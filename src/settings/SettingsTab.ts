@@ -18,6 +18,14 @@ export interface HypervaultSettings {
   maxBuildings: number;
   /** Saved block positions (user-arranged layout) */
   blockPositions: BlockPosition[];
+  /** Enable procedural GPU shaders for buildings */
+  enableShaders: boolean;
+  /** Enable bloom post-processing glow */
+  enableBloom: boolean;
+  /** Bloom glow intensity (0.3-2.0) */
+  bloomIntensity: number;
+  /** Enable atmospheric fog effect */
+  enableAtmosphere: boolean;
 }
 
 export const DEFAULT_SETTINGS: HypervaultSettings = {
@@ -26,6 +34,10 @@ export const DEFAULT_SETTINGS: HypervaultSettings = {
   enableShadows: true,
   maxBuildings: 300,
   blockPositions: [],
+  enableShaders: false,
+  enableBloom: false,
+  bloomIntensity: 0.8,
+  enableAtmosphere: false,
 };
 
 export class SettingsTab extends PluginSettingTab {
@@ -87,6 +99,52 @@ export class SettingsTab extends PluginSettingTab {
             this.plugin.settings.maxBuildings = value;
             await this.plugin.saveSettings();
           }),
+      );
+
+    containerEl.createEl('h3', { text: 'Visual Effects' });
+
+    new Setting(containerEl)
+      .setName('Procedural shaders')
+      .setDesc('Enable GPU shaders for procedural windows and glitch effects. Reload view after changing.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableShaders).onChange(async (value) => {
+          this.plugin.settings.enableShaders = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Bloom glow')
+      .setDesc('Enable post-processing neon glow effect. Reload view after changing.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableBloom).onChange(async (value) => {
+          this.plugin.settings.enableBloom = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Bloom intensity')
+      .setDesc('Strength of the bloom glow effect.')
+      .addSlider((slider) =>
+        slider
+          .setLimits(0.3, 2.0, 0.1)
+          .setValue(this.plugin.settings.bloomIntensity)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.bloomIntensity = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName('Atmospheric fog')
+      .setDesc('Enable depth fog and enhanced grid for cyberpunk aesthetic. Reload view after changing.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableAtmosphere).onChange(async (value) => {
+          this.plugin.settings.enableAtmosphere = value;
+          await this.plugin.saveSettings();
+        }),
       );
   }
 }

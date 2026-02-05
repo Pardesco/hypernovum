@@ -36,7 +36,7 @@ const context = await esbuild.context({
   logLevel: 'info',
   sourcemap: prod ? false : 'inline',
   treeShaking: true,
-  outfile: 'main.js',
+  outfile: '.obsidian/plugins/obsidian-hypervault/main.js',
   minify: prod,
   loader: {
     '.vert': 'text',

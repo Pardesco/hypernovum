@@ -49,10 +49,11 @@ export class HypervaultView extends ItemView {
     container.empty();
     container.addClass('hypervault-container');
 
-    // Initialize 3D scene with save callback
+    // Initialize 3D scene with save callback and settings
     this.sceneManager = new SceneManager(container, {
       savedPositions: this.settings.blockPositions,
       onSaveLayout: (positions) => this.saveLayout(positions),
+      settings: this.settings,
     });
 
     // Add legend overlay

@@ -1,12 +1,18 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { ProjectData, District } from '../types';
-import type { BlockPosition } from '../settings/SettingsTab';
+import type { BlockPosition, HypervaultSettings } from '../settings/SettingsTab';
+import { BuildingShader } from '../renderers/BuildingShader';
 
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
   onSaveLayout?: (positions: BlockPosition[]) => void;
+  settings?: HypervaultSettings;
 }
 
 interface LabelInfo {
@@ -72,12 +78,23 @@ export class SceneManager {
   // Animation timing
   private clock = new THREE.Clock();
 
+  // Shader system
+  private useShaders = false;
+  private useBloom = false;
+  private useAtmosphere = false;
+  private bloomIntensity = 0.8;
+  private buildingShader: BuildingShader;
+  private shaderMaterials: Map<THREE.Mesh, THREE.ShaderMaterial> = new Map();
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+
   constructor(container: HTMLElement, options?: SceneManagerOptions) {
     this.container = container;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera();
     this.renderer = new THREE.WebGLRenderer();
     this.labelRenderer = new CSS2DRenderer();
+    this.buildingShader = new BuildingShader();
 
     // Load saved positions
     if (options?.savedPositions) {
@@ -87,11 +104,29 @@ export class SceneManager {
     }
     this.onSaveLayout = options?.onSaveLayout;
 
+    // Load visual effect settings
+    if (options?.settings) {
+      this.useShaders = options.settings.enableShaders;
+      this.useBloom = options.settings.enableBloom;
+      this.useAtmosphere = options.settings.enableAtmosphere;
+      this.bloomIntensity = options.settings.bloomIntensity;
+    }
+
     this.initScene();
     this.initCamera();
     this.initRenderer();
     this.controls = this.initControls();
     this.initLights();
+
+    // Test shader compilation if shaders are enabled
+    if (this.useShaders) {
+      BuildingShader.testCompilation(this.renderer);
+    }
+
+    // Initialize bloom composer if enabled
+    if (this.useBloom) {
+      this.initComposer();
+    }
 
     this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.container.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -105,6 +140,11 @@ export class SceneManager {
 
   private initScene(): void {
     this.scene.background = new THREE.Color(0x0c0c18);
+
+    // Add atmospheric fog for depth effect
+    if (this.useAtmosphere) {
+      this.scene.fog = new THREE.FogExp2(0x0c0c18, 0.006);
+    }
   }
 
   private initCamera(): void {
@@ -173,6 +213,35 @@ export class SceneManager {
 
     const hemisphere = new THREE.HemisphereLight(0x8090a0, 0x101018, 0.5);
     this.scene.add(hemisphere);
+  }
+
+  private initComposer(): void {
+    try {
+      const width = this.container.clientWidth;
+      const height = this.container.clientHeight;
+
+      this.composer = new EffectComposer(this.renderer);
+
+      const renderPass = new RenderPass(this.scene, this.camera);
+      this.composer.addPass(renderPass);
+
+      this.bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width, height),
+        this.bloomIntensity,  // strength
+        0.4,                   // radius
+        0.7                    // threshold - only bright things glow
+      );
+      this.composer.addPass(this.bloomPass);
+
+      const outputPass = new OutputPass();
+      this.composer.addPass(outputPass);
+
+      console.log('[Hypervault] Bloom post-processing initialized');
+    } catch (e) {
+      console.warn('[Hypervault] Failed to initialize bloom:', e);
+      this.composer = null;
+      this.bloomPass = null;
+    }
   }
 
   buildCity(projects: ProjectData[], districts: Map<string, District>): void {
@@ -252,6 +321,7 @@ export class SceneManager {
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
+    this.shaderMaterials.clear();
   }
 
   private addGround(projects: ProjectData[]): void {
@@ -279,8 +349,14 @@ export class SceneManager {
     ground.userData = { isGround: true };
     this.scene.add(ground);
 
-    // Subtle grid
-    const grid = new THREE.GridHelper(size * 2, size, 0x1a1a2e, 0x14141e);
+    // Subtle grid - cyan tint when atmosphere enabled
+    const gridColor = this.useAtmosphere ? 0x00ffff : 0x1a1a2e;
+    const gridSubColor = this.useAtmosphere ? 0x003333 : 0x14141e;
+    const grid = new THREE.GridHelper(size * 2, this.useAtmosphere ? size / 5 : size, gridColor, gridSubColor);
+    if (this.useAtmosphere) {
+      (grid.material as THREE.Material).transparent = true;
+      (grid.material as THREE.Material).opacity = 0.3;
+    }
     grid.position.set(size / 2, 0.01, size / 2);
     grid.userData = { isGround: true };
     this.scene.add(grid);
@@ -517,16 +593,21 @@ export class SceneManager {
     // Building shape varies by category
     const geometry = this.createBuildingGeometry(project.category, width, height, depth);
 
-    const emissiveIntensity = project.status === 'blocked' ? 0.3 :
-                              project.status === 'active' ? 0.15 : 0.05;
+    // Try shader material if enabled, fallback to standard material
+    let material: THREE.Material;
+    let isShaderMaterial = false;
 
-    const material = new THREE.MeshStandardMaterial({
-      color: baseColor,
-      roughness: 0.35,
-      metalness: 0.65,
-      emissive: baseColor,
-      emissiveIntensity,
-    });
+    if (this.useShaders && BuildingShader.isAvailable()) {
+      const shaderMat = this.buildingShader.createMaterial(project);
+      if (shaderMat) {
+        material = shaderMat;
+        isShaderMaterial = true;
+      } else {
+        material = this.createFallbackMaterial(project, baseColor);
+      }
+    } else {
+      material = this.createFallbackMaterial(project, baseColor);
+    }
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, foundationHeight + height / 2, z);
@@ -534,18 +615,26 @@ export class SceneManager {
     mesh.receiveShadow = true;
     mesh.userData = { isBuilding: true, project };
 
+    // Store shader materials for animation updates
+    if (isShaderMaterial) {
+      this.shaderMaterials.set(mesh, material as THREE.ShaderMaterial);
+    }
+
     this.scene.add(mesh);
     this.buildings.push(mesh);
 
-    // Edge glow - more prominent for blocked status
+    // Edge glow - brighter for bloom pickup when enabled
     const edges = new THREE.EdgesGeometry(geometry);
-    const edgeOpacity = project.status === 'blocked' ? 0.6 :
-                        project.status === 'active' ? 0.4 : 0.25;
-    const edgeColor = baseColor.clone().multiplyScalar(project.status === 'blocked' ? 2.2 : 1.8);
+    const bloomMultiplier = this.useBloom ? 1.5 : 1.0;
+    const edgeOpacity = project.status === 'blocked' ? 0.8 * bloomMultiplier :
+                        project.status === 'active' ? 0.5 * bloomMultiplier : 0.3;
+    const edgeColor = baseColor.clone().multiplyScalar(
+      project.status === 'blocked' ? 3.0 : (this.useBloom ? 2.5 : 1.8)
+    );
     const lineMat = new THREE.LineBasicMaterial({
       color: edgeColor,
       transparent: true,
-      opacity: edgeOpacity,
+      opacity: Math.min(edgeOpacity, 1.0),
     });
     const wireframe = new THREE.LineSegments(edges, lineMat);
     wireframe.position.copy(mesh.position);
@@ -603,6 +692,19 @@ export class SceneManager {
 
   private createHexPrism(width: number, height: number): THREE.BufferGeometry {
     return new THREE.CylinderGeometry(width / 2, width / 2, height, 6);
+  }
+
+  private createFallbackMaterial(project: ProjectData, baseColor: THREE.Color): THREE.MeshStandardMaterial {
+    const emissiveIntensity = project.status === 'blocked' ? 0.3 :
+                              project.status === 'active' ? 0.15 : 0.05;
+
+    return new THREE.MeshStandardMaterial({
+      color: baseColor,
+      roughness: 0.35,
+      metalness: 0.65,
+      emissive: baseColor,
+      emissiveIntensity,
+    });
   }
 
   private createSmartLabels(projects: ProjectData[]): void {
@@ -1121,8 +1223,28 @@ export class SceneManager {
 
     const elapsed = this.clock.getElapsedTime();
 
-    // Animate building emissives based on status
+    // Update shader material uniforms
+    for (const [mesh, material] of this.shaderMaterials) {
+      material.uniforms.uTime.value = elapsed;
+
+      const project = mesh.userData.project as ProjectData;
+      if (project) {
+        // Dynamic glitch for blocked projects
+        if (project.status === 'blocked') {
+          material.uniforms.uGlitch.value = 0.5 + Math.sin(elapsed * 2) * 0.3;
+        }
+        // Dynamic activity glow
+        if (project.status === 'active') {
+          material.uniforms.uActivity.value = 0.6 + Math.sin(elapsed * 1.5) * 0.3;
+        }
+      }
+    }
+
+    // Animate standard material emissives for non-shader buildings
     for (const building of this.buildings) {
+      // Skip shader materials (handled above)
+      if (this.shaderMaterials.has(building)) continue;
+
       const mat = building.material as THREE.MeshStandardMaterial;
       const project = building.userData.project as ProjectData;
 
@@ -1172,7 +1294,15 @@ export class SceneManager {
     });
 
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+
+    // Render with composer (bloom) or direct renderer
+    if (this.composer) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
+
+    // Labels always render last (on top, not affected by bloom)
     this.labelRenderer.render(this.scene, this.camera);
   };
 
@@ -1183,12 +1313,23 @@ export class SceneManager {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
     this.labelRenderer.setSize(width, height);
+
+    // Resize composer if bloom is enabled
+    if (this.composer) {
+      this.composer.setSize(width, height);
+    }
+    if (this.bloomPass) {
+      this.bloomPass.resolution.set(width, height);
+    }
   }
 
   dispose(): void {
     if (this.animationId !== null) cancelAnimationFrame(this.animationId);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    if (this.composer) {
+      this.composer.dispose();
+    }
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.labelRenderer.domElement.remove();
