@@ -11,7 +11,7 @@ export default class HypervaultPlugin extends Plugin {
     // Register the 3D city view
     this.registerView(
       VIEW_TYPE,
-      (leaf) => new HypervaultView(leaf, this.app, this.settings),
+      (leaf) => new HypervaultView(leaf, this.app, this),
     );
 
     // Ribbon icon

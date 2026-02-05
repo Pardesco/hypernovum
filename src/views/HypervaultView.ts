@@ -1,17 +1,18 @@
-import { ItemView, WorkspaceLeaf, App } from 'obsidian';
+import { ItemView, WorkspaceLeaf, App, Notice } from 'obsidian';
 import { SceneManager } from './SceneManager';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { BinPacker } from '../layout/BinPacker';
 import { BuildingRaycaster } from '../interactions/Raycaster';
 import { KeyboardNav } from '../interactions/KeyboardNav';
-import type { HypervaultSettings } from '../settings/SettingsTab';
+import type { HypervaultSettings, BlockPosition } from '../settings/SettingsTab';
 import type { ProjectData } from '../types';
+import type HypervaultPlugin from '../main';
 
 export const VIEW_TYPE = 'hypervault-view';
 
 export class HypervaultView extends ItemView {
-  private settings: HypervaultSettings;
+  private plugin: HypervaultPlugin;
   private sceneManager: SceneManager | null = null;
   private parser: ProjectParser;
   private binPacker: BinPacker;
@@ -20,11 +21,15 @@ export class HypervaultView extends ItemView {
   private keyboardNav: KeyboardNav | null = null;
   private projects: ProjectData[] = [];
 
-  constructor(leaf: WorkspaceLeaf, app: App, settings: HypervaultSettings) {
+  constructor(leaf: WorkspaceLeaf, app: App, plugin: HypervaultPlugin) {
     super(leaf);
-    this.settings = settings;
+    this.plugin = plugin;
     this.parser = new ProjectParser(app);
     this.binPacker = new BinPacker();
+  }
+
+  get settings(): HypervaultSettings {
+    return this.plugin.settings;
   }
 
   getViewType(): string {
@@ -44,8 +49,20 @@ export class HypervaultView extends ItemView {
     container.empty();
     container.addClass('hypervault-container');
 
-    // Initialize 3D scene
-    this.sceneManager = new SceneManager(container);
+    // Initialize 3D scene with save callback
+    this.sceneManager = new SceneManager(container, {
+      savedPositions: this.settings.blockPositions,
+      onSaveLayout: (positions) => this.saveLayout(positions),
+    });
+
+    // Add legend overlay
+    this.addLegend(container);
+
+    // Add controls hint
+    this.addControlsHint(container);
+
+    // Add save layout button
+    this.addSaveButton(container);
 
     // Set up raycaster for click-to-navigate
     this.raycaster = new BuildingRaycaster(
@@ -120,5 +137,88 @@ export class HypervaultView extends ItemView {
       this.sceneManager.focusOnPosition(target.position);
       this.sceneManager.setFocusedProject(target);
     }
+  }
+
+  private addLegend(container: HTMLElement): void {
+    const legend = document.createElement('div');
+    legend.className = 'hypervault-legend';
+    legend.innerHTML = `
+      <div class="hypervault-legend-section">
+        <h4>Status (Color)</h4>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-color active"></div>
+          <span>Active</span>
+        </div>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-color blocked"></div>
+          <span>Blocked</span>
+        </div>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-color paused"></div>
+          <span>Paused</span>
+        </div>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-color complete"></div>
+          <span>Complete</span>
+        </div>
+      </div>
+      <div class="hypervault-legend-section">
+        <h4>Priority (Height)</h4>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-height">
+            <div class="hypervault-legend-bar" style="height: 16px;"></div>
+          </div>
+          <span>Critical</span>
+        </div>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-height">
+            <div class="hypervault-legend-bar" style="height: 10px;"></div>
+          </div>
+          <span>High</span>
+        </div>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-height">
+            <div class="hypervault-legend-bar" style="height: 6px;"></div>
+          </div>
+          <span>Medium</span>
+        </div>
+        <div class="hypervault-legend-item">
+          <div class="hypervault-legend-height">
+            <div class="hypervault-legend-bar" style="height: 3px;"></div>
+          </div>
+          <span>Low</span>
+        </div>
+      </div>
+    `;
+    container.appendChild(legend);
+  }
+
+  private addControlsHint(container: HTMLElement): void {
+    const controls = document.createElement('div');
+    controls.className = 'hypervault-controls';
+    controls.innerHTML = `
+      <kbd>Click</kbd> Open note<br>
+      <kbd>Right-drag</kbd> Pan<br>
+      <kbd>Scroll</kbd> Zoom
+    `;
+    container.appendChild(controls);
+  }
+
+  private addSaveButton(container: HTMLElement): void {
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'hypervault-save-btn';
+    saveBtn.textContent = 'Save Layout';
+    saveBtn.addEventListener('click', () => {
+      if (this.sceneManager) {
+        this.sceneManager.triggerSave();
+      }
+    });
+    container.appendChild(saveBtn);
+  }
+
+  private async saveLayout(positions: BlockPosition[]): Promise<void> {
+    this.plugin.settings.blockPositions = positions;
+    await this.plugin.saveSettings();
+    new Notice('City layout saved!');
   }
 }

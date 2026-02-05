@@ -59,6 +59,7 @@ export class ProjectParser {
       recentActivity: this.isRecentlyActive(file.stat.mtime),
       health: this.calculateHealth(fm),
       noteCount: fm.noteCount ?? 1,
+      stack: this.parseStack(fm.stack),
     };
   }
 
@@ -138,5 +139,15 @@ export class ProjectParser {
       complete: 100,
     };
     return statusHealth[String(fm.status ?? 'active').toLowerCase()] ?? 60;
+  }
+
+  private parseStack(raw: unknown): string[] | undefined {
+    if (Array.isArray(raw)) {
+      return raw.map(String).filter(s => s.length > 0);
+    }
+    if (typeof raw === 'string') {
+      return raw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+    }
+    return undefined;
   }
 }

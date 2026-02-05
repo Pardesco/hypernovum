@@ -22,6 +22,8 @@ export interface ProjectData {
   health: number;
   /** Number of notes in the project */
   noteCount: number;
+  /** Tech stack (e.g. ["Three.js", "TypeScript", "Vite"]) */
+  stack?: string[];
 
   // Populated by layout engine
   position?: { x: number; y: number; z: number };

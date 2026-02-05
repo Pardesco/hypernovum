@@ -1,6 +1,12 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HypervaultPlugin from '../main';
 
+export interface BlockPosition {
+  category: string;
+  offsetX: number;
+  offsetZ: number;
+}
+
 export interface HypervaultSettings {
   /** Frontmatter tag that identifies a note as a project */
   projectTag: string;
@@ -10,6 +16,8 @@ export interface HypervaultSettings {
   enableShadows: boolean;
   /** Maximum buildings to render */
   maxBuildings: number;
+  /** Saved block positions (user-arranged layout) */
+  blockPositions: BlockPosition[];
 }
 
 export const DEFAULT_SETTINGS: HypervaultSettings = {
@@ -17,6 +25,7 @@ export const DEFAULT_SETTINGS: HypervaultSettings = {
   showLabels: true,
   enableShadows: true,
   maxBuildings: 300,
+  blockPositions: [],
 };
 
 export class SettingsTab extends PluginSettingTab {

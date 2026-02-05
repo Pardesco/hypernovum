@@ -22,4 +22,10 @@ package-lock.json
 
 # Obsidian
 data.json
+.obsidian/
 .claude/
+
+# Test data
+projects/
+Untitled.base
+nul
