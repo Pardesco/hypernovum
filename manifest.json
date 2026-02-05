@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-hypervault",
+  "name": "Hypervault",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.0",
+  "description": "3D Code City Dashboard — visualize your vault as a cityscape where buildings encode project health, priority, and momentum.",
+  "author": "Randall Groves",
+  "authorUrl": "https://github.com/pardesco",
+  "isDesktopOnly": true
+}

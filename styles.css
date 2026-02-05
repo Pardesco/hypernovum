@@ -1,0 +1,55 @@
+/* Hypervault - 3D Code City Dashboard */
+
+.hypervault-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #0a0a0a;
+}
+
+.hypervault-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Building name labels */
+.hypervault-label {
+  color: var(--text-normal, #ffffff);
+  font-size: 11px;
+  font-family: var(--font-interface);
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Hover tooltip */
+.hypervault-tooltip {
+  color: var(--text-normal, #ffffff);
+  font-size: 12px;
+  font-family: var(--font-interface);
+  background-color: var(--background-secondary, rgba(30, 30, 30, 0.95));
+  border: 1px solid var(--background-modifier-border, #444);
+  padding: 8px 12px;
+  border-radius: 6px;
+  pointer-events: none;
+  user-select: none;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.hypervault-tooltip strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--text-accent, #00ffff);
+}
+
+.hypervault-tooltip div {
+  margin: 2px 0;
+  opacity: 0.85;
+}
