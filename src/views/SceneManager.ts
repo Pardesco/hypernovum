@@ -12,6 +12,9 @@ export class SceneManager {
   private container: HTMLElement;
   private animationId: number | null = null;
   private resizeObserver: ResizeObserver;
+  private focusedProject: ProjectData | null = null;
+  private initialCameraPos = new THREE.Vector3(0, 50, 60);
+  private initialTarget = new THREE.Vector3(0, 0, 0);
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -216,5 +219,33 @@ export class SceneManager {
 
   getCamera(): THREE.PerspectiveCamera {
     return this.camera;
+  }
+
+  getCanvas(): HTMLCanvasElement {
+    return this.renderer.domElement;
+  }
+
+  resetCamera(): void {
+    this.camera.position.copy(this.initialCameraPos);
+    this.controls.target.copy(this.initialTarget);
+    this.controls.update();
+    this.focusedProject = null;
+  }
+
+  focusOnPosition(position: { x: number; y: number; z: number }): void {
+    const target = new THREE.Vector3(position.x, 0, position.z);
+    const cameraPos = target.clone().add(new THREE.Vector3(0, 30, 25));
+
+    this.camera.position.copy(cameraPos);
+    this.controls.target.copy(target);
+    this.controls.update();
+  }
+
+  getFocusedProject(): ProjectData | null {
+    return this.focusedProject;
+  }
+
+  setFocusedProject(project: ProjectData | null): void {
+    this.focusedProject = project;
   }
 }

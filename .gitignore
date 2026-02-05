@@ -22,3 +22,4 @@ package-lock.json
 
 # Obsidian
 data.json
+.claude/
