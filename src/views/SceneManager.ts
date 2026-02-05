@@ -1,15 +1,8 @@
 import * as THREE from 'three';
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { ProjectData, District } from '../types';
 import type { BlockPosition } from '../settings/SettingsTab';
-
-// Import shaders as text
-import buildingVertexShader from '../../shaders/building.vert';
-import buildingFragmentShader from '../../shaders/building.frag';
 
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
@@ -38,11 +31,8 @@ export class SceneManager {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private labelRenderer: CSS2DRenderer;
-  private composer: EffectComposer;
   private controls: MapControls;
   private container: HTMLElement;
-  private clock = new THREE.Clock();
-  private shaderMaterials: THREE.ShaderMaterial[] = [];
   private animationId: number | null = null;
   private resizeObserver: ResizeObserver;
   private focusedProject: ProjectData | null = null;
@@ -58,8 +48,7 @@ export class SceneManager {
 
   // Block dragging state
   private blocks: Map<string, BlockData> = new Map();
-  private dragHandles: THREE.Mesh[] = [];  // Only meshes for raycasting
-  private anchorVisuals: THREE.Object3D[] = [];  // Visual anchors for animation
+  private dragHandles: THREE.Mesh[] = [];
   private isDragging = false;
   private draggedBlock: BlockData | null = null;
   private dragStartPoint = new THREE.Vector3();
@@ -98,7 +87,6 @@ export class SceneManager {
     this.initScene();
     this.initCamera();
     this.initRenderer();
-    this.composer = this.initPostProcessing();
     this.controls = this.initControls();
     this.initLights();
 
@@ -139,25 +127,6 @@ export class SceneManager {
     this.labelRenderer.domElement.style.top = '0';
     this.labelRenderer.domElement.style.pointerEvents = 'none';
     this.container.appendChild(this.labelRenderer.domElement);
-  }
-
-  private initPostProcessing(): EffectComposer {
-    const composer = new EffectComposer(this.renderer);
-
-    // Regular scene render
-    const renderPass = new RenderPass(this.scene, this.camera);
-    composer.addPass(renderPass);
-
-    // Bloom for emissive glow
-    const bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(this.container.clientWidth, this.container.clientHeight),
-      0.4,   // Bloom strength
-      0.4,   // Radius
-      0.85   // Threshold
-    );
-    composer.addPass(bloomPass);
-
-    return composer;
   }
 
   private initControls(): MapControls {
@@ -280,8 +249,6 @@ export class SceneManager {
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
-    this.anchorVisuals = [];
-    this.shaderMaterials = [];
   }
 
   private addGround(projects: ProjectData[]): void {
@@ -437,65 +404,36 @@ export class SceneManager {
       this.scene.add(dot);
       blockObjects.push(dot);
 
-      // HOLOGRAPHIC ANCHOR - wireframe octahedron drag handle
-      const anchorSize = 1.8;
-      const anchorHeight = 3;
-      const anchorX = bounds.maxX + padding - anchorSize;
-      const anchorZ = bounds.minZ - padding + anchorSize;
+      // Simple drag handle at top-right corner
+      const handleSize = 1.5;
+      const handleHeight = 1.0;
+      const handleX = bounds.maxX + padding - handleSize / 2;
+      const handleZ = bounds.minZ - padding + handleSize / 2;
 
-      // Outer wireframe octahedron (main visual)
-      const octaGeo = new THREE.OctahedronGeometry(anchorSize);
-      const octaEdges = new THREE.EdgesGeometry(octaGeo);
-      const octaMat = new THREE.LineBasicMaterial({
+      // Small box handle
+      const handleGeo = new THREE.BoxGeometry(handleSize, handleHeight, handleSize);
+      const handleMat = new THREE.MeshStandardMaterial({
         color,
+        emissive: color,
+        emissiveIntensity: 0.3,
         transparent: true,
-        opacity: 0.7,
+        opacity: 0.8,
       });
-      const octaWireframe = new THREE.LineSegments(octaEdges, octaMat);
-      octaWireframe.position.set(anchorX, anchorHeight, anchorZ);
-      octaWireframe.userData = { isDragHandle: true, category, isAnchor: true, octaMat };
-      this.scene.add(octaWireframe);
-      blockObjects.push(octaWireframe);
+      const handle = new THREE.Mesh(handleGeo, handleMat);
+      handle.position.set(handleX, handleHeight / 2 + 0.1, handleZ);
+      handle.userData = { isDragHandle: true, category };
+      this.scene.add(handle);
+      this.dragHandles.push(handle);
+      blockObjects.push(handle);
 
-      // Vertical beam connecting to ground (energy tether)
-      const beamGeo = new THREE.CylinderGeometry(0.08, 0.08, anchorHeight - 0.5, 8);
-      const beamMat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.4,
-      });
-      const beam = new THREE.Mesh(beamGeo, beamMat);
-      beam.position.set(anchorX, (anchorHeight - 0.5) / 2 + 0.2, anchorZ);
-      beam.userData = { isDragHandle: true, category };
-      this.scene.add(beam);
-      blockObjects.push(beam);
-
-      // Ground ring (anchor point)
-      const ringGeo = new THREE.RingGeometry(0.6, 0.9, 16);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide,
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(anchorX, 0.1, anchorZ);
-      ring.userData = { isDragHandle: true, category };
-      this.scene.add(ring);
-      blockObjects.push(ring);
-
-      // Invisible hitbox for clicking (larger sphere)
-      const hitboxGeo = new THREE.SphereGeometry(anchorSize * 1.5, 8, 8);
-      const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
-      const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
-      hitbox.position.copy(octaWireframe.position);
-      hitbox.userData = { isDragHandle: true, category, isHitbox: true, anchor: octaWireframe };
-      this.scene.add(hitbox);
-      this.dragHandles.push(hitbox);  // Only mesh hitboxes for raycasting
-
-      // Store reference to the visual anchor for animation
-      this.anchorVisuals.push(octaWireframe);
+      // Handle edge outline
+      const handleEdges = new THREE.EdgesGeometry(handleGeo);
+      const handleLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+      const handleWireframe = new THREE.LineSegments(handleEdges, handleLineMat);
+      handleWireframe.position.copy(handle.position);
+      handleWireframe.userData = { isDragHandle: true, category };
+      this.scene.add(handleWireframe);
+      blockObjects.push(handleWireframe);
 
       // Store block data
       this.blocks.set(category, {
@@ -768,20 +706,22 @@ export class SceneManager {
 
     // Reset previous handle hover
     if (this.hoveredHandle) {
-      this.hideAnchorLabel();
+      const mat = this.hoveredHandle.material as THREE.MeshStandardMaterial;
+      if (mat.emissiveIntensity !== undefined) {
+        mat.emissiveIntensity = 0.3;
+      }
       this.hoveredHandle = null;
       this.container.style.cursor = 'default';
     }
 
-    // Handle hover on drag handle (including invisible hitbox)
+    // Handle hover on drag handle
     if (handleHits.length > 0) {
       const hit = handleHits[0].object as THREE.Mesh;
       if (hit.userData.isDragHandle) {
         this.hoveredHandle = hit;
-        // Get the anchor visual from the hitbox userData
-        const anchor = hit.userData.anchor as THREE.Object3D;
-        if (anchor) {
-          this.showAnchorLabel(anchor.position, hit.userData.category);
+        const mat = hit.material as THREE.MeshStandardMaterial;
+        if (mat.emissiveIntensity !== undefined) {
+          mat.emissiveIntensity = 0.8;
         }
         this.container.style.cursor = 'grab';
         return; // Don't show other tooltips when hovering handle
@@ -970,27 +910,6 @@ export class SceneManager {
     }
   }
 
-  private anchorLabel: CSS2DObject | null = null;
-
-  private showAnchorLabel(position: THREE.Vector3, category: string): void {
-    this.hideAnchorLabel();
-
-    const div = document.createElement('div');
-    div.className = 'hypervault-anchor-label';
-    div.innerHTML = `<span class="anchor-bracket">[</span> DRAG BLOCK <span class="anchor-bracket">]</span>`;
-
-    this.anchorLabel = new CSS2DObject(div);
-    this.anchorLabel.position.set(position.x, position.y + 2.5, position.z);
-    this.scene.add(this.anchorLabel);
-  }
-
-  private hideAnchorLabel(): void {
-    if (this.anchorLabel) {
-      this.scene.remove(this.anchorLabel);
-      this.anchorLabel = null;
-    }
-  }
-
   private onMouseUp(_event: MouseEvent): void {
     if (this.isDragging) {
       this.isDragging = false;
@@ -1170,23 +1089,6 @@ export class SceneManager {
 
   private animate = (): void => {
     this.animationId = requestAnimationFrame(this.animate);
-
-    const elapsed = this.clock.getElapsedTime();
-
-    // Animate holographic anchors (rotate + pulse)
-    for (const anchor of this.anchorVisuals) {
-      // Slow rotation
-      anchor.rotation.y = elapsed * 0.5;
-
-      // Subtle hover pulse (intensified when hovered)
-      const isHovered = this.hoveredHandle?.userData.anchor === anchor;
-      const basePulse = Math.sin(elapsed * 2) * 0.15 + 0.7;
-      const targetOpacity = isHovered ? 1.0 : basePulse;
-
-      const octaMat = anchor.userData.octaMat as THREE.LineBasicMaterial;
-      if (octaMat) octaMat.opacity = targetOpacity;
-    }
-
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
@@ -1198,7 +1100,6 @@ export class SceneManager {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
-    this.composer.setSize(width, height);
     this.labelRenderer.setSize(width, height);
   }
 
