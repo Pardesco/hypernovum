@@ -69,6 +69,9 @@ export class SceneManager {
   private lastClickTime = 0;
   private lastClickedBuilding: THREE.Mesh | null = null;
 
+  // Animation timing
+  private clock = new THREE.Clock();
+
   constructor(container: HTMLElement, options?: SceneManagerOptions) {
     this.container = container;
     this.scene = new THREE.Scene();
@@ -404,21 +407,23 @@ export class SceneManager {
       this.scene.add(dot);
       blockObjects.push(dot);
 
-      // Simple drag handle at top-right corner of outline
-      const handleSize = 1.5;
-      const handleHeight = 1.0;
+      // Enhanced drag handle at top-right corner of outline
+      const handleSize = 1.8;
+      const handleHeight = 1.2;
       // Position at the corner of the outline (maxX + padding, minZ - padding)
       const handleX = bounds.maxX + padding;
       const handleZ = bounds.minZ - padding;
 
-      // Small box handle
+      // Main handle cube with beveled appearance
       const handleGeo = new THREE.BoxGeometry(handleSize, handleHeight, handleSize);
       const handleMat = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
         emissiveIntensity: 0.3,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.85,
+        roughness: 0.3,
+        metalness: 0.7,
       });
       const handle = new THREE.Mesh(handleGeo, handleMat);
       handle.position.set(handleX, handleHeight / 2 + 0.1, handleZ);
@@ -427,14 +432,30 @@ export class SceneManager {
       this.dragHandles.push(handle);
       blockObjects.push(handle);
 
-      // Handle edge outline
+      // Handle edge outline - brighter
       const handleEdges = new THREE.EdgesGeometry(handleGeo);
-      const handleLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+      const handleLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
       const handleWireframe = new THREE.LineSegments(handleEdges, handleLineMat);
       handleWireframe.position.copy(handle.position);
       handleWireframe.userData = { isDragHandle: true, category };
       this.scene.add(handleWireframe);
       blockObjects.push(handleWireframe);
+
+      // Corner accent - small diagonal lines suggesting "grab here"
+      const accentSize = handleSize * 0.4;
+      const accentPoints = [
+        // Top-right corner accent
+        new THREE.Vector3(handleSize / 2 - accentSize, handleHeight / 2 + 0.01, -handleSize / 2),
+        new THREE.Vector3(handleSize / 2, handleHeight / 2 + 0.01, -handleSize / 2),
+        new THREE.Vector3(handleSize / 2, handleHeight / 2 + 0.01, -handleSize / 2 + accentSize),
+      ];
+      const accentGeo = new THREE.BufferGeometry().setFromPoints(accentPoints);
+      const accentMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+      const accent = new THREE.Line(accentGeo, accentMat);
+      accent.position.set(handleX, 0, handleZ);
+      accent.userData = { isDragHandle: true, category };
+      this.scene.add(accent);
+      blockObjects.push(accent);
 
       // Store block data
       this.blocks.set(category, {
@@ -461,8 +482,13 @@ export class SceneManager {
       foundationHeight,
       depth + foundationPadding
     );
+    // Foundation base color with subtle status tint
+    const foundationBaseColor = new THREE.Color(0x2a2a3a);
+    const statusTint = baseColor.clone().multiplyScalar(0.15);
+    foundationBaseColor.add(statusTint);
+
     const foundationMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2a3a,
+      color: foundationBaseColor,
       roughness: 0.7,
       metalness: 0.4,
     });
@@ -473,12 +499,15 @@ export class SceneManager {
     this.scene.add(foundation);
     this.foundations.push(foundation);
 
-    // Foundation edge outline (visible on dark background)
+    // Foundation edge outline - tinted by status color
     const foundationEdges = new THREE.EdgesGeometry(foundationGeo);
+    const edgeColorBase = new THREE.Color(0x5a5a7a);
+    const edgeTint = baseColor.clone().multiplyScalar(0.3);
+    edgeColorBase.add(edgeTint);
     const foundationLineMat = new THREE.LineBasicMaterial({
-      color: 0x5a5a7a,
+      color: edgeColorBase,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.65,
     });
     const foundationWireframe = new THREE.LineSegments(foundationEdges, foundationLineMat);
     foundationWireframe.position.copy(foundation.position);
@@ -508,16 +537,19 @@ export class SceneManager {
     this.scene.add(mesh);
     this.buildings.push(mesh);
 
-    // Subtle edge glow
+    // Edge glow - more prominent for blocked status
     const edges = new THREE.EdgesGeometry(geometry);
+    const edgeOpacity = project.status === 'blocked' ? 0.6 :
+                        project.status === 'active' ? 0.4 : 0.25;
+    const edgeColor = baseColor.clone().multiplyScalar(project.status === 'blocked' ? 2.2 : 1.8);
     const lineMat = new THREE.LineBasicMaterial({
-      color: baseColor.clone().multiplyScalar(1.8),
+      color: edgeColor,
       transparent: true,
-      opacity: 0.3,
+      opacity: edgeOpacity,
     });
     const wireframe = new THREE.LineSegments(edges, lineMat);
     wireframe.position.copy(mesh.position);
-    wireframe.userData = { isBuilding: true, project };
+    wireframe.userData = { isBuilding: true, project, isEdgeGlow: true };
     this.scene.add(wireframe);
   }
 
@@ -1086,6 +1118,59 @@ export class SceneManager {
 
   private animate = (): void => {
     this.animationId = requestAnimationFrame(this.animate);
+
+    const elapsed = this.clock.getElapsedTime();
+
+    // Animate building emissives based on status
+    for (const building of this.buildings) {
+      const mat = building.material as THREE.MeshStandardMaterial;
+      const project = building.userData.project as ProjectData;
+
+      // Skip if in move mode (keep bright)
+      if (building === this.movingBuilding) continue;
+      // Skip if hovered (keep bright)
+      if (building === this.hoveredMesh) continue;
+
+      if (project) {
+        switch (project.status) {
+          case 'blocked':
+            // Pulsing warning glow (faster, more urgent)
+            mat.emissiveIntensity = 0.25 + Math.sin(elapsed * 4) * 0.15;
+            break;
+          case 'active':
+            // Gentle breathing (slower, calming)
+            mat.emissiveIntensity = 0.12 + Math.sin(elapsed * 1.5) * 0.08;
+            break;
+          case 'complete':
+            // Subtle shimmer
+            mat.emissiveIntensity = 0.05 + Math.sin(elapsed * 2) * 0.03;
+            break;
+          case 'paused':
+            // Very subtle pulse
+            mat.emissiveIntensity = 0.08 + Math.sin(elapsed * 0.8) * 0.04;
+            break;
+        }
+      }
+    }
+
+    // Animate drag handles - gentle idle pulse
+    for (const handle of this.dragHandles) {
+      if (handle === this.hoveredHandle) continue; // Keep hover bright
+      const mat = handle.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 0.25 + Math.sin(elapsed * 2 + handle.position.x * 0.5) * 0.15;
+    }
+
+    // Animate edge glow for blocked buildings
+    this.scene.traverse((obj) => {
+      if (obj instanceof THREE.LineSegments && obj.userData.isEdgeGlow) {
+        const project = obj.userData.project as ProjectData;
+        if (project?.status === 'blocked') {
+          const mat = obj.material as THREE.LineBasicMaterial;
+          mat.opacity = 0.4 + Math.sin(elapsed * 4) * 0.25;
+        }
+      }
+    });
+
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
