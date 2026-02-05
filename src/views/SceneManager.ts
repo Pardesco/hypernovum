@@ -8,6 +8,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { ProjectData, District } from '../types';
 import type { BlockPosition, HypervaultSettings } from '../settings/SettingsTab';
 import { BuildingShader } from '../renderers/BuildingShader';
+import { GeometryFactory } from '../renderers/GeometryFactory';
 
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
@@ -643,67 +644,42 @@ export class SceneManager {
   }
 
   private createBuildingGeometry(category: string, width: number, height: number, depth: number): THREE.BufferGeometry {
-    // Different building styles by category
+    // Procedural Sci-Fi Architecture - parametric silhouettes
     switch (category) {
       case 'web-apps':
-        // Modern glass tower - slightly tapered
-        return this.createTaperedBox(width, height, depth, 0.9);
+        // "The Helix Tower" - twisting tower representing the stack
+        return GeometryFactory.createHelixTower(width, height, depth);
       case 'visualization':
-        // Geometric crystal shape
-        return this.createCrystalShape(width, height, depth);
+        // "The Data Shard" - dual-crystal, abstract mathematical
+        return GeometryFactory.createDataShard(width * 0.7, height);
       case 'infrastructure':
-        // Industrial blocky
-        return new THREE.BoxGeometry(width * 1.1, height * 0.9, depth * 1.1);
+        // "The Brutalist Ziggurat" - heavy stepped pyramid
+        return GeometryFactory.createZiggurat(width, height, depth);
       case 'trading':
-        // Tall narrow tower
-        return new THREE.BoxGeometry(width * 0.8, height * 1.1, depth * 0.8);
+        // "The Quant Blade" - sharp triangular prism, aggressive
+        return GeometryFactory.createQuantBlade(width, height);
       case 'obsidian-plugins':
-        // Hexagonal
-        return this.createHexPrism(width, height);
+        // "The Modular Hive" - hexagonal column
+        return GeometryFactory.createHive(width / 2, height);
       case 'content':
-        // Rounded corners (cylinder approximation)
-        return new THREE.CylinderGeometry(width / 2, width / 2, height, 8);
+        // "The Memory Core" - ribbed cylinder
+        return GeometryFactory.createMemoryCore(width / 2, height);
       default:
-        return new THREE.BoxGeometry(width, height, depth);
+        return GeometryFactory.createDefault(width, height, depth);
     }
-  }
-
-  private createTaperedBox(width: number, height: number, depth: number, topScale: number): THREE.BufferGeometry {
-    const geo = new THREE.BoxGeometry(width, height, depth);
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
-      if (y > 0) {
-        pos.setX(i, pos.getX(i) * topScale);
-        pos.setZ(i, pos.getZ(i) * topScale);
-      }
-    }
-    pos.needsUpdate = true;
-    geo.computeVertexNormals();
-    return geo;
-  }
-
-  private createCrystalShape(width: number, height: number, depth: number): THREE.BufferGeometry {
-    // Octahedron-like stretched vertically
-    const geo = new THREE.OctahedronGeometry(width / 1.5);
-    geo.scale(1, height / width * 0.8, 1);
-    return geo;
-  }
-
-  private createHexPrism(width: number, height: number): THREE.BufferGeometry {
-    return new THREE.CylinderGeometry(width / 2, width / 2, height, 6);
   }
 
   private createFallbackMaterial(project: ProjectData, baseColor: THREE.Color): THREE.MeshStandardMaterial {
     const emissiveIntensity = project.status === 'blocked' ? 0.3 :
-                              project.status === 'active' ? 0.15 : 0.05;
+                              project.status === 'active' ? 0.2 : 0.1;
 
     return new THREE.MeshStandardMaterial({
       color: baseColor,
-      roughness: 0.35,
-      metalness: 0.65,
+      roughness: 0.2,
+      metalness: 0.8,
       emissive: baseColor,
       emissiveIntensity,
+      flatShading: true,  // Critical for "Low Poly Sci-Fi" look
     });
   }
 
