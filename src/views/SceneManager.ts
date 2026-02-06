@@ -58,6 +58,8 @@ export class SceneManager {
   // Block dragging state
   private blocks: Map<string, BlockData> = new Map();
   private dragHandles: THREE.Mesh[] = [];
+  private handleHitBoxes: THREE.Mesh[] = [];   // Larger invisible hitboxes for drag handles
+  private foundationHitPads: THREE.Mesh[] = []; // Larger invisible hitboxes for foundation hover
   private isDragging = false;
   private draggedBlock: BlockData | null = null;
   private dragStartPoint = new THREE.Vector3();
@@ -361,6 +363,8 @@ export class SceneManager {
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
+    this.handleHitBoxes = [];
+    this.foundationHitPads = [];
     this.shaderMaterials.clear();
     this.buildingPathMap.clear();
   }
@@ -549,6 +553,16 @@ export class SceneManager {
       this.dragHandles.push(handle);
       blockObjects.push(handle);
 
+      // Invisible larger hitbox for easier click/hover detection
+      const hitBoxGeo = new THREE.BoxGeometry(handleSize + 3, handleHeight + 2, handleSize + 3);
+      const hitBoxMat = new THREE.MeshBasicMaterial({ visible: false });
+      const hitBox = new THREE.Mesh(hitBoxGeo, hitBoxMat);
+      hitBox.position.copy(handle.position);
+      hitBox.userData = { isDragHandle: true, category, visualHandle: handle };
+      this.scene.add(hitBox);
+      this.handleHitBoxes.push(hitBox);
+      blockObjects.push(hitBox);
+
       // Handle edge outline - brighter
       const handleEdges = new THREE.EdgesGeometry(handleGeo);
       const handleLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
@@ -615,6 +629,20 @@ export class SceneManager {
     foundation.userData = { isFoundation: true, project };
     this.scene.add(foundation);
     this.foundations.push(foundation);
+
+    // Invisible larger hit pad for easier tech stack hover detection
+    const hitPadExtra = 1.8;
+    const hitPadGeo = new THREE.BoxGeometry(
+      width + foundationPadding + hitPadExtra * 2,
+      foundationHeight + 0.4,
+      depth + foundationPadding + hitPadExtra * 2
+    );
+    const hitPadMat = new THREE.MeshBasicMaterial({ visible: false });
+    const hitPad = new THREE.Mesh(hitPadGeo, hitPadMat);
+    hitPad.position.set(x, foundationHeight / 2, z);
+    hitPad.userData = { isFoundation: true, project, visualFoundation: foundation };
+    this.scene.add(hitPad);
+    this.foundationHitPads.push(hitPad);
 
     // Foundation edge outline - tinted by status color
     const foundationEdges = new THREE.EdgesGeometry(foundationGeo);
@@ -855,8 +883,8 @@ export class SceneManager {
       return;
     }
 
-    // Check drag handles first
-    const handleHits = this.raycaster.intersectObjects(this.dragHandles, false);
+    // Check drag handle hitboxes (larger invisible areas)
+    const handleHits = this.raycaster.intersectObjects(this.handleHitBoxes, false);
 
     // Reset previous handle hover
     if (this.hoveredHandle) {
@@ -870,10 +898,11 @@ export class SceneManager {
 
     // Handle hover on drag handle
     if (handleHits.length > 0) {
-      const hit = handleHits[0].object as THREE.Mesh;
-      if (hit.userData.isDragHandle) {
-        this.hoveredHandle = hit;
-        const mat = hit.material as THREE.MeshStandardMaterial;
+      const hitBox = handleHits[0].object as THREE.Mesh;
+      if (hitBox.userData.isDragHandle) {
+        const visualHandle = (hitBox.userData.visualHandle ?? hitBox) as THREE.Mesh;
+        this.hoveredHandle = visualHandle;
+        const mat = visualHandle.material as THREE.MeshStandardMaterial;
         if (mat.emissiveIntensity !== undefined) {
           mat.emissiveIntensity = 0.8;
         }
@@ -884,8 +913,8 @@ export class SceneManager {
 
     // Check buildings
     const buildingHits = this.raycaster.intersectObjects(this.buildings, false);
-    // Then foundations
-    const foundationHits = this.raycaster.intersectObjects(this.foundations, false);
+    // Then foundation hit pads (larger invisible areas around foundations)
+    const foundationHits = this.raycaster.intersectObjects(this.foundationHitPads, false);
 
     // Reset previous building hover
     if (this.hoveredMesh) {
@@ -927,15 +956,16 @@ export class SceneManager {
     }
     // Handle foundation hover (shows stack)
     else if (foundationHits.length > 0) {
-      const hit = foundationHits[0].object as THREE.Mesh;
-      if (hit.userData.isFoundation && hit.userData.project) {
-        this.hoveredFoundation = hit;
-        const mat = hit.material as THREE.MeshStandardMaterial;
+      const hitPad = foundationHits[0].object as THREE.Mesh;
+      if (hitPad.userData.isFoundation && hitPad.userData.project) {
+        const visualFoundation = (hitPad.userData.visualFoundation ?? hitPad) as THREE.Mesh;
+        this.hoveredFoundation = visualFoundation;
+        const mat = visualFoundation.material as THREE.MeshStandardMaterial;
         mat.color.setHex(0x3a3a5a);
         mat.emissive.setHex(0x1a1a2a);
         mat.emissiveIntensity = 0.5;
 
-        const project = hit.userData.project as ProjectData;
+        const project = hitPad.userData.project as ProjectData;
         if (project.stack && project.stack.length > 0) {
           this.showStackTooltip(project, event);
         }
@@ -989,8 +1019,8 @@ export class SceneManager {
       this.lastClickedBuilding = hit;
     }
 
-    // Check for drag handle clicks
-    const handleHits = this.raycaster.intersectObjects(this.dragHandles, false);
+    // Check for drag handle clicks (use larger hitboxes)
+    const handleHits = this.raycaster.intersectObjects(this.handleHitBoxes, false);
 
     if (handleHits.length > 0) {
       const hit = handleHits[0].object as THREE.Mesh;
@@ -1093,11 +1123,17 @@ export class SceneManager {
       project.position.z += deltaZ;
     }
 
-    // Move associated foundation
+    // Move associated foundation and hit pads
     for (const foundation of this.foundations) {
       if (foundation.userData.project === project) {
         foundation.position.x += deltaX;
         foundation.position.z += deltaZ;
+      }
+    }
+    for (const hitPad of this.foundationHitPads) {
+      if (hitPad.userData.project === project) {
+        hitPad.position.x += deltaX;
+        hitPad.position.z += deltaZ;
       }
     }
 
@@ -1140,6 +1176,12 @@ export class SceneManager {
       if (foundation.userData.project?.category === category) {
         foundation.position.x += deltaX;
         foundation.position.z += deltaZ;
+      }
+    }
+    for (const hitPad of this.foundationHitPads) {
+      if (hitPad.userData.project?.category === category) {
+        hitPad.position.x += deltaX;
+        hitPad.position.z += deltaZ;
       }
     }
 

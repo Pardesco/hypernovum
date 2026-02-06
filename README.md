@@ -4,6 +4,12 @@ A 3D **Code City** dashboard for [Obsidian](https://obsidian.md) — visualize y
 
 Each project in your vault becomes a building. Status maps to color, priority to height, category to district. A central **Neural Core** pulses with activity as you work, and **Data Arteries** flow from the core to buildings when files change.
 
+![City overview — districts, Neural Core, and data arteries](site/assets/hypervault_01.png)
+
+![Building selected with note details sidebar](site/assets/hypervault_02.png)
+
+![Right-click context menu — Launch Claude, Open in Explorer, Focus Camera](site/assets/hypervault_03.png)
+
 ## Features
 
 ### City Visualization
@@ -40,6 +46,16 @@ Each project in your vault becomes a building. Status maps to color, priority to
 - **Controls hint** overlay
 - **Save Layout** button for persisting block positions
 
+## Platform Support
+
+| Platform | Terminal Emulators | Notes |
+|----------|-------------------|-------|
+| **Windows** | Windows Terminal, cmd.exe | Tries `wt` first, falls back to `cmd` |
+| **macOS** | iTerm2, Terminal.app | Tries iTerm2 first (if running), falls back to Terminal.app |
+| **Linux** | gnome-terminal, konsole, xfce4-terminal, xterm | Tries each in order until one succeeds |
+
+All features — Neural Core, Data Arteries, Claude Code integration, context menus — work identically on every platform. The only difference is which terminal emulator opens.
+
 ## Frontmatter Schema
 
 Projects are detected by frontmatter tag `project` or field `type: project`. See [SCHEMA.md](SCHEMA.md) for the full field reference.
@@ -52,7 +68,9 @@ status: active
 priority: high
 category: web-apps
 stack: [TypeScript, React, Vite]
-projectDir: C:\path\to\project
+projectDir: C:\Users\me\projects\my-project   # Windows
+# projectDir: /Users/me/projects/my-project   # macOS
+# projectDir: /home/me/projects/my-project    # Linux
 ---
 ```
 
@@ -63,8 +81,14 @@ Hypervault has **no built-in AI**. External AI tools (Claude Code, etc.) read `S
 The `scripts/heartbeat.js` script can be wired into Claude Code hooks to enable real-time activity visualization:
 
 ```bash
-node scripts/heartbeat.js --vault="/path/to/vault" --project="my-project" --action="editing"
+# macOS / Linux
+node scripts/heartbeat.js --vault="/Users/you/Documents/MyVault" --project="my-project" --action="editing"
+
+# Windows (PowerShell)
+node scripts/heartbeat.js --vault="C:\Users\you\Documents\MyVault" --project="my-project" --action="editing"
 ```
+
+The heartbeat file (`.hypervault-status.json`) is written to the vault root, so the `--vault` flag must point to your actual vault folder regardless of platform.
 
 ## Development
 

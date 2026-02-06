@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu } from 'obsidian';
+import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting } from 'obsidian';
 import { existsSync } from 'fs';
 import * as path from 'path';
 import { SceneManager } from './SceneManager';
@@ -563,44 +563,124 @@ export class HypervaultView extends ItemView {
 
   /** Launch Claude Code from orb — opens folder picker first */
   private async launchClaudeFromOrb(): Promise<void> {
+    // Try native Electron dialog (modern @electron/remote first, then legacy)
+    const dialog = this.getElectronDialog();
+    if (dialog) {
+      try {
+        const result = await dialog.showOpenDialog({
+          properties: ['openDirectory', 'createDirectory'],
+          title: 'Select folder for Claude Code',
+        });
+
+        if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+          return;
+        }
+
+        await this.launchClaudeInFolder(result.filePaths[0]);
+        return;
+      } catch {
+        // Dialog failed, fall through to modal
+      }
+    }
+
+    // Fallback: text input modal
+    new FolderInputModal(this.app, async (folderPath) => {
+      await this.launchClaudeInFolder(folderPath);
+    }).open();
+  }
+
+  /** Try to get Electron's dialog API, or null if unavailable */
+  private getElectronDialog(): any {
     try {
-      // Use Electron's dialog for folder selection
+      // Modern Electron (Obsidian 1.5+): @electron/remote
+      const remote = require('@electron/remote');
+      if (remote?.dialog) return remote.dialog;
+    } catch { /* not available */ }
+
+    try {
+      // Legacy Electron: electron.remote
       const electron = require('electron');
       const remote = electron.remote || (electron as any).default?.remote;
-      const dialog = remote?.dialog;
+      if (remote?.dialog) return remote.dialog;
+    } catch { /* not available */ }
 
-      if (!dialog) {
-        new Notice('Folder picker not available (requires Obsidian desktop)');
-        return;
-      }
+    return null;
+  }
 
-      const result = await dialog.showOpenDialog({
-        properties: ['openDirectory', 'createDirectory'],
-        title: 'Select folder for Claude Code',
-      });
+  /** Shared launch logic for folder-based Claude launch */
+  private async launchClaudeInFolder(folderPath: string): Promise<void> {
+    const projectName = path.basename(folderPath);
+    new Notice(`Launching Claude in ${projectName}...`);
 
-      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-        return;
-      }
+    const launchResult = await TerminalLauncher.launch({
+      projectPath: folderPath,
+      command: 'claude',
+      projectName,
+    });
 
-      const selectedFolder = result.filePaths[0];
-      const projectName = path.basename(selectedFolder);
-
-      new Notice(`🚀 Launching Claude in ${projectName}...`);
-
-      const launchResult = await TerminalLauncher.launch({
-        projectPath: selectedFolder,
-        command: 'claude',
-        projectName,
-      });
-
-      if (launchResult.success) {
-        new Notice(`✓ Terminal launched in ${projectName}`);
-      } else {
-        new Notice(`✗ Launch failed: ${launchResult.message}`);
-      }
-    } catch (e) {
-      new Notice('Folder picker not available (requires Obsidian desktop)');
+    if (launchResult.success) {
+      new Notice(`Terminal launched in ${projectName}`);
+    } else {
+      new Notice(`Launch failed: ${launchResult.message}`);
     }
+  }
+}
+
+/**
+ * Simple modal that prompts the user for a folder path.
+ * Used as fallback when Electron's native folder picker is unavailable.
+ */
+class FolderInputModal extends Modal {
+  private onSubmit: (path: string) => void;
+  private inputValue = '';
+
+  constructor(app: App, onSubmit: (path: string) => void) {
+    super(app);
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: 'Launch Claude Code' });
+    contentEl.createEl('p', { text: 'Enter the project folder path:' });
+
+    new Setting(contentEl)
+      .setName('Folder path')
+      .addText((text) => {
+        text.setPlaceholder('/Users/you/projects/my-project');
+        text.onChange((value) => { this.inputValue = value; });
+        // Submit on Enter key
+        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.submit();
+          }
+        });
+      });
+
+    new Setting(contentEl)
+      .addButton((btn) => {
+        btn.setButtonText('Launch')
+          .setCta()
+          .onClick(() => this.submit());
+      });
+  }
+
+  private submit(): void {
+    const trimmed = this.inputValue.trim();
+    if (!trimmed) {
+      new Notice('Please enter a folder path');
+      return;
+    }
+    if (!existsSync(trimmed)) {
+      new Notice('Folder not found: ' + trimmed);
+      return;
+    }
+    this.close();
+    this.onSubmit(trimmed);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }

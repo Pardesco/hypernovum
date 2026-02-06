@@ -15,6 +15,14 @@ export interface LaunchOptions {
 }
 
 /**
+ * Escape a string for safe embedding in AppleScript single-quoted strings.
+ * Replaces \ with \\ and ' with '\'' (end quote, escaped quote, start quote).
+ */
+function escapeAppleScript(str: string): string {
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "'\\''");
+}
+
+/**
  * Cross-platform terminal launcher for launching Claude Code in project directories.
  * Supports Windows Terminal, macOS Terminal, and Linux terminals.
  */
@@ -120,22 +128,56 @@ export class TerminalLauncher {
   }
 
   /**
-   * Launch macOS Terminal with Claude Code.
+   * Launch macOS terminal with Claude Code.
+   * Tries iTerm2 first, falls back to Terminal.app.
    */
   private static async launchMacOS(
     projectPath: string,
     command: string,
     projectName?: string
   ): Promise<LaunchResult> {
-    // Use osascript to open Terminal.app with the command
-    const script = `
+    const safePath = escapeAppleScript(projectPath);
+    const safeCommand = escapeAppleScript(command);
+    const cdAndRun = `cd '${safePath}' && ${safeCommand}`;
+
+    // Try iTerm2 first — most popular macOS terminal for developers
+    const iTermScript = `
+      if application "iTerm" is running then
+        tell application "iTerm"
+          activate
+          set newWindow to (create window with default profile)
+          tell current session of newWindow
+            write text "${cdAndRun}"
+          end tell
+        end tell
+        return "ok"
+      else
+        return "not running"
+      end if
+    `;
+
+    try {
+      const iTermResult = await this.runOsascript(iTermScript);
+      if (iTermResult === 'ok') {
+        return {
+          success: true,
+          message: `Launched iTerm2 in ${projectName || projectPath}`,
+          platform: 'macos',
+        };
+      }
+    } catch {
+      // iTerm2 not available, fall through
+    }
+
+    // Fallback: Terminal.app
+    const terminalScript = `
       tell application "Terminal"
         activate
-        do script "cd '${projectPath}' && ${command}"
+        do script "cd '${safePath}' && ${safeCommand}"
       end tell
     `;
 
-    const child = spawn('osascript', ['-e', script], {
+    const child = spawn('osascript', ['-e', terminalScript], {
       detached: true,
       stdio: 'ignore',
     });
@@ -146,6 +188,22 @@ export class TerminalLauncher {
       message: `Launched Terminal.app in ${projectName || projectPath}`,
       platform: 'macos',
     };
+  }
+
+  /**
+   * Run an AppleScript and return its stdout output (trimmed).
+   */
+  private static runOsascript(script: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+      child.on('close', (code) => {
+        if (code === 0) resolve(stdout.trim());
+        else reject(new Error(`osascript exited with code ${code}`));
+      });
+      child.on('error', reject);
+    });
   }
 
   /**
