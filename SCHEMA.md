@@ -42,7 +42,7 @@ The detection tag can be customized in plugin settings (default: `project`).
 | `tasks` | `number` | parsed from checkboxes | **Window grid density** + total window count |
 | `tasks_done` | `number` | parsed from checkboxes | **Lit windows** (fill from bottom) |
 | `stack` | `string[]` or CSV | — | **Tech stack** shown on foundation hover |
-| `projectDir` | `string` | — | **Project directory** path for terminal launch (absolute or vault-relative) |
+| `projectDir` | `string` | — | **Project directory** path for terminal launch (absolute or vault-relative). **Required for "Launch Claude" and "Open in Explorer" to work.** |
 
 ### Status Values → Building Color
 
@@ -149,3 +149,19 @@ Hypervault has **no built-in AI**. Instead, AI tools operate externally:
 5. Hypervault reads the frontmatter and renders the city
 
 This keeps the plugin simple and avoids API key configuration. Any AI tool that can read files and write markdown can integrate with Hypervault.
+
+### Critical: Always Set `projectDir`
+
+The `projectDir` field is **essential** for terminal-based features (right-click → "Launch Claude", "Open in Explorer"). Without it, the plugin cannot determine where the actual project source code lives on disk.
+
+**AI tools must always set `projectDir` to the absolute path of the project's root directory.** The vault note is just metadata — the real code is elsewhere on the filesystem.
+
+```yaml
+# CORRECT — absolute path to the actual project directory
+projectDir: /home/user/projects/my-app
+
+# ALSO VALID — path relative to the vault root
+projectDir: ../../projects/my-app
+
+# WRONG — omitting projectDir means "Launch Claude" opens in the vault directory, not the project
+```

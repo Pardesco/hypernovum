@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hypervault — The Spatial Command Center for AI Agents</title>
+  <meta name="description" content="Visualize your projects as a living cyberpunk city. Click buildings to open code. Right-click to deploy AI.">
+  <meta name="theme-color" content="#0a0a14">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a14;
+      --bg-card: #0f0f1a;
+      --purple: #b366ff;
+      --purple-dim: rgba(179, 102, 255, 0.15);
+      --purple-glow: rgba(179, 102, 255, 0.4);
+      --cyan: #00ffff;
+      --cyan-dim: rgba(0, 255, 255, 0.1);
+      --text: #e0e0e8;
+      --text-dim: #8888a0;
+      --border: rgba(179, 102, 255, 0.2);
+      --mono: 'Courier New', Courier, monospace;
+      --sans: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid Background ──────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(179, 102, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(179, 102, 255, 0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      animation: gridShift 20s linear infinite;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    @keyframes gridShift {
+      0% { background-position: 0 0; }
+      100% { background-position: 60px 60px; }
+    }
+
+    /* ── Layout ────────────────────────────────────── */
+    section {
+      position: relative;
+      z-index: 1;
+      padding: 100px 24px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* ── Typography ────────────────────────────────── */
+    h1, h2, h3 {
+      font-family: var(--mono);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    /* ── Scroll Animations ─────────────────────────── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Buttons ───────────────────────────────────── */
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      text-decoration: none;
+      border-radius: 6px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--purple);
+      color: #fff;
+      border: 1px solid var(--purple);
+      box-shadow: 0 0 20px var(--purple-glow);
+    }
+
+    .btn-primary:hover {
+      background: #c080ff;
+      box-shadow: 0 0 30px var(--purple-glow), 0 0 60px rgba(179, 102, 255, 0.2);
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--cyan);
+      border: 1px solid var(--cyan);
+    }
+
+    .btn-outline:hover {
+      background: var(--cyan-dim);
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 1 — HERO
+       ═══════════════════════════════════════════════ */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding-top: 60px;
+    }
+
+    .hero-title {
+      font-size: clamp(3rem, 8vw, 6rem);
+      color: var(--purple);
+      text-shadow:
+        0 0 10px var(--purple-glow),
+        0 0 40px rgba(179, 102, 255, 0.3),
+        0 0 80px rgba(179, 102, 255, 0.15);
+      margin-bottom: 8px;
+      position: relative;
+      display: inline-block;
+    }
+
+    .cursor-blink {
+      display: inline-block;
+      width: 0.5ch;
+      height: 1em;
+      background: var(--purple);
+      vertical-align: text-bottom;
+      margin-left: 4px;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .hero-tagline {
+      font-family: var(--mono);
+      font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+      color: var(--cyan);
+      margin-bottom: 16px;
+      text-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+    }
+
+    .hero-sub {
+      font-size: 1.1rem;
+      color: var(--text-dim);
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 2 — PROBLEM STATEMENT
+       ═══════════════════════════════════════════════ */
+    .problem { background: linear-gradient(180deg, transparent, rgba(179, 102, 255, 0.02), transparent); }
+
+    .problem h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+      color: var(--text);
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .problem-text {
+      text-align: center;
+      color: var(--text-dim);
+      max-width: 700px;
+      margin: 0 auto 48px;
+      font-size: 1.05rem;
+    }
+
+    .gap-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      max-width: 750px;
+      margin: 0 auto;
+    }
+
+    .gap-card {
+      text-align: center;
+      padding: 32px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-card);
+    }
+
+    .gap-card .icon {
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+
+    .gap-card h3 {
+      font-size: 1.1rem;
+      margin-bottom: 4px;
+    }
+
+    .gap-card.missing {
+      border-color: rgba(255, 80, 80, 0.3);
+    }
+
+    .gap-card.missing h3 { color: #ff6666; }
+
+    .gap-card.found {
+      border-color: var(--purple);
+      box-shadow: 0 0 20px var(--purple-dim);
+    }
+
+    .gap-card.found h3 { color: var(--purple); }
+
+    .gap-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--purple);
+      font-family: var(--mono);
+      font-size: 1.4rem;
+      margin: 24px 0;
+      text-shadow: 0 0 10px var(--purple-glow);
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 3 — HERO SCREENSHOT
+       ═══════════════════════════════════════════════ */
+    .screenshot { padding: 60px 24px 100px; }
+
+    .screenshot-frame {
+      max-width: 1000px;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow:
+        0 0 30px var(--purple-dim),
+        0 4px 60px rgba(0, 0, 0, 0.5);
+      background: var(--bg-card);
+    }
+
+    .screenshot-frame img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .screenshot-placeholder {
+      width: 100%;
+      aspect-ratio: 16/9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      border: 1px dashed var(--border);
+    }
+
+    .screenshot-caption {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      margin-top: 20px;
+      font-style: italic;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 4 — FEATURES GRID
+       ═══════════════════════════════════════════════ */
+    .features h2 {
+      text-align: center;
+      font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+      margin-bottom: 48px;
+      color: var(--text);
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .feature-card {
+      padding: 32px 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--purple);
+      box-shadow: 0 0 25px var(--purple-dim);
+    }
+
+    .feature-card .icon {
+      font-size: 1.8rem;
+      margin-bottom: 12px;
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      color: var(--purple);
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 5 — COMPETITIVE POSITIONING
+       ═══════════════════════════════════════════════ */
+    .positioning h2 {
+      text-align: center;
+      font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    .positioning-sub {
+      text-align: center;
+      color: var(--text-dim);
+      margin-bottom: 48px;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .compare-card {
+      padding: 32px 24px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--bg-card);
+    }
+
+    .compare-card.dimmed {
+      opacity: 0.5;
+    }
+
+    .compare-card.dimmed h3 { color: var(--text-dim); }
+
+    .compare-card.highlight {
+      border-color: var(--purple);
+      box-shadow: 0 0 30px var(--purple-dim);
+      opacity: 1;
+    }
+
+    .compare-card h3 {
+      font-family: var(--mono);
+      font-size: 1.1rem;
+      margin-bottom: 8px;
+    }
+
+    .compare-card .label {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+
+    .compare-card.highlight h3 { color: var(--purple); }
+    .compare-card.highlight .label { color: var(--cyan); }
+
+    .compare-card p {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .compare-card.highlight p { color: var(--text); }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 6 — OPEN SOURCE CTA
+       ═══════════════════════════════════════════════ */
+    .opensource {
+      text-align: center;
+      background: linear-gradient(180deg, transparent, rgba(179, 102, 255, 0.03), transparent);
+    }
+
+    .opensource h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+      margin-bottom: 20px;
+      color: var(--text);
+    }
+
+    .opensource-text {
+      color: var(--text-dim);
+      max-width: 600px;
+      margin: 0 auto 16px;
+      font-size: 1.05rem;
+    }
+
+    .opensource-key {
+      font-family: var(--mono);
+      color: var(--cyan);
+      font-size: 1.05rem;
+      margin-bottom: 36px;
+      text-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+    }
+
+    .code-block {
+      display: inline-block;
+      background: #0d0d1a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 32px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      color: var(--cyan);
+      text-align: left;
+      margin-bottom: 32px;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .code-block .comment { color: var(--text-dim); }
+    .code-block .cmd { color: var(--text); }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 7 — FOOTER
+       ═══════════════════════════════════════════════ */
+    footer {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      padding: 48px 24px;
+      border-top: 1px solid var(--border);
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--purple);
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    footer p { margin-bottom: 6px; }
+
+    .footer-powered {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      opacity: 0.6;
+    }
+
+    /* ═══════════════════════════════════════════════
+       RESPONSIVE
+       ═══════════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      section { padding: 64px 20px; }
+
+      .gap-grid,
+      .features-grid,
+      .compare-grid {
+        grid-template-columns: 1fr;
+        max-width: 400px;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .hero-buttons { flex-direction: column; align-items: center; }
+      .btn { width: 100%; max-width: 280px; text-align: center; }
+
+      .code-block {
+        font-size: 0.8rem;
+        padding: 16px 20px;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+    }
+
+    @media (min-width: 769px) and (max-width: 1024px) {
+      .features-grid,
+      .compare-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 1 — HERO
+       ════════════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="container">
+      <h1 class="hero-title">HYPERVAULT<span class="cursor-blink"></span></h1>
+      <p class="hero-tagline">The Spatial Command Center for AI Agents</p>
+      <p class="hero-sub">Visualize your projects as a living cyberpunk city. Click buildings to open code. Right-click to deploy AI.</p>
+      <div class="hero-buttons">
+        <a href="https://github.com/Pardesco/hypervault" class="btn btn-primary" target="_blank" rel="noopener">View on GitHub</a>
+        <a href="#screenshot" class="btn btn-outline">Watch Demo</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 2 — PROBLEM STATEMENT
+       ════════════════════════════════════════════════ -->
+  <section class="problem">
+    <div class="container reveal">
+      <h2>AI has brains and hands.<br>But the cockpit is missing.</h2>
+      <p class="problem-text">LLMs give us reasoning. Agents give us execution. But humans still stare at linear chat windows, scrolling through walls of text. There's no spatial interface for orchestrating AI work across projects.</p>
+      <div class="gap-grid">
+        <div class="gap-card">
+          <div class="icon">&#x1F9E0;</div>
+          <h3>Brains</h3>
+          <p style="color: var(--cyan); font-family: var(--mono); font-size: 0.85rem;">LLMs &check;</p>
+        </div>
+        <div class="gap-card">
+          <div class="icon">&#x1F91A;</div>
+          <h3>Hands</h3>
+          <p style="color: var(--cyan); font-family: var(--mono); font-size: 0.85rem;">Agents &check;</p>
+        </div>
+        <div class="gap-card missing">
+          <div class="icon">&#x1F3AE;</div>
+          <h3>Cockpit</h3>
+          <p style="color: #ff6666; font-family: var(--mono); font-size: 0.85rem;">Missing &cross;</p>
+        </div>
+      </div>
+      <div class="gap-arrow">&darr; Hypervault fills the gap &darr;</div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 3 — HERO SCREENSHOT
+       ════════════════════════════════════════════════ -->
+  <section class="screenshot" id="screenshot">
+    <div class="container reveal">
+      <div class="screenshot-frame">
+        <img src="assets/hero.png" alt="Hypervault city view — projects visualized as glowing cyberpunk buildings" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <div class="screenshot-placeholder" style="display:none;">[ Drop hero.png into site/assets/ ]</div>
+      </div>
+      <p class="screenshot-caption">Every building is a project. Every pulse is a file change. Click to navigate. Right-click to deploy.</p>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 4 — FEATURES GRID
+       ════════════════════════════════════════════════ -->
+  <section class="features">
+    <div class="container">
+      <h2 class="reveal">Features</h2>
+      <div class="features-grid">
+        <div class="feature-card reveal">
+          <div class="icon">&#x1F3D7;&#xFE0F;</div>
+          <h3>Procedural Architecture</h3>
+          <p>Each project category gets a unique silhouette &mdash; helix towers, data shards, ziggurats, and more.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="icon">&#x1F52E;</div>
+          <h3>Neural Core</h3>
+          <p>Central wireframe sphere pulses with city activity. RGB chromatic split. The heartbeat of your workspace.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="icon">&#x1F300;</div>
+          <h3>Data Arteries</h3>
+          <p>Animated neon tubes flow from the core to buildings when files change. See your city breathe.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="icon">&#x1F5B1;&#xFE0F;</div>
+          <h3>Click to Navigate</h3>
+          <p>Click any building to open its note. Double-click to reposition the camera. Your vault at a glance.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="icon">&#x1F916;</div>
+          <h3>Launch AI Agents</h3>
+          <p>Right-click buildings or the Neural Core to spawn Claude Code terminals with full project context.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="icon">&#x26A1;</div>
+          <h3>Real-Time Activity</h3>
+          <p>Watch your AI work in real-time &mdash; streaming arteries, pulsing core, and a live activity overlay.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 5 — COMPETITIVE POSITIONING
+       ════════════════════════════════════════════════ -->
+  <section class="positioning">
+    <div class="container">
+      <h2 class="reveal">Not Another Dashboard</h2>
+      <p class="positioning-sub reveal">Hypervault isn't a report. It's an interface.</p>
+      <div class="compare-grid">
+        <div class="compare-card dimmed reveal">
+          <div class="label">Dashboards</div>
+          <h3>Jellyfish, LinearB</h3>
+          <p>2D charts for managers. Reporting, not doing. You watch metrics go up &mdash; or down.</p>
+        </div>
+        <div class="compare-card dimmed reveal">
+          <div class="label">Flowcharts</div>
+          <h3>LangFlow, ComfyUI</h3>
+          <p>Nodes and wires. Circuit boards, not cities. Built for pipelines, not projects.</p>
+        </div>
+        <div class="compare-card highlight reveal">
+          <div class="label">Spatial Interface</div>
+          <h3>Hypervault</h3>
+          <p>Active 3D interface. You aren't watching the code &mdash; you're commanding it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 6 — OPEN SOURCE CTA
+       ════════════════════════════════════════════════ -->
+  <section class="opensource">
+    <div class="container reveal">
+      <h2>Free. Open Source.<br>Built for the Vibe.</h2>
+      <p class="opensource-text">Hypervault is open source and always will be. We're not building a product &mdash; we're building a standard for how humans interact with AI-augmented codebases.</p>
+      <p class="opensource-key">We don't charge for the tool. We're building a standard.</p>
+      <div class="code-block">
+        <span class="comment"># Clone and install</span><br>
+        <span class="cmd">git clone https://github.com/Pardesco/hypervault.git</span><br>
+        <span class="cmd">cd hypervault && npm install && npm run build</span>
+      </div>
+      <br>
+      <a href="https://github.com/Pardesco/hypervault" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════
+       SECTION 7 — FOOTER
+       ════════════════════════════════════════════════ -->
+  <footer>
+    <p>Built by <a href="https://github.com/Pardesco" target="_blank" rel="noopener">@pardesco_</a></p>
+    <p class="footer-powered">Powered by Three.js + Obsidian</p>
+    <p class="footer-powered" style="margin-top: 12px;">Deployed on Cloudflare Pages</p>
+  </footer>
+
+  <!-- ════════════════════════════════════════════════
+       SCROLL REVEAL JS
+       ════════════════════════════════════════════════ -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var reveals = document.querySelectorAll('.reveal');
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.15 });
+      reveals.forEach(function (el) { observer.observe(el); });
+    });
+  </script>
+</body>
+</html>
