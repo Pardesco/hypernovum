@@ -1,0 +1,17 @@
+{
+  "name": "@hypervault/core",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "three": "^0.160.0",
+    "three-stdlib": "^2.36.1",
+    "zustand": "^4.4.0"
+  },
+  "peerDependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0"
+  }
+}

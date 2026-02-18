@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ProjectData } from '../types';
+import { BuildingFactory } from './BuildingFactory';
 
 /**
  * Factory for creating building mesh objects from project data.
@@ -12,17 +13,24 @@ export class BuildingObject {
 
     const { width, height, depth } = project.dimensions;
 
-    const geometry = new THREE.BoxGeometry(width, height, depth);
+    // Generate procedural geometry based on project data/status
+    const geometry = BuildingFactory.createBuilding(project);
+
+    // Ensure shadow casting/receiving
+    geometry.computeVertexNormals();
+
+    // Material fallback if shader fails (will be replaced by BuildingShader if valid)
     const material = new THREE.MeshStandardMaterial({
       color: this.getColor(project.status),
-      roughness: 0.7,
-      metalness: 0.3,
+      roughness: 0.6,
+      metalness: 0.8,
+      flatShading: true, // Cyberpunk low-poly aesthetic
     });
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(
       project.position.x,
-      height / 2,
+      0, // Geometry is already y-translated (0 to height)
       project.position.z,
     );
     mesh.castShadow = true;

@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import type { ProjectData } from '../types';
 
 // Shader source will be inlined by esbuild loader
-import vertexShader from '../../shaders/building.vert';
-import fragmentShader from '../../shaders/building.frag';
+import vertexShader from '../shaders/building.vert';
+import fragmentShader from '../shaders/building.frag';
 
 /**
  * Creates ShaderMaterial for buildings with procedural windows,

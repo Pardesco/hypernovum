@@ -1,6 +1,5 @@
 import { App, TFile, TFolder } from 'obsidian';
-import type { HypervaultSettings } from '../settings/SettingsTab';
-import type { ProjectData } from '../types';
+import type { HypervaultSettings, ProjectData } from '@hypervault/core';
 
 export class ProjectParser {
   private app: App;

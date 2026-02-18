@@ -1,44 +1,11 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HypervaultPlugin from '../main';
+import { DEFAULT_SETTINGS } from '@hypervault/core';
+import type { BlockPosition, HypervaultSettings } from '@hypervault/core';
 
-export interface BlockPosition {
-  category: string;
-  offsetX: number;
-  offsetZ: number;
-}
-
-export interface HypervaultSettings {
-  /** Frontmatter tag that identifies a note as a project */
-  projectTag: string;
-  /** Show building labels */
-  showLabels: boolean;
-  /** Enable shadow rendering */
-  enableShadows: boolean;
-  /** Maximum buildings to render */
-  maxBuildings: number;
-  /** Saved block positions (user-arranged layout) */
-  blockPositions: BlockPosition[];
-  /** Enable procedural GPU shaders for buildings */
-  enableShaders: boolean;
-  /** Enable bloom post-processing glow */
-  enableBloom: boolean;
-  /** Bloom glow intensity (0.3-2.0) */
-  bloomIntensity: number;
-  /** Enable atmospheric fog effect */
-  enableAtmosphere: boolean;
-}
-
-export const DEFAULT_SETTINGS: HypervaultSettings = {
-  projectTag: 'project',
-  showLabels: true,
-  enableShadows: true,
-  maxBuildings: 300,
-  blockPositions: [],
-  enableShaders: false,
-  enableBloom: false,
-  bloomIntensity: 0.8,
-  enableAtmosphere: false,
-};
+// Re-export for backward compatibility within the plugin package
+export { DEFAULT_SETTINGS };
+export type { BlockPosition, HypervaultSettings };
 
 export class SettingsTab extends PluginSettingTab {
   plugin: HypervaultPlugin;

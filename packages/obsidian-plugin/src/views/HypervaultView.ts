@@ -1,16 +1,12 @@
 import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting } from 'obsidian';
 import { existsSync } from 'fs';
 import * as path from 'path';
-import { SceneManager } from './SceneManager';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypervault/core';
+import type { ProjectData, HypervaultSettings, BlockPosition, RaycastHit } from '@hypervault/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
-import { BinPacker } from '../layout/BinPacker';
-import { BuildingRaycaster, type RaycastHit } from '../interactions/Raycaster';
-import { KeyboardNav } from '../interactions/KeyboardNav';
 import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonitor';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
-import type { HypervaultSettings, BlockPosition } from '../settings/SettingsTab';
-import type { ProjectData } from '../types';
 import type HypervaultPlugin from '../main';
 
 export const VIEW_TYPE = 'hypervault-view';

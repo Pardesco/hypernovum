@@ -2,8 +2,9 @@
 node_modules/
 
 # Build output
-main.js
-*.js.map
+packages/core/dist/
+packages/desktop/dist/
+*.tsbuildinfo
 
 # IDE
 .vscode/

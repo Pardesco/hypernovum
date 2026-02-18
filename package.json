@@ -1,33 +1,19 @@
 {
-  "name": "obsidian-hypervault",
-  "version": "0.1.0",
-  "description": "3D Code City Dashboard for Personal Knowledge Management in Obsidian",
-  "main": "main.js",
-  "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production"
-  },
-  "keywords": [
-    "obsidian",
-    "plugin",
-    "3d",
-    "visualization",
-    "code-city",
-    "dashboard"
+  "name": "hypervault",
+  "private": true,
+  "workspaces": [
+    "packages/core",
+    "packages/obsidian-plugin",
+    "packages/desktop"
   ],
-  "author": "Randall Morgan",
-  "license": "AGPL-3.0-only",
-  "dependencies": {
-    "three": "^0.160.0",
-    "zustand": "^4.4.0"
+  "scripts": {
+    "build": "npm run build -w packages/obsidian-plugin",
+    "build:core": "echo '@hypervault/core is bundled directly by consumers'",
+    "build:plugin": "npm run build -w packages/obsidian-plugin",
+    "build:desktop": "npm run build -w packages/desktop",
+    "start:desktop": "npm start -w packages/desktop",
+    "dev": "npm run dev -w packages/obsidian-plugin"
   },
-  "devDependencies": {
-    "@types/three": "^0.160.0",
-    "@types/node": "^20.0.0",
-    "builtin-modules": "^3.3.0",
-    "esbuild": "^0.19.0",
-    "obsidian": "latest",
-    "tslib": "^2.6.0",
-    "typescript": "^5.0.0"
-  }
+  "author": "Randall Morgan",
+  "license": "AGPL-3.0-only"
 }
