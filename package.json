@@ -3,15 +3,12 @@
   "private": true,
   "workspaces": [
     "packages/core",
-    "packages/obsidian-plugin",
-    "packages/desktop"
+    "packages/obsidian-plugin"
   ],
   "scripts": {
-    "build": "npm run build -w packages/obsidian-plugin",
-    "build:core": "echo '@hypervault/core is bundled directly by consumers'",
+    "build": "npm run build:core && npm run build:plugin",
+    "build:core": "npm run build -w packages/core",
     "build:plugin": "npm run build -w packages/obsidian-plugin",
-    "build:desktop": "npm run build -w packages/desktop",
-    "start:desktop": "npm start -w packages/desktop",
     "dev": "npm run dev -w packages/obsidian-plugin"
   },
   "author": "Randall Morgan",

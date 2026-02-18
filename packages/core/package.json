@@ -1,8 +1,39 @@
 {
   "name": "@hypervault/core",
   "version": "0.1.0",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "description": "Platform-agnostic 3D city visualization engine for code projects",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./shaders/*": "./dist/shaders/*"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build --force && node -e \"const fs=require('fs');fs.mkdirSync('dist/shaders',{recursive:true});fs.copyFileSync('src/shaders/building.vert','dist/shaders/building.vert');fs.copyFileSync('src/shaders/building.frag','dist/shaders/building.frag')\"",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "three",
+    "threejs",
+    "3d",
+    "visualization",
+    "code-city",
+    "obsidian"
+  ],
+  "author": "Randall Morgan",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Pardesco/hypervault.git",
+    "directory": "packages/core"
+  },
   "dependencies": {
     "three": "^0.160.0",
     "three-stdlib": "^2.36.1",
@@ -12,6 +43,7 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
-    "@types/three": "^0.160.0"
+    "@types/three": "^0.160.0",
+    "typescript": "^5.0.0"
   }
 }
