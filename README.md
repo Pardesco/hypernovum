@@ -100,6 +100,10 @@ npm run build  # production build
 
 Built with [Three.js](https://threejs.org/), [Zustand](https://github.com/pmndrs/zustand), and the [Obsidian Plugin API](https://docs.obsidian.md/).
 
+## Hypervault Pro
+
+For a standalone desktop experience beyond Obsidian — with GLB model support, AI agent management, MCP server integration, and more — check out [Hypervault Pro](https://hypervault.dev).
+
 ## License
 
 [AGPL-3.0](LICENSE) — Free to use, modify, and distribute. Any modified version that is deployed must also be open-sourced under AGPL-3.0.

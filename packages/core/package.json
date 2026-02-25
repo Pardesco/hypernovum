@@ -1,6 +1,6 @@
 {
   "name": "@hypervault/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Platform-agnostic 3D city visualization engine for code projects",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -8,7 +8,6 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { ProjectData, District, BlockPosition, HypervaultSettings, WeatherData } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
-import { BuildingFactory } from '../renderers/BuildingFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
 
@@ -431,18 +430,23 @@ export class SceneManager {
 
     // Category-specific colors for outlines
     const categoryColors: Record<string, number> = {
-      'web-apps': 0x00cccc,       // Cyan
-      'visualization': 0xcc66ff,  // Purple
-      'infrastructure': 0xff9933, // Orange
-      'trading': 0xff3366,        // Red-pink
-      'obsidian-plugins': 0x66ff66, // Green
-      'content': 0xffcc00,        // Gold
+      'web-apps': 0x00cccc,
+      'visualization': 0xcc66ff,
+      'infrastructure': 0xff9933,
+      'trading': 0xff3366,
+      'obsidian-plugins': 0x66ff66,
+      'content': 0xffcc00,
+      'desktop-apps': 0x00aaff,
+      'research': 0xff66cc,
+      'animation': 0xff8844,
+      'art': 0xff00ff,
+      'AI/ML': 0x66ffcc,
     };
 
     const padding = 3; // Padding around buildings
 
     for (const [category, bounds] of categoryBounds) {
-      const color = categoryColors[category] ?? 0x6699cc;
+      const color = categoryColors[category] ?? SceneManager.hashCategoryColor(category);
       const blockObjects: THREE.Object3D[] = [];
 
       // Create planar rectangular outline on the ground
@@ -609,8 +613,19 @@ export class SceneManager {
     const baseColor = this.getStatusColor(project.status);
 
     // Foundation plinth (shows stack on hover)
+    // Hex foundation for cylindrical shapes (hive, memory core, data shard); box for the rest
     const foundationHeight = 0.8;
-    const foundationGeo = BuildingFactory.createFoundation(project, foundationHeight);
+    const padding = 0.4;
+    const hexCategories = ['obsidian-plugins', 'content', 'visualization'];
+    let foundationGeo: THREE.BufferGeometry;
+    if (hexCategories.includes(project.category)) {
+      const radius = Math.min(width, depth) / 2 + padding;
+      foundationGeo = new THREE.CylinderGeometry(radius, radius, foundationHeight, 6);
+      foundationGeo.translate(0, foundationHeight / 2, 0);
+    } else {
+      foundationGeo = new THREE.BoxGeometry(width + padding, foundationHeight, depth + padding);
+      foundationGeo.translate(0, foundationHeight / 2, 0);
+    }
     // Foundation base color with subtle status tint
     const foundationBaseColor = new THREE.Color(0x2a2a3a);
     const statusTint = baseColor.clone().multiplyScalar(0.15);
@@ -658,8 +673,8 @@ export class SceneManager {
     foundationWireframe.userData = { isFoundation: true, project };
     this.scene.add(foundationWireframe);
 
-    // Building shape varies by category (via BuildingFactory)
-    const geometry = BuildingFactory.createBuilding(project);
+    // Building shape varies by category (via GeometryFactory)
+    const geometry = this.createBuildingGeometry(project.category, width, height, depth);
 
     // Try shader material if enabled, fallback to standard material
     let material: THREE.Material;
@@ -786,6 +801,18 @@ export class SceneManager {
 
       this.labels.push({ project, buildingPos: buildingTop, labelPos, label });
     }
+  }
+
+  /** Deterministic neon color from category name so unknown categories are consistent */
+  private static hashCategoryColor(category: string): number {
+    let hash = 0;
+    for (let i = 0; i < category.length; i++) {
+      hash = (hash << 5) - hash + category.charCodeAt(i);
+      hash |= 0;
+    }
+    const hue = ((hash >>> 0) % 360) / 360;
+    const color = new THREE.Color().setHSL(hue, 0.9, 0.6);
+    return (Math.round(color.r * 255) << 16) | (Math.round(color.g * 255) << 8) | Math.round(color.b * 255);
   }
 
   private getStatusColor(status: string): THREE.Color {
