@@ -10,7 +10,7 @@
 HYPERNOVUM is a 3D cyberpunk city visualization of coding projects. It ships as two apps that share one core package:
 
 ```
-hypervault/                          ← THIS MONOREPO
+hypernovum/                          ← THIS MONOREPO
 ├── packages/core/                   ← @hypervault/core (shared engine)
 │   ├── src/                         ← TypeScript SOURCE OF TRUTH
 │   │   ├── scene/SceneManager.ts    ← City builder, camera, interactions
@@ -23,7 +23,7 @@ hypervault/                          ← THIS MONOREPO
 ├── packages/obsidian-plugin/        ← Obsidian addon (consumes core via npm workspace)
 └── .obsidian/plugins/obsidian-hypernovum/  ← Built plugin output (gitignored)
 
-hypervault-pro/                      ← SEPARATE REPO (Electron desktop app)
+hypernovum-pro/                      ← SEPARATE REPO (Electron desktop app)
 ├── node_modules/@hypervault/core/   ← Copy of core dist — NOT symlinked
 ├── scripts/sync-core.sh             ← Script to copy core dist from monorepo
 └── src/main/index.ts                ← Logs CORE_BUILD_VERSION at startup
@@ -132,7 +132,7 @@ After rebuilding core, verify this version is what you expect. If it shows an ol
 ### Rule 4: Use the sync script for Pro app
 
 ```bash
-# In hypervault-pro/:
+# In hypernovum-pro/:
 bash scripts/sync-core.sh    # Copies dist from monorepo
 node esbuild.config.mjs      # Rebuilds Pro app
 ```
@@ -196,5 +196,5 @@ Both the Obsidian plugin and Pro app call `SceneManager.buildCity()` — neither
 | SceneManager | `packages/core/src/scene/SceneManager.ts` |
 | Core version constant | `packages/core/src/index.ts` → `CORE_BUILD_VERSION` |
 | Plugin bundle | `.obsidian/plugins/obsidian-hypernovum/main.js` (gitignored) |
-| Pro app repo | `../hypervault-pro/` (separate git repo) |
-| Pro sync script | `../hypervault-pro/scripts/sync-core.sh` |
+| Pro app repo | `../hypernovum-pro/` (separate git repo) |
+| Pro sync script | `../hypernovum-pro/scripts/sync-core.sh` |
