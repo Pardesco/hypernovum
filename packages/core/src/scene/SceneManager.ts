@@ -8,6 +8,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
+import { BuildingFactory } from '../renderers/BuildingFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
 
@@ -31,6 +32,13 @@ interface BlockData {
   color: number;
   objects: THREE.Object3D[];  // All objects belonging to this block
   handle: THREE.Mesh;
+  hitBox: THREE.Mesh;
+  outline: THREE.Line;
+  fill: THREE.Mesh;
+  label: CSS2DObject;
+  leaderLine: THREE.Line;
+  dot: THREE.Mesh;
+  handleBracket: THREE.Line;
   projects: ProjectData[];
 }
 
@@ -148,7 +156,7 @@ export class SceneManager {
     }
 
     // Initialize Neural Core and Artery Manager
-    this.neuralCore = new NeuralCore({ position: new THREE.Vector3(0, 15, 0) });
+    this.neuralCore = new NeuralCore({ position: new THREE.Vector3(0, 25, 0) });
     this.scene.add(this.neuralCore);
     this.arteryManager = new ArteryManager({ scene: this.scene });
 
@@ -283,6 +291,31 @@ export class SceneManager {
 
     this.clearCity();
     this.blockOffsets.clear();
+
+    // Center the layout on origin (0, 0)
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const p of projects) {
+      if (!p.position) continue;
+      minX = Math.min(minX, p.position.x);
+      maxX = Math.max(maxX, p.position.x);
+      minZ = Math.min(minZ, p.position.z);
+      maxZ = Math.max(maxZ, p.position.z);
+    }
+    if (minX !== Infinity) {
+      const offsetX = (minX + maxX) / 2;
+      const offsetZ = (minZ + maxZ) / 2;
+      for (const p of projects) {
+        if (p.position) {
+          p.position.x -= offsetX;
+          p.position.z -= offsetZ;
+        }
+      }
+      for (const district of districts.values()) {
+        district.bounds.x -= offsetX;
+        district.bounds.z -= offsetZ;
+      }
+    }
+
     this.addGround(projects);
     this.addBlockOutlines(districts);
 
@@ -296,6 +329,7 @@ export class SceneManager {
       }
     }
 
+    this.centerSingleBuildings();
     this.createSmartLabels(projects);
 
     // Apply saved positions after initial layout
@@ -375,16 +409,16 @@ export class SceneManager {
   private addGround(projects: ProjectData[]): void {
     if (projects.length === 0) return;
 
-    let maxX = 0, maxZ = 0;
+    let maxExtent = 0;
     for (const p of projects) {
       if (p.position) {
-        maxX = Math.max(maxX, p.position.x + 20);
-        maxZ = Math.max(maxZ, p.position.z + 20);
+        maxExtent = Math.max(maxExtent, Math.abs(p.position.x) + 20, Math.abs(p.position.z) + 20);
       }
     }
 
-    const size = Math.max(maxX, maxZ, 100);
-    const groundGeo = new THREE.PlaneGeometry(size * 2, size * 2);
+    const radius = Math.max(maxExtent, 50);
+    // Circular ground plane centered at origin
+    const groundGeo = new THREE.CircleGeometry(radius, 64);
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x0a0a14,
       roughness: 0.95,
@@ -392,22 +426,63 @@ export class SceneManager {
     });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(size / 2, -0.1, size / 2);
+    ground.position.set(0, -0.1, 0);
     ground.receiveShadow = true;
     ground.userData = { isGround: true };
     this.scene.add(ground);
 
-    // Subtle grid - cyan tint when atmosphere enabled
+    // Square grid lines clipped to circular boundary
     const gridColor = this.useAtmosphere ? 0x00ffff : 0x1a1a2e;
-    const gridSubColor = this.useAtmosphere ? 0x003333 : 0x14141e;
-    const grid = new THREE.GridHelper(size * 2, this.useAtmosphere ? size / 5 : size, gridColor, gridSubColor);
-    if (this.useAtmosphere) {
-      (grid.material as THREE.Material).transparent = true;
-      (grid.material as THREE.Material).opacity = 0.3;
+    const gridGroup = new THREE.Group();
+    gridGroup.position.set(0, 0.01, 0);
+    gridGroup.userData = { isGround: true };
+    const gridSpacing = 5;
+    const lineMat = new THREE.LineBasicMaterial({
+      color: gridColor,
+      transparent: this.useAtmosphere,
+      opacity: this.useAtmosphere ? 0.3 : 1.0,
+    });
+    // Horizontal lines (parallel to X axis, varying Z)
+    for (let z = -radius; z <= radius; z += gridSpacing) {
+      const rSq = radius * radius;
+      const zSq = z * z;
+      if (zSq >= rSq) continue;
+      const halfChord = Math.sqrt(rSq - zSq);
+      const pts = [
+        new THREE.Vector3(-halfChord, 0, z),
+        new THREE.Vector3(halfChord, 0, z),
+      ];
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      gridGroup.add(new THREE.Line(geo, lineMat.clone()));
     }
-    grid.position.set(size / 2, 0.01, size / 2);
-    grid.userData = { isGround: true };
-    this.scene.add(grid);
+    // Vertical lines (parallel to Z axis, varying X)
+    for (let x = -radius; x <= radius; x += gridSpacing) {
+      const rSq = radius * radius;
+      const xSq = x * x;
+      if (xSq >= rSq) continue;
+      const halfChord = Math.sqrt(rSq - xSq);
+      const pts = [
+        new THREE.Vector3(x, 0, -halfChord),
+        new THREE.Vector3(x, 0, halfChord),
+      ];
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      gridGroup.add(new THREE.Line(geo, lineMat.clone()));
+    }
+    // Circular border outline
+    const borderPts: THREE.Vector3[] = [];
+    const segments = 64;
+    for (let i = 0; i <= segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      borderPts.push(new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+    }
+    const borderGeo = new THREE.BufferGeometry().setFromPoints(borderPts);
+    const borderMat = new THREE.LineBasicMaterial({
+      color: gridColor,
+      transparent: this.useAtmosphere,
+      opacity: this.useAtmosphere ? 0.3 : 1.0,
+    });
+    gridGroup.add(new THREE.Line(borderGeo, borderMat));
+    this.scene.add(gridGroup);
   }
 
   private addBlockOutlines(districts: Map<string, District>): void {
@@ -446,8 +521,28 @@ export class SceneManager {
 
     const padding = 3; // Padding around buildings
 
+    // Generate a consistent color for unknown categories via string hash
+    const hashColor = (str: string): number => {
+      let h = 0;
+      for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+      const hue = ((h % 360) + 360) % 360;
+      // Convert HSL(hue, 90%, 60%) to RGB hex
+      const s = 0.9, l = 0.6;
+      const c = (1 - Math.abs(2 * l - 1)) * s;
+      const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+      const m = l - c / 2;
+      let r: number, g: number, b: number;
+      if (hue < 60) { r = c; g = x; b = 0; }
+      else if (hue < 120) { r = x; g = c; b = 0; }
+      else if (hue < 180) { r = 0; g = c; b = x; }
+      else if (hue < 240) { r = 0; g = x; b = c; }
+      else if (hue < 300) { r = x; g = 0; b = c; }
+      else { r = c; g = 0; b = x; }
+      return (Math.round((r + m) * 255) << 16) | (Math.round((g + m) * 255) << 8) | Math.round((b + m) * 255);
+    };
+
     for (const [category, bounds] of categoryBounds) {
-      const color = categoryColors[category] ?? SceneManager.hashCategoryColor(category);
+      const color = categoryColors[category] ?? hashColor(category);
       const blockObjects: THREE.Object3D[] = [];
 
       // Create planar rectangular outline on the ground
@@ -536,75 +631,88 @@ export class SceneManager {
       this.scene.add(dot);
       blockObjects.push(dot);
 
-      // Enhanced drag handle at top-right corner of outline
-      const handleSize = 1.8;
-      const handleHeight = 1.2;
-      // Position at the corner of the outline (maxX + padding, minZ - padding)
+      // Flat drag handle at top-right corner of outline
+      const handleArmLen = 2.5;
       const handleX = bounds.maxX + padding;
       const handleZ = bounds.minZ - padding;
 
-      // Main handle cube with beveled appearance
-      const handleGeo = new THREE.BoxGeometry(handleSize, handleHeight, handleSize);
+      // Flat L-bracket line on the ground
+      const bracketPts = [
+        new THREE.Vector3(handleX - handleArmLen, 0.06, handleZ),
+        new THREE.Vector3(handleX, 0.06, handleZ),
+        new THREE.Vector3(handleX, 0.06, handleZ + handleArmLen),
+      ];
+      const bracketGeo = new THREE.BufferGeometry().setFromPoints(bracketPts);
+      const bracketMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
+      const handleBracket = new THREE.Line(bracketGeo, bracketMat);
+      handleBracket.userData = { isDragHandle: true, category };
+      this.scene.add(handleBracket);
+      blockObjects.push(handleBracket);
+
+      // Small flat square at the corner for visual focus + emissive animation
+      const handleGeo = new THREE.PlaneGeometry(1.6, 1.6);
       const handleMat = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
         emissiveIntensity: 0.15,
         transparent: true,
-        opacity: 0.35,
-        roughness: 0.3,
-        metalness: 0.7,
+        opacity: 0.3,
+        roughness: 0.4,
+        metalness: 0.6,
+        side: THREE.DoubleSide,
       });
       const handle = new THREE.Mesh(handleGeo, handleMat);
-      handle.position.set(handleX, handleHeight / 2 + 0.1, handleZ);
+      handle.rotation.x = -Math.PI / 2;
+      handle.position.set(handleX, 0.07, handleZ);
       handle.userData = { isDragHandle: true, category };
       this.scene.add(handle);
       this.dragHandles.push(handle);
       blockObjects.push(handle);
 
-      // Invisible larger hitbox for easier click/hover detection
-      const hitBoxGeo = new THREE.BoxGeometry(handleSize + 3, handleHeight + 2, handleSize + 3);
+      // Invisible larger hitbox for easier click/hover detection (flat slab)
+      const hitBoxGeo = new THREE.BoxGeometry(4.5, 1.0, 4.5);
       const hitBoxMat = new THREE.MeshBasicMaterial({ visible: false });
       const hitBox = new THREE.Mesh(hitBoxGeo, hitBoxMat);
-      hitBox.position.copy(handle.position);
+      hitBox.position.set(handleX, 0.5, handleZ);
       hitBox.userData = { isDragHandle: true, category, visualHandle: handle };
       this.scene.add(hitBox);
       this.handleHitBoxes.push(hitBox);
       blockObjects.push(hitBox);
 
-      // Handle edge outline - brighter
-      const handleEdges = new THREE.EdgesGeometry(handleGeo);
-      const handleLineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.2 });
-      const handleWireframe = new THREE.LineSegments(handleEdges, handleLineMat);
-      handleWireframe.position.copy(handle.position);
-      handleWireframe.userData = { isDragHandle: true, category };
-      this.scene.add(handleWireframe);
-      blockObjects.push(handleWireframe);
-
-      // Corner accent - small diagonal lines suggesting "grab here"
-      const accentSize = handleSize * 0.4;
-      const accentPoints = [
-        // Top-right corner accent
-        new THREE.Vector3(handleSize / 2 - accentSize, handleHeight / 2 + 0.01, -handleSize / 2),
-        new THREE.Vector3(handleSize / 2, handleHeight / 2 + 0.01, -handleSize / 2),
-        new THREE.Vector3(handleSize / 2, handleHeight / 2 + 0.01, -handleSize / 2 + accentSize),
-      ];
-      const accentGeo = new THREE.BufferGeometry().setFromPoints(accentPoints);
-      const accentMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
-      const accent = new THREE.Line(accentGeo, accentMat);
-      accent.position.set(handleX, 0, handleZ);
-      accent.userData = { isDragHandle: true, category };
-      this.scene.add(accent);
-      blockObjects.push(accent);
-
-      // Store block data
+      // Store block data with named refs for recalcBlockBounds
       this.blocks.set(category, {
         category,
         bounds: { ...bounds },
         color,
         objects: blockObjects,
         handle,
+        hitBox,
+        outline,
+        fill,
+        label,
+        leaderLine,
+        dot,
+        handleBracket,
         projects: categoryProjects.get(category) || [],
       });
+    }
+  }
+
+  private centerSingleBuildings(): void {
+    for (const [category, block] of this.blocks) {
+      const catBuildings = this.buildings.filter(
+        b => b.userData.project?.category === category
+      );
+      if (catBuildings.length !== 1) continue;
+      const building = catBuildings[0];
+      const project = building.userData.project;
+      if (!project?.position || !project?.dimensions) continue;
+      const zoneCenterX = (block.bounds.minX + block.bounds.maxX) / 2;
+      const zoneCenterZ = (block.bounds.minZ + block.bounds.maxZ) / 2;
+      const deltaX = zoneCenterX - project.position.x;
+      const deltaZ = zoneCenterZ - project.position.z;
+      if (Math.abs(deltaX) < 0.1 && Math.abs(deltaZ) < 0.1) continue;
+      this.moveSingleBuilding(building, deltaX, deltaZ);
     }
   }
 
@@ -613,20 +721,9 @@ export class SceneManager {
     const { x, z } = project.position!;
     const baseColor = this.getStatusColor(project.status);
 
-    // Foundation plinth (shows stack on hover)
-    // Hex foundation for cylindrical shapes (hive, memory core, data shard); box for the rest
+    // Foundation plinth (shows stack on hover) — shape varies by category via BuildingFactory
     const foundationHeight = 0.8;
-    const padding = 0.4;
-    const hexCategories = ['obsidian-plugins', 'content', 'visualization'];
-    let foundationGeo: THREE.BufferGeometry;
-    if (hexCategories.includes(project.category)) {
-      const radius = Math.min(width, depth) / 2 + padding;
-      foundationGeo = new THREE.CylinderGeometry(radius, radius, foundationHeight, 6);
-      foundationGeo.translate(0, foundationHeight / 2, 0);
-    } else {
-      foundationGeo = new THREE.BoxGeometry(width + padding, foundationHeight, depth + padding);
-      foundationGeo.translate(0, foundationHeight / 2, 0);
-    }
+    const foundationGeo = BuildingFactory.createFoundation(project, foundationHeight);
     // Foundation base color with subtle status tint
     const foundationBaseColor = new THREE.Color(0x2a2a3a);
     const statusTint = baseColor.clone().multiplyScalar(0.15);
@@ -674,8 +771,8 @@ export class SceneManager {
     foundationWireframe.userData = { isFoundation: true, project };
     this.scene.add(foundationWireframe);
 
-    // Building shape varies by category (via GeometryFactory)
-    const geometry = this.createBuildingGeometry(project.category, width, height, depth);
+    // Building shape varies by category (via BuildingFactory)
+    const geometry = BuildingFactory.createBuilding(project);
 
     // Try shader material if enabled, fallback to standard material
     let material: THREE.Material;
@@ -802,18 +899,6 @@ export class SceneManager {
 
       this.labels.push({ project, buildingPos: buildingTop, labelPos, label });
     }
-  }
-
-  /** Deterministic neon color from category name so unknown categories are consistent */
-  private static hashCategoryColor(category: string): number {
-    let hash = 0;
-    for (let i = 0; i < category.length; i++) {
-      hash = (hash << 5) - hash + category.charCodeAt(i);
-      hash |= 0;
-    }
-    const hue = ((hash >>> 0) % 360) / 360;
-    const color = new THREE.Color().setHSL(hue, 0.9, 0.6);
-    return (Math.round(color.r * 255) << 16) | (Math.round(color.g * 255) << 8) | Math.round(color.b * 255);
   }
 
   private getStatusColor(status: string): THREE.Color {
@@ -1093,6 +1178,16 @@ export class SceneManager {
     const mat = building.material as THREE.MeshStandardMaterial;
     mat.emissiveIntensity = 1.0;
 
+    // Highlight the parent block outline + fill
+    const cat = building.userData.project?.category;
+    if (cat) {
+      const block = this.blocks.get(cat);
+      if (block) {
+        if (block.outline) (block.outline.material as THREE.LineBasicMaterial).opacity = 0.7;
+        if (block.fill) (block.fill.material as THREE.MeshBasicMaterial).opacity = 0.06;
+      }
+    }
+
     this.container.style.cursor = 'move';
 
     // Show move mode indicator
@@ -1106,6 +1201,16 @@ export class SceneManager {
     const mat = this.movingBuilding.material as THREE.MeshStandardMaterial;
     const status = this.movingBuilding.userData.project?.status;
     mat.emissiveIntensity = status === 'blocked' ? 0.3 : status === 'active' ? 0.15 : 0.05;
+
+    // Restore block outline + fill to default
+    const cat = this.movingBuilding.userData.project?.category;
+    if (cat) {
+      const block = this.blocks.get(cat);
+      if (block) {
+        if (block.outline) (block.outline.material as THREE.LineBasicMaterial).opacity = 0.25;
+        if (block.fill) (block.fill.material as THREE.MeshBasicMaterial).opacity = 0.02;
+      }
+    }
 
     this.movingBuilding = null;
     this.container.style.cursor = 'default';
@@ -1198,6 +1303,106 @@ export class SceneManager {
         labelInfo.labelPos.x += deltaX;
         labelInfo.labelPos.z += deltaZ;
       }
+    }
+
+    // Recalc block bounds after single building move
+    const cat = building.userData.project?.category;
+    if (cat) this.recalcBlockBounds(cat);
+  }
+
+  private recalcBlockBounds(category: string): void {
+    const block = this.blocks.get(category);
+    if (!block) return;
+
+    // Compute new bounds from all buildings in this category
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    let found = 0;
+    for (const b of this.buildings) {
+      const p = b.userData.project as ProjectData;
+      if (!p || p.category !== category) continue;
+      found++;
+      const pos = p.position;
+      const dim = p.dimensions;
+      if (!pos || !dim) continue;
+      const halfW = dim.width / 2;
+      const halfD = dim.depth / 2;
+      minX = Math.min(minX, pos.x - halfW);
+      maxX = Math.max(maxX, pos.x + halfW);
+      minZ = Math.min(minZ, pos.z - halfD);
+      maxZ = Math.max(maxZ, pos.z + halfD);
+    }
+    if (found === 0) return;
+
+    // Epsilon check — skip if bounds didn't change
+    const eps = 0.01;
+    const ob = block.bounds;
+    if (Math.abs(ob.minX - minX) < eps && Math.abs(ob.maxX - maxX) < eps &&
+        Math.abs(ob.minZ - minZ) < eps && Math.abs(ob.maxZ - maxZ) < eps) return;
+
+    block.bounds = { minX, maxX, minZ, maxZ };
+    const padding = 3;
+
+    // 1. Update outline vertices (5-point closed rectangle)
+    if (block.outline) {
+      const pos = block.outline.geometry.attributes.position as THREE.BufferAttribute;
+      const pts: [number, number, number][] = [
+        [minX - padding, 0.05, minZ - padding],
+        [maxX + padding, 0.05, minZ - padding],
+        [maxX + padding, 0.05, maxZ + padding],
+        [minX - padding, 0.05, maxZ + padding],
+        [minX - padding, 0.05, minZ - padding],
+      ];
+      for (let i = 0; i < pts.length; i++) {
+        pos.setXYZ(i, pts[i][0], pts[i][1], pts[i][2]);
+      }
+      pos.needsUpdate = true;
+    }
+
+    // 2. Dispose + recreate fill geometry
+    if (block.fill) {
+      block.fill.geometry.dispose();
+      block.fill.geometry = new THREE.PlaneGeometry(
+        maxX - minX + padding * 2, maxZ - minZ + padding * 2
+      );
+      block.fill.position.set((minX + maxX) / 2, 0.03, (minZ + maxZ) / 2);
+    }
+
+    // 3. Reposition label, leader line, dot to new left edge
+    const labelX = minX - padding - 6;
+    const labelZ = (minZ + maxZ) / 2;
+    const labelY = 1.5;
+    if (block.label) {
+      block.label.position.set(labelX, labelY, labelZ);
+    }
+    if (block.leaderLine) {
+      const lp = block.leaderLine.geometry.attributes.position as THREE.BufferAttribute;
+      const horizontalEnd = labelX + 3;
+      lp.setXYZ(0, labelX + 1.5, labelY - 0.5, labelZ);
+      lp.setXYZ(1, horizontalEnd, labelY - 0.5, labelZ);
+      lp.setXYZ(2, minX - padding, 0.1, labelZ);
+      lp.needsUpdate = true;
+    }
+    if (block.dot) {
+      block.dot.position.set(minX - padding, 0.08, labelZ);
+    }
+
+    // 4. Reposition handle cluster to new top-right corner
+    const handleX = maxX + padding;
+    const handleZ = minZ - padding;
+    if (block.handle) {
+      block.handle.position.set(handleX, 0.07, handleZ);
+    }
+    if (block.hitBox) {
+      block.hitBox.position.set(handleX, 0.5, handleZ);
+    }
+    // Update L-bracket vertices
+    if (block.handleBracket) {
+      const armLen = 2.5;
+      const bp = block.handleBracket.geometry.attributes.position as THREE.BufferAttribute;
+      bp.setXYZ(0, handleX - armLen, 0.06, handleZ);
+      bp.setXYZ(1, handleX, 0.06, handleZ);
+      bp.setXYZ(2, handleX, 0.06, handleZ + armLen);
+      bp.needsUpdate = true;
     }
   }
 
@@ -1541,8 +1746,6 @@ export class SceneManager {
       }
     });
 
-    this.controls.update();
-
     // Clamp pan target so camera can't drift into the void
     const t = this.controls.target;
     const b = this.cityBounds;
@@ -1554,6 +1757,8 @@ export class SceneManager {
       t.x = b.centerX + dx * scale;
       t.z = b.centerZ + dz * scale;
     }
+
+    this.controls.update();
 
     // Render with composer (bloom) or direct renderer
     if (this.composer) {
@@ -1632,13 +1837,12 @@ export class SceneManager {
   getFocusedProject(): ProjectData | null { return this.focusedProject; }
   setFocusedProject(project: ProjectData | null): void { this.focusedProject = project; }
 
-  /** Position the Neural Core at the center of the city */
-  private positionNeuralCore(projects: ProjectData[]): void {
-    if (!this.neuralCore || projects.length === 0) return;
+  /** Smoothly animate camera back to default overhead position */
+  animateCameraToDefault(duration = 1000): void {
+    const projects = this.buildings.map(b => b.userData.project).filter(Boolean) as ProjectData[];
+    if (projects.length === 0) return;
 
-    let minX = Infinity, maxX = -Infinity;
-    let minZ = Infinity, maxZ = -Infinity;
-
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const p of projects) {
       if (!p.position) continue;
       minX = Math.min(minX, p.position.x);
@@ -1646,12 +1850,34 @@ export class SceneManager {
       minZ = Math.min(minZ, p.position.z);
       maxZ = Math.max(maxZ, p.position.z);
     }
-
     const centerX = (minX + maxX) / 2;
     const centerZ = (minZ + maxZ) / 2;
+    const sizeX = maxX - minX + 30;
+    const sizeZ = maxZ - minZ + 30;
+    const maxSize = Math.max(sizeX, sizeZ, 50);
+    const distance = maxSize * 1.1;
+    const targetPos = new THREE.Vector3(centerX, distance * 0.6, centerZ + distance * 0.7);
+    const targetLookAt = new THREE.Vector3(centerX, 0, centerZ);
+    const startPos = this.camera.position.clone();
+    const startTarget = this.controls.target.clone();
+    const startTime = performance.now();
+    const animate = () => {
+      const elapsed = performance.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      this.camera.position.lerpVectors(startPos, targetPos, ease);
+      this.controls.target.lerpVectors(startTarget, targetLookAt, ease);
+      this.controls.update();
+      if (t < 1) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }
 
-    // Position core at city center, elevated above buildings
-    this.neuralCore.position.set(centerX, 25, centerZ);
+  /** Position the Neural Core at the center of the city (origin) */
+  private positionNeuralCore(projects: ProjectData[]): void {
+    if (!this.neuralCore || projects.length === 0) return;
+
+    this.neuralCore.position.set(0, 25, 0);
 
     // Keep hit sphere in sync
     if (this.coreHitSphere) {
@@ -1787,6 +2013,22 @@ export class SceneManager {
     const building = this.buildingPathMap.get(projectPath);
     if (!building) return;
 
+    // === Compute time-based decay factor (0.0 = fresh, 1.0 = abandoned) ===
+    let decayFactor = 0.0;
+    if (weather.lastCommitDate > 0) {
+      const daysSince = (Date.now() - weather.lastCommitDate) / (1000 * 60 * 60 * 24);
+      if (daysSince <= 5) {
+        decayFactor = 0.0;
+      } else if (daysSince <= 14) {
+        decayFactor = ((daysSince - 5) / 9) * 0.4;
+      } else if (daysSince <= 30) {
+        decayFactor = 0.4 + ((daysSince - 14) / 16) * 0.45;
+      } else {
+        decayFactor = Math.min(0.85 + ((daysSince - 30) / 60) * 0.15, 1.0);
+      }
+    }
+    building.userData.decayFactor = decayFactor;
+
     const shaderMat = this.shaderMaterials.get(building);
 
     if (shaderMat) {
@@ -1794,15 +2036,33 @@ export class SceneManager {
       // Merge conflicts → glitch
       if (weather.hasMergeConflicts) {
         shaderMat.uniforms.uGlitch.value = 0.8;
+      } else {
+        shaderMat.uniforms.uGlitch.value = 0.0;
       }
 
       // Stale branches → decay  (scale: 0 branches=0, 1-2=0.3, 3-5=0.6, 6+=0.9)
+      let decayFromStale = 0.0;
       if (weather.staleBranchCount > 0) {
-        const decayFromStale = weather.staleBranchCount <= 2 ? 0.3
+        decayFromStale = weather.staleBranchCount <= 2 ? 0.3
           : weather.staleBranchCount <= 5 ? 0.6 : 0.9;
-        // Take the max of time-based decay and stale-based decay
-        const currentDecay = shaderMat.uniforms.uDecay.value as number;
-        shaderMat.uniforms.uDecay.value = Math.max(currentDecay, decayFromStale);
+      }
+      // Set uDecay to the max of time-based decay and stale-based decay
+      shaderMat.uniforms.uDecay.value = Math.max(decayFactor, decayFromStale);
+
+      // Modulate lit windows
+      const project = building.userData.project as ProjectData;
+      if (project) {
+        let baseLit = 0.5;
+        if ((project.totalTasks ?? 0) > 0) {
+          baseLit = (project.completedTasks || 0) / project.totalTasks!;
+        } else {
+          baseLit = project.recentActivity ? 0.6 : 0.1;
+        }
+        if (decayFactor > 0.3) {
+          shaderMat.uniforms.uLitPercent.value = baseLit * (1.0 - decayFactor * 0.8);
+        } else {
+          shaderMat.uniforms.uLitPercent.value = baseLit;
+        }
       }
     } else {
       // Standard material: modify emissive properties
