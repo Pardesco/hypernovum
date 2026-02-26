@@ -1,3 +1,6 @@
+// Version tracking — update after every meaningful change to core
+export const CORE_BUILD_VERSION = '2026-02-26-5efc807';
+
 // Types
 export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData } from './types';
 export { DEFAULT_SETTINGS } from './types';
