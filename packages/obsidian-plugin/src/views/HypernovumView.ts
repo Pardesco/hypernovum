@@ -7,7 +7,7 @@ import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonitor';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
-import { generateAgentContext, enrichAgentCommand } from '../utils/AgentContext';
+import { generateAgentContext } from '../utils/AgentContext';
 import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
@@ -61,6 +61,9 @@ export class HypernovumView extends ItemView {
 
     // Add legend overlay
     this.addLegend(container);
+
+    // Add agent switcher overlay
+    this.addAgentSwitcher(container);
 
     // Add controls hint
     this.addControlsHint(container);
@@ -179,6 +182,70 @@ export class HypernovumView extends ItemView {
       this.sceneManager.focusOnPosition(target.position);
       this.sceneManager.setFocusedProject(target);
     }
+  }
+
+  private addAgentSwitcher(container: HTMLElement): void {
+    const KNOWN_AGENTS = [
+      { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b' },
+      { id: 'gemini', name: 'Gemini CLI', command: 'gemini', icon: 'G', color: '#4d96ff' },
+      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77' },
+      { id: 'aider', name: 'Aider', command: 'aider', icon: 'A', color: '#ff6b6b' },
+    ];
+
+    const panel = document.createElement('div');
+    panel.className = 'agents-panel';
+    panel.innerHTML = `
+      <div class="agents-header">
+        <div>
+          <span class="agents-title">AGENTS</span>
+          <div class="agents-subtitle">Select an agent, click building, launch</div>
+        </div>
+      </div>
+      <div class="agents-list"></div>
+    `;
+
+    const list = panel.querySelector('.agents-list') as HTMLElement;
+    
+    const renderAgents = () => {
+      list.empty();
+      const currentCommand = this.settings.agentCommand;
+      const currentName = this.settings.agentName;
+      
+      const agentsToRender = [...KNOWN_AGENTS];
+      const isKnown = KNOWN_AGENTS.some(a => a.command === currentCommand);
+      
+      if (!isKnown && currentCommand) {
+        agentsToRender.push({
+          id: 'custom',
+          name: currentName || 'Custom Agent',
+          command: currentCommand,
+          icon: currentName ? currentName[0].toUpperCase() : '?',
+          color: '#cc5de8'
+        });
+      }
+      
+      for (const agent of agentsToRender) {
+        const item = document.createElement('div');
+        item.className = 'agents-item' + (currentCommand === agent.command ? ' active' : '');
+        item.innerHTML = `
+          <div class="agents-icon-circle" style="background: ${agent.color}">${agent.icon}</div>
+          <span class="agents-item-name">${agent.name}</span>
+        `;
+        if (currentCommand === agent.command) {
+          item.style.borderLeftColor = agent.color;
+        }
+        item.addEventListener('click', async () => {
+          this.plugin.settings.agentName = agent.name;
+          this.plugin.settings.agentCommand = agent.command;
+          await this.plugin.saveSettings();
+          renderAgents();
+        });
+        list.appendChild(item);
+      }
+    };
+    
+    renderAgents();
+    container.appendChild(panel);
   }
 
   private addLegend(container: HTMLElement): void {
@@ -497,7 +564,7 @@ export class HypernovumView extends ItemView {
 
     const result = await TerminalLauncher.launch({
       projectPath,
-      command: enrichAgentCommand(agentCommand),
+      command: agentCommand,
       projectName: project.title,
     });
 
@@ -627,7 +694,7 @@ export class HypernovumView extends ItemView {
 
     const launchResult = await TerminalLauncher.launch({
       projectPath: folderPath,
-      command: enrichAgentCommand(agentCommand),
+      command: agentCommand,
       projectName,
     });
 
