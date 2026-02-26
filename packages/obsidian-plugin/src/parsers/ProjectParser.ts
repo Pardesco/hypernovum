@@ -1,5 +1,5 @@
 import { App, TFile, TFolder } from 'obsidian';
-import type { HypervaultSettings, ProjectData } from '@hypervault/core';
+import type { HypernovumSettings, ProjectData } from '@hypernovum/core';
 
 export class ProjectParser {
   private app: App;
@@ -12,7 +12,7 @@ export class ProjectParser {
    * Parse vault files to extract project metadata.
    * Detection strategy: looks for frontmatter fields that mark a note as a project.
    */
-  async parseProjects(settings: HypervaultSettings): Promise<ProjectData[]> {
+  async parseProjects(settings: HypernovumSettings): Promise<ProjectData[]> {
     const projects: ProjectData[] = [];
     const files = this.app.vault.getMarkdownFiles();
 
@@ -28,7 +28,7 @@ export class ProjectParser {
 
   private async tryParseProject(
     file: TFile,
-    settings: HypervaultSettings,
+    settings: HypernovumSettings,
   ): Promise<ProjectData | null> {
     const cache = this.app.metadataCache.getFileCache(file);
     if (!cache?.frontmatter) return null;

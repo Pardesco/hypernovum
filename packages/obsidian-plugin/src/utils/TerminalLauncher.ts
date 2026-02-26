@@ -35,7 +35,7 @@ export class TerminalLauncher {
     const { projectPath, command = 'claude', projectName } = options;
     const platform = this.getPlatform();
 
-    console.log(`[Hypervault] Launching terminal for: ${projectPath} on ${platform}`);
+    console.log(`[Hypernovum] Launching terminal for: ${projectPath} on ${platform}`);
 
     try {
       switch (platform) {
@@ -54,7 +54,7 @@ export class TerminalLauncher {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Hypervault] Terminal launch failed:', message);
+      console.error('[Hypernovum] Terminal launch failed:', message);
       return {
         success: false,
         message,
@@ -107,7 +107,7 @@ export class TerminalLauncher {
       };
     } catch (wtError) {
       // Fallback to basic cmd
-      console.log('[Hypervault] Windows Terminal not found, using cmd.exe');
+      console.log('[Hypernovum] Windows Terminal not found, using cmd.exe');
 
       const child = spawn('cmd', [
         '/c', 'start', 'cmd', '/k',

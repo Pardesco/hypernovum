@@ -5,7 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import type { ProjectData, District, BlockPosition, HypervaultSettings, WeatherData } from '../types';
+import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
@@ -14,7 +14,7 @@ import { ArteryManager } from '../visuals/ArteryManager';
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
   onSaveLayout?: (positions: BlockPosition[]) => void;
-  settings?: HypervaultSettings;
+  settings?: HypernovumSettings;
 }
 
 interface LabelInfo {
@@ -46,13 +46,13 @@ export class SceneManager {
   private focusedProject: ProjectData | null = null;
   private hoveredMesh: THREE.Mesh | null = null;
   private tooltip: CSS2DObject | null = null;
+  private tooltipLeader: THREE.Group | null = null;
   private buildings: THREE.Mesh[] = [];
   private foundations: THREE.Mesh[] = [];
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
   private hoveredFoundation: THREE.Mesh | null = null;
-  private stackTooltip: HTMLDivElement | null = null;
 
   // Block dragging state
   private blocks: Map<string, BlockData> = new Map();
@@ -66,6 +66,7 @@ export class SceneManager {
   private hoveredHandle: THREE.Mesh | null = null;
   private gridSize = 5; // Grid snap size
   private dragAccumulator = new THREE.Vector2(0, 0); // Accumulate small movements
+  private cityBounds = { centerX: 0, centerZ: 0, radius: 50 }; // Pan boundary
 
   // Layout persistence
   private savedPositions: Map<string, { offsetX: number; offsetZ: number }> = new Map();
@@ -267,9 +268,9 @@ export class SceneManager {
       const outputPass = new OutputPass();
       this.composer.addPass(outputPass);
 
-      console.log('[Hypervault] Bloom post-processing initialized');
+      console.log('[Hypernovum] Bloom post-processing initialized');
     } catch (e) {
-      console.warn('[Hypervault] Failed to initialize bloom:', e);
+      console.warn('[Hypernovum] Failed to initialize bloom:', e);
       this.composer = null;
       this.bloomPass = null;
     }
@@ -498,7 +499,7 @@ export class SceneManager {
       const labelY = 1.5;
 
       const labelDiv = document.createElement('div');
-      labelDiv.className = 'hypervault-category-label';
+      labelDiv.className = 'hypernovum-category-label';
       labelDiv.textContent = category.toUpperCase();
       labelDiv.style.color = `#${color.toString(16).padStart(6, '0')}`;
       const label = new CSS2DObject(labelDiv);
@@ -792,7 +793,7 @@ export class SceneManager {
 
       // Create label
       const labelDiv = document.createElement('div');
-      labelDiv.className = 'hypervault-building-label';
+      labelDiv.className = 'hypernovum-building-label';
       labelDiv.textContent = project.title;
       const label = new CSS2DObject(labelDiv);
       label.position.copy(labelPos);
@@ -849,6 +850,9 @@ export class SceneManager {
     this.camera.position.set(centerX, distance * 0.6, centerZ + distance * 0.7);
     this.controls.target.set(centerX, 0, centerZ);
     this.controls.update();
+
+    // Store bounds for pan clamping
+    this.cityBounds = { centerX, centerZ, radius: maxSize * 0.75 };
   }
 
   private onMouseMove(event: MouseEvent): void {
@@ -960,17 +964,26 @@ export class SceneManager {
       this.hoveredFoundation = null;
     }
 
-    // Clear tooltips
+    // Clear tooltip + leader line
     if (this.tooltip) {
       this.scene.remove(this.tooltip);
       this.tooltip = null;
     }
-    if (this.stackTooltip) {
-      this.stackTooltip.remove();
-      this.stackTooltip = null;
+    if (this.tooltipLeader) {
+      this.tooltipLeader.traverse((child: THREE.Object3D) => {
+        const m = child as any;
+        if (m.geometry) m.geometry.dispose();
+        if (m.material) m.material.dispose();
+      });
+      this.scene.remove(this.tooltipLeader);
+      this.tooltipLeader = null;
     }
 
-    // Handle building hover (takes priority)
+    // Determine which project is hovered (building takes priority, then foundation)
+    let hoveredProject: ProjectData | null = null;
+    let tooltipPos: THREE.Vector3 | null = null;
+    let tooltipHeight = 0;
+
     if (buildingHits.length > 0) {
       const hit = buildingHits[0].object as THREE.Mesh;
       if (hit.userData.isBuilding && hit.userData.project) {
@@ -978,12 +991,11 @@ export class SceneManager {
         const mat = hit.material as THREE.MeshStandardMaterial;
         mat.emissiveIntensity = 0.6;
 
-        const project = hit.userData.project as ProjectData;
-        this.showTooltip(project, hit.position, project.dimensions!.height + 0.8);
+        hoveredProject = hit.userData.project as ProjectData;
+        tooltipPos = hit.position;
+        tooltipHeight = hoveredProject.dimensions!.height + 0.8;
       }
-    }
-    // Handle foundation hover (shows stack)
-    else if (foundationHits.length > 0) {
+    } else if (foundationHits.length > 0) {
       const hitPad = foundationHits[0].object as THREE.Mesh;
       if (hitPad.userData.isFoundation && hitPad.userData.project) {
         const visualFoundation = (hitPad.userData.visualFoundation ?? hitPad) as THREE.Mesh;
@@ -993,11 +1005,14 @@ export class SceneManager {
         mat.emissive.setHex(0x1a1a2a);
         mat.emissiveIntensity = 0.5;
 
-        const project = hitPad.userData.project as ProjectData;
-        if (project.stack && project.stack.length > 0) {
-          this.showStackTooltip(project, event);
-        }
+        hoveredProject = hitPad.userData.project as ProjectData;
+        tooltipPos = visualFoundation.position;
+        tooltipHeight = 0.8;
       }
+    }
+
+    if (hoveredProject && tooltipPos) {
+      this.showTooltip(hoveredProject, tooltipPos, tooltipHeight);
     }
   }
 
@@ -1104,14 +1119,14 @@ export class SceneManager {
     this.hideMoveModeIndicator();
 
     const div = document.createElement('div');
-    div.className = 'hypervault-move-indicator';
+    div.className = 'hypernovum-move-indicator';
     div.textContent = 'MOVE MODE - Click elsewhere to exit';
-    div.id = 'hypervault-move-indicator';
+    div.id = 'hypernovum-move-indicator';
     this.container.appendChild(div);
   }
 
   private hideMoveModeIndicator(): void {
-    const existing = document.getElementById('hypervault-move-indicator');
+    const existing = document.getElementById('hypernovum-move-indicator');
     if (existing) existing.remove();
   }
 
@@ -1263,8 +1278,9 @@ export class SceneManager {
 
   private showTooltip(project: ProjectData, position: THREE.Vector3, height: number): void {
     const div = document.createElement('div');
-    div.className = 'hypervault-tooltip';
-    div.innerHTML = `
+    div.className = 'hypernovum-tooltip';
+
+    let html = `
       <strong>${this.escapeHtml(project.title)}</strong>
       <div class="tooltip-row"><span>Status:</span> <span class="status-${project.status}">${project.status}</span></div>
       <div class="tooltip-row"><span>Priority:</span> ${project.priority}</div>
@@ -1273,32 +1289,69 @@ export class SceneManager {
       <div class="tooltip-row"><span>Files:</span> ${project.noteCount}</div>
     `;
 
+    if (project.stack && project.stack.length > 0) {
+      html += `
+        <div class="tooltip-stack-section">
+          <div class="tooltip-stack-header">TECH STACK</div>
+          <div class="tooltip-stack-list">
+            ${project.stack.map(tech => `<span class="tooltip-stack-item">${this.escapeHtml(tech)}</span>`).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    div.innerHTML = html;
+
+    // Determine which side of the screen has more space for the tooltip
+    const buildingCentroid = new THREE.Vector3(position.x, height / 2, position.z);
+    const screenPos = buildingCentroid.clone().project(this.camera);
+    // screenPos.x: -1 (left edge) to +1 (right edge)
+    const buildingOnLeft = screenPos.x < 0;
+
+    // Offset tooltip to the side with more space (in world-space X)
+    const offsetX = buildingOnLeft ? 8 : -8;
+    const tooltipY = height + 2;
+    const tooltipX = position.x + offsetX;
+    const tooltipZ = position.z;
+
     this.tooltip = new CSS2DObject(div);
-    this.tooltip.position.set(position.x, height + 3, position.z);
+    this.tooltip.position.set(tooltipX, tooltipY, tooltipZ);
     this.scene.add(this.tooltip);
-  }
 
-  private showStackTooltip(project: ProjectData, event: MouseEvent): void {
-    if (!project.stack || project.stack.length === 0) return;
+    // Leader line: horizontal stub from tooltip, then diagonal to building centroid
+    const leaderGroup = new THREE.Group();
+    const stubEnd = tooltipX + (buildingOnLeft ? -2 : 2); // horizontal stub toward the building
+    const targetY = height * 0.5;  // aim at building centroid height
 
-    const div = document.createElement('div');
-    div.className = 'hypervault-stack-tooltip';
-    div.innerHTML = `
-      <div class="stack-header">TECH STACK</div>
-      <div class="stack-list">
-        ${project.stack.map(tech => `<span class="stack-item">${this.escapeHtml(tech)}</span>`).join('')}
-      </div>
-    `;
+    const leaderPoints = [
+      new THREE.Vector3(tooltipX, tooltipY - 0.5, tooltipZ),          // start near tooltip
+      new THREE.Vector3(stubEnd, tooltipY - 0.5, tooltipZ),           // end of horizontal stub
+      new THREE.Vector3(position.x, targetY, position.z),             // building centroid
+    ];
+    const leaderGeo = new THREE.BufferGeometry().setFromPoints(leaderPoints);
+    const leaderMat = new THREE.LineBasicMaterial({
+      color: 0x8899bb,
+      transparent: true,
+      opacity: 0.35,
+    });
+    const leaderLine = new THREE.Line(leaderGeo, leaderMat);
+    leaderGroup.add(leaderLine);
 
-    // Position at cursor (top-left corner aligned with cursor)
-    div.style.position = 'absolute';
-    div.style.left = `${event.clientX}px`;
-    div.style.top = `${event.clientY}px`;
-    div.style.zIndex = '1000';
-    div.style.pointerEvents = 'none';
+    // Small dot at the building end
+    const dotGeo = new THREE.CircleGeometry(0.25, 12);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: 0x8899bb,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.4,
+    });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.set(position.x, targetY + 0.05, position.z);
+    leaderGroup.add(dot);
 
-    document.body.appendChild(div);
-    this.stackTooltip = div;
+    this.tooltipLeader = leaderGroup;
+    this.scene.add(leaderGroup);
   }
 
   private escapeHtml(str: string): string {
@@ -1490,6 +1543,18 @@ export class SceneManager {
 
     this.controls.update();
 
+    // Clamp pan target so camera can't drift into the void
+    const t = this.controls.target;
+    const b = this.cityBounds;
+    const dx = t.x - b.centerX;
+    const dz = t.z - b.centerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > b.radius) {
+      const scale = b.radius / dist;
+      t.x = b.centerX + dx * scale;
+      t.z = b.centerZ + dz * scale;
+    }
+
     // Render with composer (bloom) or direct renderer
     if (this.composer) {
       this.composer.render();
@@ -1626,7 +1691,7 @@ export class SceneManager {
     // Also trigger the data flow
     this.triggerFlow(projectPath);
 
-    console.log('[Hypervault] Launch effect triggered for:', projectPath);
+    console.log('[Hypernovum] Launch effect triggered for:', projectPath);
   }
 
   /** Start continuous streaming to a project (for Claude Code activity) */
@@ -1635,14 +1700,14 @@ export class SceneManager {
 
     const building = this.buildingPathMap.get(projectPath);
     if (!building) {
-      console.log('[Hypervault] No building found for path:', projectPath);
+      console.log('[Hypernovum] No building found for path:', projectPath);
       return;
     }
 
     const project = building.userData.project as ProjectData;
     if (!project || !project.dimensions) return;
 
-    console.log('[Hypervault] Starting stream to:', project.title);
+    console.log('[Hypernovum] Starting stream to:', project.title);
 
     this.arteryManager.startStream(
       this.neuralCore,
@@ -1656,7 +1721,7 @@ export class SceneManager {
   stopStreaming(): void {
     if (!this.arteryManager) return;
 
-    console.log('[Hypervault] Stopping stream');
+    console.log('[Hypernovum] Stopping stream');
     this.arteryManager.stopStream();
   }
 

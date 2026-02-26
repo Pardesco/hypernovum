@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Hypervault Heartbeat Script
+ * Hypernovum Heartbeat Script
  *
- * Called by Claude Code hooks to signal activity to Hypervault.
- * Writes status to .hypervault-status.json in the specified vault.
+ * Called by Claude Code hooks to signal activity to Hypernovum.
+ * Writes status to .hypernovum-status.json in the specified vault.
  *
  * Usage:
  *   node heartbeat.js --vault="/path/to/vault" --project="project-name" --action="editing file.ts"
@@ -38,14 +38,14 @@ for (const arg of args) {
 }
 
 // Get vault path from args or environment
-const vaultPath = params.vault || process.env.HYPERVAULT_PATH || process.env.OBSIDIAN_VAULT;
+const vaultPath = params.vault || process.env.HYPERNOVUM_PATH || process.env.OBSIDIAN_VAULT;
 
 if (!vaultPath) {
-  console.error('Error: No vault path specified. Use --vault="/path/to/vault" or set HYPERVAULT_PATH environment variable.');
+  console.error('Error: No vault path specified. Use --vault="/path/to/vault" or set HYPERNOVUM_PATH environment variable.');
   process.exit(1);
 }
 
-const statusFile = path.join(vaultPath, '.hypervault-status.json');
+const statusFile = path.join(vaultPath, '.hypernovum-status.json');
 
 // Handle stop command
 if (params.stop) {
@@ -58,7 +58,7 @@ if (params.stop) {
   };
 
   fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
-  console.log('Hypervault: Activity stopped');
+  console.log('Hypernovum: Activity stopped');
   process.exit(0);
 }
 
@@ -75,8 +75,8 @@ const status = {
 try {
   fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
   // Silent success for hook usage - uncomment for debugging:
-  // console.log(`Hypervault: Ping sent for ${status.project}`);
+  // console.log(`Hypernovum: Ping sent for ${status.project}`);
 } catch (err) {
-  console.error('Hypervault heartbeat error:', err.message);
+  console.error('Hypernovum heartbeat error:', err.message);
   process.exit(1);
 }

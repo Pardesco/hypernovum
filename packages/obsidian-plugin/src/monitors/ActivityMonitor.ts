@@ -20,7 +20,7 @@ export interface ActivityCallbacks {
 
 /**
  * Monitors Claude Code activity via heartbeat status file.
- * Watches .hypervault-status.json in vault root for real-time updates.
+ * Watches .hypernovum-status.json in vault root for real-time updates.
  */
 export class ActivityMonitor {
   private app: App;
@@ -30,7 +30,7 @@ export class ActivityMonitor {
   private pollTimer: number | null = null;
   private lastStatus: ActivityStatus | null = null;
   private isActive = false;
-  private statusFilePath = '.hypervault-status.json';
+  private statusFilePath = '.hypernovum-status.json';
 
   constructor(
     app: App,
@@ -51,7 +51,7 @@ export class ActivityMonitor {
     if (this.pollTimer !== null) return;
 
     this.pollTimer = window.setInterval(() => this.poll(), this.pollInterval);
-    console.log('[Hypervault] Activity monitor started');
+    console.log('[Hypernovum] Activity monitor started');
 
     // Initial poll
     this.poll();
@@ -63,7 +63,7 @@ export class ActivityMonitor {
       window.clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
-    console.log('[Hypervault] Activity monitor stopped');
+    console.log('[Hypernovum] Activity monitor stopped');
   }
 
   /** Check current activity status */

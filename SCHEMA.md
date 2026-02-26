@@ -1,6 +1,6 @@
-# Hypervault Frontmatter Schema
+# Hypernovum Frontmatter Schema
 
-Hypervault reads YAML frontmatter from Obsidian vault notes to generate a 3D code city. Each note that matches the project detection rules becomes a building.
+Hypernovum reads YAML frontmatter from Obsidian vault notes to generate a 3D code city. Each note that matches the project detection rules becomes a building.
 
 This schema is designed to be populated **manually by humans** or **automatically by AI tools** (e.g., Claude Code scanning project directories).
 
@@ -95,8 +95,6 @@ noteCount: 12
 
 ## Example: Task-Based Progress
 
-When `tasks` and `tasks_done` are provided, building windows fill from the bottom to visualize progress. If omitted, checkboxes (`- [x]` / `- [ ]`) in the note body are counted automatically.
-
 ```yaml
 ---
 tags: [project]
@@ -116,7 +114,7 @@ When an AI tool (like Claude Code) scans a project directory, it should create o
 ```yaml
 ---
 type: project
-title: hypervault
+title: hypernovum
 status: active
 priority: high
 stage: active
@@ -125,10 +123,10 @@ scope: 30
 health: 85
 noteCount: 28
 stack: [TypeScript, Three.js, Zustand, esbuild]
-projectDir: C:\Users\Randall\Documents\hypervault
+projectDir: C:\Users\Randall\Documents\hypernovum
 ---
 
-# hypervault
+# hypernovum
 
 Obsidian plugin — 3D Code City dashboard for PKM.
 
@@ -140,15 +138,15 @@ Obsidian plugin — 3D Code City dashboard for PKM.
 
 ## AI Integration Pattern
 
-Hypervault has **no built-in AI**. Instead, AI tools operate externally:
+Hypernovum has **no built-in AI**. Instead, AI tools operate externally:
 
-1. User asks their AI assistant: *"Scan my projects and set up Hypervault"*
+1. User asks their AI assistant: *"Scan my projects and set up Hypernovum"*
 2. AI reads this schema (SCHEMA.md) to learn the frontmatter format
 3. AI scans the user's project directories (analyzing code, git history, READMEs)
 4. AI creates/updates notes in the user's Obsidian vault with the correct frontmatter
-5. Hypervault reads the frontmatter and renders the city
+5. Hypernovum reads the frontmatter and renders the city
 
-This keeps the plugin simple and avoids API key configuration. Any AI tool that can read files and write markdown can integrate with Hypervault.
+This keeps the plugin simple and avoids API key configuration. Any AI tool that can read files and write markdown can integrate with Hypernovum.
 
 ### Critical: Always Set `projectDir`
 

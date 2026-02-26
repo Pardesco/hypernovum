@@ -55,10 +55,10 @@ export class BuildingShader {
       testGeom.dispose();
       testMaterial.dispose();
 
-      console.log('[Hypervault] Shader compilation successful');
+      console.log('[Hypernovum] Shader compilation successful');
       return true;
     } catch (e) {
-      console.warn('[Hypervault] Shader compilation failed, using fallback materials:', e);
+      console.warn('[Hypernovum] Shader compilation failed, using fallback materials:', e);
       this.compilationFailed = true;
       return false;
     }
@@ -98,7 +98,7 @@ export class BuildingShader {
         transparent: true,
       });
     } catch (e) {
-      console.warn('[Hypervault] Failed to create shader material:', e);
+      console.warn('[Hypernovum] Failed to create shader material:', e);
       return null;
     }
   }

@@ -1,18 +1,18 @@
 import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting } from 'obsidian';
 import { existsSync } from 'fs';
 import * as path from 'path';
-import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypervault/core';
-import type { ProjectData, HypervaultSettings, BlockPosition, RaycastHit } from '@hypervault/core';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypernovum/core';
+import type { ProjectData, HypernovumSettings, BlockPosition, RaycastHit } from '@hypernovum/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonitor';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
-import type HypervaultPlugin from '../main';
+import type HypernovumPlugin from '../main';
 
-export const VIEW_TYPE = 'hypervault-view';
+export const VIEW_TYPE = 'hypernovum-view';
 
-export class HypervaultView extends ItemView {
-  private plugin: HypervaultPlugin;
+export class HypernovumView extends ItemView {
+  private plugin: HypernovumPlugin;
   private sceneManager: SceneManager | null = null;
   private parser: ProjectParser;
   private binPacker: BinPacker;
@@ -23,14 +23,14 @@ export class HypervaultView extends ItemView {
   private activityIndicator: HTMLElement | null = null;
   private projects: ProjectData[] = [];
 
-  constructor(leaf: WorkspaceLeaf, app: App, plugin: HypervaultPlugin) {
+  constructor(leaf: WorkspaceLeaf, app: App, plugin: HypernovumPlugin) {
     super(leaf);
     this.plugin = plugin;
     this.parser = new ProjectParser(app);
     this.binPacker = new BinPacker();
   }
 
-  get settings(): HypervaultSettings {
+  get settings(): HypernovumSettings {
     return this.plugin.settings;
   }
 
@@ -39,7 +39,7 @@ export class HypervaultView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Hypervault';
+    return 'Hypernovum';
   }
 
   getIcon(): string {
@@ -49,7 +49,7 @@ export class HypervaultView extends ItemView {
   async onOpen(): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
-    container.addClass('hypervault-container');
+    container.addClass('hypernovum-container');
 
     // Initialize 3D scene with save callback and settings
     this.sceneManager = new SceneManager(container, {
@@ -123,7 +123,7 @@ export class HypervaultView extends ItemView {
       onActivityUpdate: (status) => this.onClaudeActivityUpdate(status),
       onActivityStop: () => this.onClaudeActivityStop(),
       onProjectChange: (newProject, oldProject) => {
-        console.log('[Hypervault] Project changed:', oldProject, '->', newProject);
+        console.log('[Hypernovum] Project changed:', oldProject, '->', newProject);
       },
     });
     this.activityMonitor.start();
@@ -182,50 +182,50 @@ export class HypervaultView extends ItemView {
 
   private addLegend(container: HTMLElement): void {
     const legend = document.createElement('div');
-    legend.className = 'hypervault-legend';
+    legend.className = 'hypernovum-legend';
     legend.innerHTML = `
-      <div class="hypervault-legend-section">
+      <div class="hypernovum-legend-section">
         <h4>Status (Color)</h4>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-color active"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-color active"></div>
           <span>Active</span>
         </div>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-color blocked"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-color blocked"></div>
           <span>Blocked</span>
         </div>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-color paused"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-color paused"></div>
           <span>Paused</span>
         </div>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-color complete"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-color complete"></div>
           <span>Complete</span>
         </div>
       </div>
-      <div class="hypervault-legend-section">
+      <div class="hypernovum-legend-section">
         <h4>Priority (Height)</h4>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-height">
-            <div class="hypervault-legend-bar" style="height: 16px;"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-height">
+            <div class="hypernovum-legend-bar" style="height: 16px;"></div>
           </div>
           <span>Critical</span>
         </div>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-height">
-            <div class="hypervault-legend-bar" style="height: 10px;"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-height">
+            <div class="hypernovum-legend-bar" style="height: 10px;"></div>
           </div>
           <span>High</span>
         </div>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-height">
-            <div class="hypervault-legend-bar" style="height: 6px;"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-height">
+            <div class="hypernovum-legend-bar" style="height: 6px;"></div>
           </div>
           <span>Medium</span>
         </div>
-        <div class="hypervault-legend-item">
-          <div class="hypervault-legend-height">
-            <div class="hypervault-legend-bar" style="height: 3px;"></div>
+        <div class="hypernovum-legend-item">
+          <div class="hypernovum-legend-height">
+            <div class="hypernovum-legend-bar" style="height: 3px;"></div>
           </div>
           <span>Low</span>
         </div>
@@ -236,7 +236,7 @@ export class HypervaultView extends ItemView {
 
   private addControlsHint(container: HTMLElement): void {
     const controls = document.createElement('div');
-    controls.className = 'hypervault-controls';
+    controls.className = 'hypernovum-controls';
     controls.innerHTML = `
       <kbd>Click</kbd> Open note<br>
       <kbd>Right-drag</kbd> Pan<br>
@@ -247,7 +247,7 @@ export class HypervaultView extends ItemView {
 
   private addSaveButton(container: HTMLElement): void {
     const saveBtn = document.createElement('button');
-    saveBtn.className = 'hypervault-save-btn';
+    saveBtn.className = 'hypernovum-save-btn';
     saveBtn.textContent = 'Save Layout';
     saveBtn.addEventListener('click', () => {
       if (this.sceneManager) {
@@ -267,7 +267,7 @@ export class HypervaultView extends ItemView {
   private triggerRandomFlow(): void {
     if (this.projects.length === 0 || !this.sceneManager) return;
     const randomProject = this.projects[Math.floor(Math.random() * this.projects.length)];
-    console.log('[Hypervault] Debug flow triggered for:', randomProject.title);
+    console.log('[Hypernovum] Debug flow triggered for:', randomProject.title);
     this.sceneManager.triggerFlow(randomProject.path);
   }
 
@@ -292,7 +292,7 @@ export class HypervaultView extends ItemView {
   /** Add activity indicator overlay */
   private addActivityIndicator(container: HTMLElement): void {
     const indicator = document.createElement('div');
-    indicator.className = 'hypervault-activity-indicator';
+    indicator.className = 'hypernovum-activity-indicator';
     indicator.innerHTML = `
       <div class="activity-status">
         <span class="activity-dot"></span>
@@ -308,7 +308,7 @@ export class HypervaultView extends ItemView {
 
   /** Handle Claude Code activity start */
   private onClaudeActivityStart(status: ActivityStatus): void {
-    console.log('[Hypervault] Claude activity started:', status);
+    console.log('[Hypernovum] Claude activity started:', status);
 
     this.updateActivityIndicator(status, true);
 
@@ -319,7 +319,7 @@ export class HypervaultView extends ItemView {
     if (project) {
       this.sceneManager.startStreaming(project.path);
     } else {
-      console.log('[Hypervault] No matching project found for:', status.project);
+      console.log('[Hypernovum] No matching project found for:', status.project);
     }
   }
 
@@ -341,7 +341,7 @@ export class HypervaultView extends ItemView {
 
   /** Handle Claude Code activity stop */
   private onClaudeActivityStop(): void {
-    console.log('[Hypervault] Claude activity stopped');
+    console.log('[Hypernovum] Claude activity stopped');
 
     this.updateActivityIndicator(null, false);
 
@@ -503,7 +503,7 @@ export class HypervaultView extends ItemView {
   /** Add neon HUD title at top center */
   private addHudTitle(container: HTMLElement): void {
     const title = document.createElement('div');
-    title.className = 'hypervault-hud-title';
+    title.className = 'hypernovum-hud-title';
     Object.assign(title.style, {
       position: 'absolute',
       top: '14px',
@@ -527,13 +527,13 @@ export class HypervaultView extends ItemView {
     const cursor = document.createElement('span');
     cursor.textContent = '\u2588';
     cursor.style.animation = 'cursor-blink 1.06s step-end infinite';
-    title.textContent = 'HYPERVAULT';
+    title.textContent = 'HYPERNOVUM';
     title.appendChild(cursor);
 
     // Inject cursor blink keyframes if not already present
-    if (!document.getElementById('hypervault-cursor-anim')) {
+    if (!document.getElementById('hypernovum-cursor-anim')) {
       const style = document.createElement('style');
-      style.id = 'hypervault-cursor-anim';
+      style.id = 'hypernovum-cursor-anim';
       style.textContent = '@keyframes cursor-blink { 0%,50%{opacity:1} 50.01%,100%{opacity:0} }';
       document.head.appendChild(style);
     }

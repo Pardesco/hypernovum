@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hypervault — The Spatial Command Center for AI Agents</title>
+  <title>Hypernovum — The Spatial Command Center for AI Agents</title>
   <meta name="description" content="Visualize your projects as a living cyberpunk city. Click buildings to open code. Right-click to deploy AI.">
   <meta name="theme-color" content="#0a0a14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -55,6 +55,202 @@
     @keyframes gridShift {
       0% { background-position: 0 0; }
       100% { background-position: 60px 60px; }
+    }
+
+    /* ── Layout ────────────────────────────────────── */
+    section {
+      position: relative;
+      z-index: 1;
+      padding: 100px 24px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    /* ── Typography ────────────────────────────────── */
+    h1, h2, h3 {
+      font-family: var(--mono);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    /* ── Scroll Animations ─────────────────────────── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Buttons ───────────────────────────────────── */
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      text-decoration: none;
+      border-radius: 6px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--purple);
+      color: #fff;
+      border: 1px solid var(--purple);
+      box-shadow: 0 0 20px var(--purple-glow);
+    }
+
+    .btn-primary:hover {
+      background: #c080ff;
+      box-shadow: 0 0 30px var(--purple-glow), 0 0 60px rgba(179, 102, 255, 0.2);
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--cyan);
+      border: 1px solid var(--cyan);
+    }
+
+    .btn-outline:hover {
+      background: var(--cyan-dim);
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 1 — HERO
+       ═══════════════════════════════════════════════ */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding-top: 60px;
+    }
+
+    .hero-title {
+      font-size: clamp(3rem, 8vw, 6rem);
+      color: var(--purple);
+      text-shadow:
+        0 0 10px var(--purple-glow),
+        0 0 40px rgba(179, 102, 255, 0.3),
+        0 0 80px rgba(179, 102, 255, 0.15);
+      margin-bottom: 8px;
+      position: relative;
+      display: inline-block;
+    }
+
+    .cursor-blink {
+      display: inline-block;
+      width: 0.5ch;
+      height: 1em;
+      background: var(--purple);
+      vertical-align: text-bottom;
+      margin-left: 4px;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    .hero-tagline {
+      font-family: var(--mono);
+      font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+      color: var(--cyan);
+      margin-bottom: 16px;
+      text-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+    }
+
+    .hero-sub {
+      font-size: 1.1rem;
+      color: var(--text-dim);
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ═══════════════════════════════════════════════
+       SECTION 2 — PROBLEM STATEMENT
+       ═══════════════════════════════════════════════ */
+    .problem { background: linear-gradient(180deg, transparent, rgba(179, 102, 255, 0.02), transparent); }
+
+    .problem h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+      color: var(--text);
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .problem-text {
+      text-align: center;
+      color: var(--text-dim);
+      max-width: 700px;
+      margin: 0 auto 48px;
+      font-size: 1.05rem;
+    }
+
+    .gap-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      max-width: 750px;
+      margin: 0 auto;
+    }
+
+    .gap-card {
+      text-align: center;
+      padding: 32px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-card);
+    }
+
+    .gap-card .icon {
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+
+    .gap-card h3 {
+      font-size: 1.1rem;
+      margin-bottom: 4px;
+    }
+
+    .gap-card.missing {
+      border-color: rgba(255, 80, 80, 0.3);
+    }
+
+    .gap-card.missing h3 { color: #ff6666; }
+
+    .gap-card.found {
+      border-color: var(--purple);
+      box-shadow: 0 0 20px var(--purple-dim);
+    }
+
+    .gap-card.found h3 { color: var(--purple); }
+
+    .gap-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--purple);
+      font-family: var(--mono);
+      font-size: 1.4rem;
+      margin: 24px 0;
+      text-shadow: 0 0 10px var(--purple-glow);
     }
 
     /* ── Layout ────────────────────────────────────── */
@@ -525,11 +721,11 @@
        ════════════════════════════════════════════════ -->
   <section class="hero">
     <div class="container">
-      <h1 class="hero-title">HYPERVAULT<span class="cursor-blink"></span></h1>
+      <h1 class="hero-title">HYPERNOVUM<span class="cursor-blink"></span></h1>
       <p class="hero-tagline">The Spatial Command Center for AI Agents</p>
       <p class="hero-sub">Visualize your projects as a living cyberpunk city. Click buildings to open code. Right-click to deploy AI.</p>
       <div class="hero-buttons">
-        <a href="https://github.com/Pardesco/hypervault" class="btn btn-primary" target="_blank" rel="noopener">View on GitHub</a>
+        <a href="https://github.com/Pardesco/hypernovum" class="btn btn-primary" target="_blank" rel="noopener">View on GitHub</a>
         <a href="#screenshot" class="btn btn-outline">Watch Demo</a>
       </div>
     </div>
@@ -559,7 +755,7 @@
           <p style="color: #ff6666; font-family: var(--mono); font-size: 0.85rem;">Missing &cross;</p>
         </div>
       </div>
-      <div class="gap-arrow">&darr; Hypervault fills the gap &darr;</div>
+      <div class="gap-arrow">&darr; Hypernovum fills the gap &darr;</div>
     </div>
   </section>
 
@@ -569,7 +765,7 @@
   <section class="screenshot" id="screenshot">
     <div class="container reveal">
       <div class="screenshot-frame">
-        <img src="assets/hero.png" alt="Hypervault city view — projects visualized as glowing cyberpunk buildings" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <img src="assets/hero.png" alt="Hypernovum city view — projects visualized as glowing cyberpunk buildings" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
         <div class="screenshot-placeholder" style="display:none;">[ Drop hero.png into site/assets/ ]</div>
       </div>
       <p class="screenshot-caption">Every building is a project. Every pulse is a file change. Click to navigate. Right-click to deploy.</p>
@@ -623,7 +819,7 @@
   <section class="positioning">
     <div class="container">
       <h2 class="reveal">Not Another Dashboard</h2>
-      <p class="positioning-sub reveal">Hypervault isn't a report. It's an interface.</p>
+      <p class="positioning-sub reveal">Hypernovum isn't a report. It's an interface.</p>
       <div class="compare-grid">
         <div class="compare-card dimmed reveal">
           <div class="label">Dashboards</div>
@@ -637,7 +833,7 @@
         </div>
         <div class="compare-card highlight reveal">
           <div class="label">Spatial Interface</div>
-          <h3>Hypervault</h3>
+          <h3>Hypernovum</h3>
           <p>Active 3D interface. You aren't watching the code &mdash; you're commanding it.</p>
         </div>
       </div>
@@ -650,15 +846,15 @@
   <section class="opensource">
     <div class="container reveal">
       <h2>Free. Open Source.<br>Built for the Vibe.</h2>
-      <p class="opensource-text">Hypervault is open source and always will be. We're not building a product &mdash; we're building a standard for how humans interact with AI-augmented codebases.</p>
+      <p class="opensource-text">Hypernovum is open source and always will be. We're not building a product &mdash; we're building a standard for how humans interact with AI-augmented codebases.</p>
       <p class="opensource-key">We don't charge for the tool. We're building a standard.</p>
       <div class="code-block">
         <span class="comment"># Clone and install</span><br>
-        <span class="cmd">git clone https://github.com/Pardesco/hypervault.git</span><br>
-        <span class="cmd">cd hypervault && npm install && npm run build</span>
+        <span class="cmd">git clone https://github.com/Pardesco/hypernovum.git</span><br>
+        <span class="cmd">cd hypernovum && npm install && npm run build</span>
       </div>
       <br>
-      <a href="https://github.com/Pardesco/hypervault" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
+      <a href="https://github.com/Pardesco/hypernovum" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
     </div>
   </section>
 

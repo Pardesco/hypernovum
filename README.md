@@ -1,14 +1,14 @@
-# Hypervault
+# Hypernovum
 
 A 3D **Code City** dashboard for [Obsidian](https://obsidian.md) — visualize your projects as a living cyberpunk cityscape.
 
 Each project in your vault becomes a building. Status maps to color, priority to height, category to district. A central **Neural Core** pulses with activity as you work, and **Data Arteries** flow from the core to buildings when files change.
 
-![City overview — districts, Neural Core, and data arteries](site/assets/hypervault_01.png)
+![City overview — districts, Neural Core, and data arteries](site/assets/hypernovum_01.png)
 
-![Building selected with note details sidebar](site/assets/hypervault_02.png)
+![Building selected with note details sidebar](site/assets/hypernovum_02.png)
 
-![Right-click context menu — Launch Claude, Open in Explorer, Focus Camera](site/assets/hypervault_03.png)
+![Right-click context menu — Launch Claude, Open in Explorer, Focus Camera](site/assets/hypernovum_03.png)
 
 ## Features
 
@@ -34,14 +34,14 @@ Each project in your vault becomes a building. Status maps to color, priority to
 - **City states**: IDLE (cyan) / STREAMING (cyan fast) / BULK_UPDATE (gold)
 
 ### Claude Code Integration
-- **Activity Monitor** polls `.hypervault-status.json` for real-time Claude Code status
+- **Activity Monitor** polls `.hypernovum-status.json` for real-time Claude Code status
 - **Persistent streaming artery** while Claude is actively working on a project
 - **Activity indicator overlay** shows current project and action
 - **Terminal Launcher** — right-click any building or the Neural Core to launch Claude Code
 - **Heartbeat script** (`scripts/heartbeat.js`) for Claude Code hooks integration
 
 ### HUD
-- **HYPERVAULT** neon title with flashing block cursor at top center
+- **HYPERNOVUM** neon title with flashing block cursor at top center
 - **Legend panel** showing status colors and priority heights
 - **Controls hint** overlay
 - **Save Layout** button for persisting block positions
@@ -76,7 +76,7 @@ projectDir: C:\Users\me\projects\my-project   # Windows
 
 ## AI Integration
 
-Hypervault has **no built-in AI**. External AI tools (Claude Code, etc.) read `SCHEMA.md` to learn the frontmatter format, scan your project directories, and write frontmatter to vault notes. Hypervault renders the result.
+Hypernovum has **no built-in AI**. External AI tools (Claude Code, etc.) read `SCHEMA.md` to learn the frontmatter format, scan your project directories, and write frontmatter to vault notes. Hypernovum renders the result.
 
 The `scripts/heartbeat.js` script can be wired into Claude Code hooks to enable real-time activity visualization:
 
@@ -88,7 +88,7 @@ node scripts/heartbeat.js --vault="/Users/you/Documents/MyVault" --project="my-p
 node scripts/heartbeat.js --vault="C:\Users\you\Documents\MyVault" --project="my-project" --action="editing"
 ```
 
-The heartbeat file (`.hypervault-status.json`) is written to the vault root, so the `--vault` flag must point to your actual vault folder regardless of platform.
+The heartbeat file (`.hypernovum-status.json`) is written to the vault root, so the `--vault` flag must point to your actual vault folder regardless of platform.
 
 ## Development
 
@@ -100,9 +100,9 @@ npm run build  # production build
 
 Built with [Three.js](https://threejs.org/), [Zustand](https://github.com/pmndrs/zustand), and the [Obsidian Plugin API](https://docs.obsidian.md/).
 
-## Hypervault Pro
+## Hypernovum Pro
 
-For a standalone desktop experience beyond Obsidian — with GLB model support, AI agent management, MCP server integration, and more — check out [Hypervault Pro](https://hypervault.dev).
+For a standalone desktop experience beyond Obsidian — with GLB model support, AI agent management, MCP server integration, and more — check out [Hypernovum Pro](https://hypernovum.dev).
 
 ## License
 

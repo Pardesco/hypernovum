@@ -1,7 +1,7 @@
-# Hypervault: Code City for Your Second Brain
+# Hypernovum: Code City for Your Second Brain
 ## Technical Specification v4.0 (Production-Ready Architecture)
 
-**Project Codename**: Hypervault  
+**Project Codename**: Hypernovum  
 **Positioning**: 3D Code City Dashboard for Personal Knowledge Management  
 **Date**: February 2026  
 **Author**: Randall Morgan / [@pardesco_](https://x.com/pardesco_)
@@ -68,7 +68,7 @@ The v3.0 spec had the right **product vision** but missed critical **implementat
 - List/Dataview: ~50 lines
 - 2D Graph: connections, not status
 
-**Hypervault Code City**:
+**Hypernovum Code City**:
 - 100–300 buildings visible at once
 - 6–7 data dimensions per building
 - 600+ data points processed in ~2 seconds
@@ -95,11 +95,11 @@ The v3.0 spec had the right **product vision** but missed critical **implementat
 ### 2.2 Plugin Architecture [REFINED]
 
 ```
-obsidian-hypervault/
+obsidian-hypernovum/
 ├── src/
 │   ├── main.ts
 │   ├── views/
-│   │   ├── HypervaultView.ts
+│   │   ├── HypernovumView.ts
 │   │   └── SceneManager.ts
 │   ├── parsers/
 │   │   ├── ProjectParser.ts
@@ -621,7 +621,7 @@ export class TooltipManager {
   
   createLabel(project: ProjectData, position: THREE.Vector3): CSS2DObject {
     const div = document.createElement('div');
-    div.className = 'hypervault-label';
+    div.className = 'hypernovum-label';
     div.textContent = project.title;
     div.style.color = 'white';
     div.style.fontSize = '12px';
@@ -640,7 +640,7 @@ export class TooltipManager {
   
   showTooltip(project: ProjectData, building: THREE.Object3D) {
     const div = document.createElement('div');
-    div.className = 'hypervault-tooltip';
+    div.className = 'hypernovum-tooltip';
     div.innerHTML = `
       <strong>${project.title}</strong>
       <div>Status: ${project.status}</div>
@@ -735,7 +735,7 @@ export class TooltipManager {
 ## 5. Implementation Checklist for Week 1
 
 **Day 1-2: Foundation**
-- [ ] Create GitHub repo `pardesco/obsidian-hypervault`
+- [ ] Create GitHub repo `pardesco/obsidian-hypernovum`
 - [ ] Clone Obsidian sample plugin template
 - [ ] Install Three.js, Zustand, GSAP
 - [ ] Set up dev vault with 20 test projects
@@ -769,11 +769,11 @@ export class TooltipManager {
 ```typescript
 // main.ts
 import { Plugin } from 'obsidian';
-import { HypervaultView, VIEW_TYPE } from './views/HypervaultView';
-import { HypervaultSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
+import { HypernovumView, VIEW_TYPE } from './views/HypernovumView';
+import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
 
-export default class HypervaultPlugin extends Plugin {
-  settings: HypervaultSettings;
+export default class HypernovumPlugin extends Plugin {
+  settings: HypernovumSettings;
   
   async onload() {
     await this.loadSettings();
@@ -781,17 +781,17 @@ export default class HypervaultPlugin extends Plugin {
     // Register custom view
     this.registerView(
       VIEW_TYPE,
-      (leaf) => new HypervaultView(leaf, this.app, this.settings)
+      (leaf) => new HypernovumView(leaf, this.app, this.settings)
     );
     
     // Add ribbon icon
-    this.addRibbonIcon('box', 'Open Hypervault', () => {
+    this.addRibbonIcon('box', 'Open Hypernovum', () => {
       this.activateView();
     });
     
     // Add command
     this.addCommand({
-      id: 'open-hypervault',
+      id: 'open-hypernovum',
       name: 'Open Code City Dashboard',
       callback: () => this.activateView()
     });
@@ -1034,7 +1034,7 @@ export class SceneManager {
 **Demo Script** (30 seconds):
 > "I manage 50 projects. Reading a Dataview table is slow. [Show table scrolling]
 > 
-> This is Hypervault. [Show city view]
+> This is Hypernovum. [Show city view]
 > 
 > Tall buildings = high priority. Red = blocked. Faded = neglected.
 > 
@@ -1088,7 +1088,7 @@ export class SceneManager {
 ### 10.4 Immediate Action Items (Today)
 
 1. **Read shader tutorials** (if unfamiliar with GLSL)
-2. **Create GitHub repo**: `pardesco/obsidian-hypervault`
+2. **Create GitHub repo**: `pardesco/obsidian-hypernovum`
 3. **Set up dev environment**: Clone template, install deps
 4. **Create test vault**: 20 projects with varied metadata
 5. **Tweet announcement**: "Building Code City for Obsidian with production-grade architecture. Day 1."

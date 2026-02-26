@@ -63,7 +63,7 @@ export interface BlockPosition {
 }
 
 /** Shared settings interface consumed by core rendering engine */
-export interface HypervaultSettings {
+export interface HypernovumSettings {
   /** Frontmatter tag that identifies a note as a project */
   projectTag: string;
   /** Show building labels */
@@ -109,7 +109,7 @@ export interface WeatherData {
 }
 
 /** Default settings values */
-export const DEFAULT_SETTINGS: HypervaultSettings = {
+export const DEFAULT_SETTINGS: HypernovumSettings = {
   projectTag: 'project',
   showLabels: true,
   enableShadows: true,

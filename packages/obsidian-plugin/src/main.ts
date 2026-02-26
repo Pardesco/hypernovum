@@ -1,9 +1,9 @@
 import { Plugin } from 'obsidian';
-import { HypervaultView, VIEW_TYPE } from './views/HypervaultView';
-import { HypervaultSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
+import { HypernovumView, VIEW_TYPE } from './views/HypernovumView';
+import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
 
-export default class HypervaultPlugin extends Plugin {
-  settings: HypervaultSettings = DEFAULT_SETTINGS;
+export default class HypernovumPlugin extends Plugin {
+  settings: HypernovumSettings = DEFAULT_SETTINGS;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -11,17 +11,17 @@ export default class HypervaultPlugin extends Plugin {
     // Register the 3D city view
     this.registerView(
       VIEW_TYPE,
-      (leaf) => new HypervaultView(leaf, this.app, this),
+      (leaf) => new HypernovumView(leaf, this.app, this),
     );
 
     // Ribbon icon
-    this.addRibbonIcon('box', 'Open Hypervault', () => {
+    this.addRibbonIcon('box', 'Open Hypernovum', () => {
       this.activateView();
     });
 
     // Command palette entry
     this.addCommand({
-      id: 'open-hypervault',
+      id: 'open-hypernovum',
       name: 'Open Code City Dashboard',
       callback: () => this.activateView(),
     });

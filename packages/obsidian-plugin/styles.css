@@ -1,6 +1,6 @@
-/* Hypervault - 3D Code City Dashboard */
+/* Hypernovum - 3D Code City Dashboard */
 
-.hypervault-container {
+.hypernovum-container {
   position: relative;
   width: 100%;
   height: 100%;
@@ -8,14 +8,14 @@
   background-color: #0a0a14;
 }
 
-.hypervault-container canvas {
+.hypernovum-container canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
 /* Category block labels */
-.hypervault-category-label {
+.hypernovum-category-label {
   font-size: 11px;
   font-family: var(--font-monospace, monospace);
   font-weight: 700;
@@ -31,7 +31,7 @@
 }
 
 /* Building name labels */
-.hypervault-building-label {
+.hypernovum-building-label {
   color: rgba(255, 255, 255, 0.85);
   font-size: 10px;
   font-family: var(--font-interface);
@@ -45,7 +45,7 @@
 }
 
 /* Hover tooltip */
-.hypervault-tooltip {
+.hypernovum-tooltip {
   color: var(--text-normal, #e0e0e0);
   font-size: 12px;
   font-family: var(--font-interface);
@@ -60,7 +60,7 @@
   backdrop-filter: blur(8px);
 }
 
-.hypervault-tooltip strong {
+.hypernovum-tooltip strong {
   display: block;
   margin-bottom: 8px;
   padding-bottom: 6px;
@@ -70,24 +70,24 @@
   border-bottom: 1px solid rgba(100, 100, 140, 0.2);
 }
 
-.hypervault-tooltip .tooltip-row {
+.hypernovum-tooltip .tooltip-row {
   display: flex;
   justify-content: space-between;
   margin: 4px 0;
   font-size: 11px;
 }
 
-.hypervault-tooltip .tooltip-row span:first-child {
+.hypernovum-tooltip .tooltip-row span:first-child {
   color: rgba(255, 255, 255, 0.5);
 }
 
-.hypervault-tooltip .status-active { color: #00cc66; }
-.hypervault-tooltip .status-blocked { color: #cc3333; }
-.hypervault-tooltip .status-paused { color: #3366cc; }
-.hypervault-tooltip .status-complete { color: #9966cc; }
+.hypernovum-tooltip .status-active { color: #00cc66; }
+.hypernovum-tooltip .status-blocked { color: #cc3333; }
+.hypernovum-tooltip .status-paused { color: #3366cc; }
+.hypernovum-tooltip .status-complete { color: #9966cc; }
 
 /* Stack tooltip (on foundation hover - follows cursor) */
-.hypervault-stack-tooltip {
+.hypernovum-stack-tooltip {
   background: linear-gradient(135deg, rgba(30, 30, 50, 0.95), rgba(20, 20, 35, 0.95));
   border: 1px solid rgba(100, 120, 180, 0.4);
   border-radius: 6px;
@@ -100,7 +100,7 @@
   margin-top: 8px;
 }
 
-.hypervault-stack-tooltip .stack-header {
+.hypernovum-stack-tooltip .stack-header {
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 1.5px;
@@ -108,13 +108,13 @@
   margin-bottom: 6px;
 }
 
-.hypervault-stack-tooltip .stack-list {
+.hypernovum-stack-tooltip .stack-list {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
-.hypervault-stack-tooltip .stack-item {
+.hypernovum-stack-tooltip .stack-item {
   font-size: 10px;
   font-family: var(--font-monospace, monospace);
   color: #e0e8ff;
@@ -125,7 +125,7 @@
 }
 
 /* Legend panel */
-.hypervault-legend {
+.hypernovum-legend {
   position: absolute;
   bottom: 16px;
   left: 16px;
@@ -140,7 +140,7 @@
   z-index: 100;
 }
 
-.hypervault-legend h4 {
+.hypernovum-legend h4 {
   margin: 0 0 10px 0;
   font-size: 11px;
   font-weight: 600;
@@ -149,48 +149,48 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
-.hypervault-legend-section {
+.hypernovum-legend-section {
   margin-bottom: 12px;
 }
 
-.hypervault-legend-section:last-child {
+.hypernovum-legend-section:last-child {
   margin-bottom: 0;
 }
 
-.hypervault-legend-item {
+.hypernovum-legend-item {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 4px 0;
 }
 
-.hypervault-legend-color {
+.hypernovum-legend-color {
   width: 12px;
   height: 12px;
   border-radius: 2px;
   flex-shrink: 0;
 }
 
-.hypervault-legend-color.active { background: #00cc66; }
-.hypervault-legend-color.blocked { background: #cc3333; }
-.hypervault-legend-color.paused { background: #3366cc; }
-.hypervault-legend-color.complete { background: #9966cc; }
+.hypernovum-legend-color.active { background: #00cc66; }
+.hypernovum-legend-color.blocked { background: #cc3333; }
+.hypernovum-legend-color.paused { background: #3366cc; }
+.hypernovum-legend-color.complete { background: #9966cc; }
 
-.hypervault-legend-height {
+.hypernovum-legend-height {
   display: flex;
   align-items: flex-end;
   gap: 2px;
   height: 16px;
 }
 
-.hypervault-legend-bar {
+.hypernovum-legend-bar {
   width: 6px;
   background: rgba(255, 255, 255, 0.4);
   border-radius: 1px;
 }
 
 /* Controls hint */
-.hypervault-controls {
+.hypernovum-controls {
   position: absolute;
   bottom: 16px;
   right: 16px;
@@ -204,7 +204,7 @@
   z-index: 100;
 }
 
-.hypervault-controls kbd {
+.hypernovum-controls kbd {
   background: rgba(255, 255, 255, 0.1);
   padding: 2px 5px;
   border-radius: 3px;
@@ -212,7 +212,7 @@
 }
 
 /* Save layout button */
-.hypervault-save-btn {
+.hypernovum-save-btn {
   position: absolute;
   top: 16px;
   right: 16px;
@@ -229,18 +229,18 @@
   transition: all 0.2s ease;
 }
 
-.hypervault-save-btn:hover {
+.hypernovum-save-btn:hover {
   background: linear-gradient(135deg, rgba(50, 100, 150, 0.95), rgba(40, 80, 130, 0.95));
   border-color: rgba(120, 170, 220, 0.6);
   transform: translateY(-1px);
 }
 
-.hypervault-save-btn:active {
+.hypernovum-save-btn:active {
   transform: translateY(0);
 }
 
 /* Building move mode indicator */
-.hypervault-move-indicator {
+.hypernovum-move-indicator {
   position: absolute;
   top: 16px;
   left: 50%;
@@ -265,7 +265,7 @@
 }
 
 /* Holographic anchor hover label */
-.hypervault-anchor-label {
+.hypernovum-anchor-label {
   font-family: var(--font-monospace, monospace);
   font-size: 10px;
   font-weight: 600;
@@ -282,7 +282,7 @@
   animation: anchor-fade-in 0.2s ease-out;
 }
 
-.hypervault-anchor-label .anchor-bracket {
+.hypernovum-anchor-label .anchor-bracket {
   color: rgba(100, 180, 255, 0.8);
   font-weight: 400;
 }
@@ -293,7 +293,7 @@
 }
 
 /* Claude Code Activity Indicator */
-.hypervault-activity-indicator {
+.hypernovum-activity-indicator {
   position: absolute;
   top: 16px;
   left: 16px;
@@ -308,19 +308,19 @@
   transition: all 0.3s ease;
 }
 
-.hypervault-activity-indicator.active {
+.hypernovum-activity-indicator.active {
   border-color: rgba(0, 255, 255, 0.6);
   box-shadow: 0 0 20px rgba(0, 255, 255, 0.2), inset 0 0 20px rgba(0, 255, 255, 0.05);
 }
 
-.hypervault-activity-indicator .activity-status {
+.hypernovum-activity-indicator .activity-status {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
 }
 
-.hypervault-activity-indicator .activity-dot {
+.hypernovum-activity-indicator .activity-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -328,7 +328,7 @@
   transition: all 0.3s ease;
 }
 
-.hypervault-activity-indicator .activity-dot.pulsing {
+.hypernovum-activity-indicator .activity-dot.pulsing {
   background: #00ffff;
   box-shadow: 0 0 8px #00ffff, 0 0 16px rgba(0, 255, 255, 0.5);
   animation: activity-pulse 1s ease-in-out infinite;
@@ -345,7 +345,7 @@
   }
 }
 
-.hypervault-activity-indicator .activity-text {
+.hypernovum-activity-indicator .activity-text {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 2px;
@@ -353,12 +353,12 @@
   transition: color 0.3s ease;
 }
 
-.hypervault-activity-indicator.active .activity-text {
+.hypernovum-activity-indicator.active .activity-text {
   color: #00ffff;
   text-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
 }
 
-.hypervault-activity-indicator .activity-project {
+.hypernovum-activity-indicator .activity-project {
   font-size: 12px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.9);
@@ -369,7 +369,7 @@
   max-width: 200px;
 }
 
-.hypervault-activity-indicator .activity-action {
+.hypernovum-activity-indicator .activity-action {
   font-size: 9px;
   color: rgba(150, 180, 200, 0.7);
   white-space: nowrap;
@@ -379,7 +379,7 @@
 }
 
 /* HUD Title */
-.hypervault-hud-title {
+.hypernovum-hud-title {
   position: absolute;
   top: 14px;
   left: 50%;
@@ -399,7 +399,7 @@
   user-select: none;
 }
 
-.hypervault-cursor {
+.hypernovum-cursor {
   animation: cursor-blink 1.06s step-end infinite;
 }
 

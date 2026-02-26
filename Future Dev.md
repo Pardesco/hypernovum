@@ -66,7 +66,7 @@ Would you like me to write a **Three.js code snippet** for a "Flowing Neon Pipe"
 
 Moving toward a **3D LLM Workspace** is a bold pivot from "visualization" to "operating system." While bringing a literal, raw command prompt into a Three.js environment is technically complex (requiring Xterm.js rendered to a texture), creating a **Spatial Workspace** designed for "Vibe Coding" is entirely doable and arguably more "Cyberpunk."
 
-Here is how you can transform Hypervault from a map into a functional 3D IDE:
+Here is how you can transform Hypernovum from a map into a functional 3D IDE:
 
 ---
 
@@ -128,7 +128,7 @@ Don't try to rebuild VS Code inside Three.js. Instead, build a **"Command Center
     
 2. Have a small **Node.js watcher** (or use the Obsidian plugin's internal watcher) that detects when Claude is writing files.
     
-3. Hypervault becomes the **Visual Monitor**. You look at the city to see _where_ the AI is working, _how much_ it's changing, and _what_ the health of the system is.
+3. Hypernovum becomes the **Visual Monitor**. You look at the city to see _where_ the AI is working, _how much_ it's changing, and _what_ the health of the system is.
     
 
 **Would you like to see a proof-of-concept for the `CSS3DRenderer` setup that would allow you to put a functional terminal window inside your city?**

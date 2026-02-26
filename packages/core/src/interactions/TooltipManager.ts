@@ -24,7 +24,7 @@ export class TooltipManager {
 
   createLabel(project: ProjectData, position: THREE.Vector3): CSS2DObject {
     const div = document.createElement('div');
-    div.className = 'hypervault-label';
+    div.className = 'hypernovum-label';
     div.textContent = project.title;
 
     const label = new CSS2DObject(div);
@@ -39,7 +39,7 @@ export class TooltipManager {
     this.hideTooltip();
 
     const div = document.createElement('div');
-    div.className = 'hypervault-tooltip';
+    div.className = 'hypernovum-tooltip';
     div.innerHTML = `
       <strong>${this.escapeHtml(project.title)}</strong>
       <div>Status: ${this.escapeHtml(project.status)}</div>

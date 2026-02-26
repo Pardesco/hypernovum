@@ -1,5 +1,5 @@
 // Types
-export type { ProjectData, District, Bounds, CityState, BlockPosition, HypervaultSettings, WeatherData } from './types';
+export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData } from './types';
 export { DEFAULT_SETTINGS } from './types';
 
 // Scene engine

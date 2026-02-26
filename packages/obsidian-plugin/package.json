@@ -1,5 +1,5 @@
 {
-  "name": "@hypervault/obsidian",
+  "name": "@hypernovum/obsidian",
   "version": "0.2.0",
   "main": "main.js",
   "scripts": {
@@ -7,7 +7,7 @@
     "build": "node esbuild.config.mjs production"
   },
   "dependencies": {
-    "@hypervault/core": "*",
+    "@hypernovum/core": "*",
     "three": "^0.160.0",
     "zustand": "^4.4.0"
   },

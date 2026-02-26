@@ -1,16 +1,16 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import type HypervaultPlugin from '../main';
-import { DEFAULT_SETTINGS } from '@hypervault/core';
-import type { BlockPosition, HypervaultSettings } from '@hypervault/core';
+import type HypernovumPlugin from '../main';
+import { DEFAULT_SETTINGS } from '@hypernovum/core';
+import type { BlockPosition, HypernovumSettings } from '@hypernovum/core';
 
 // Re-export for backward compatibility within the plugin package
 export { DEFAULT_SETTINGS };
-export type { BlockPosition, HypervaultSettings };
+export type { BlockPosition, HypernovumSettings };
 
 export class SettingsTab extends PluginSettingTab {
-  plugin: HypervaultPlugin;
+  plugin: HypernovumPlugin;
 
-  constructor(app: App, plugin: HypervaultPlugin) {
+  constructor(app: App, plugin: HypernovumPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
@@ -19,7 +19,7 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Hypervault Settings' });
+    containerEl.createEl('h2', { text: 'Hypernovum Settings' });
 
     new Setting(containerEl)
       .setName('Project tag')

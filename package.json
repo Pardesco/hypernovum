@@ -1,5 +1,5 @@
 {
-  "name": "hypervault",
+  "name": "hypernovum",
   "private": true,
   "workspaces": [
     "packages/core",
