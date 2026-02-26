@@ -496,3 +496,47 @@
   text-overflow: ellipsis;
   font-size: 11px;
 }
+
+.agents-item.not-detected {
+  opacity: 0.4;
+}
+
+.agents-not-installed {
+  border-top: 1px solid rgba(100, 100, 140, 0.1);
+}
+
+.agents-not-installed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: rgba(150, 150, 180, 0.55);
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.agents-not-installed-toggle:hover {
+  color: rgba(180, 180, 210, 0.7);
+}
+
+.agents-install-pill {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid rgba(100, 200, 160, 0.3);
+  border-radius: 8px;
+  background: rgba(100, 200, 160, 0.08);
+  color: rgba(100, 200, 160, 0.8);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agents-install-pill:hover {
+  background: rgba(100, 200, 160, 0.18);
+  border-color: rgba(100, 200, 160, 0.5);
+}

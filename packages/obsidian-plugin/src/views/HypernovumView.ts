@@ -1,5 +1,6 @@
-import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting } from 'obsidian';
+import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Platform } from 'obsidian';
 import { existsSync } from 'fs';
+import { exec } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypernovum/core';
 import type { ProjectData, HypernovumSettings, BlockPosition, RaycastHit } from '@hypernovum/core';
@@ -186,10 +187,10 @@ export class HypernovumView extends ItemView {
 
   private addAgentSwitcher(container: HTMLElement): void {
     const KNOWN_AGENTS = [
-      { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b' },
-      { id: 'gemini', name: 'Gemini CLI', command: 'gemini', icon: 'G', color: '#4d96ff' },
-      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77' },
-      { id: 'aider', name: 'Aider', command: 'aider', icon: 'A', color: '#ff6b6b' },
+      { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b', installHint: 'npm i -g @anthropic-ai/claude-code' },
+      { id: 'gemini', name: 'Gemini CLI', command: 'gemini', icon: 'G', color: '#4d96ff', installHint: 'npm i -g @google/gemini-cli' },
+      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77', installHint: 'npm i -g @openai/codex' },
+      { id: 'aider', name: 'Aider', command: 'aider', icon: 'A', color: '#ff6b6b', installHint: 'pipx install aider-chat' },
     ];
 
     const panel = document.createElement('div');
@@ -202,12 +203,41 @@ export class HypernovumView extends ItemView {
         </div>
       </div>
       <div class="agents-list"></div>
+      <div class="agents-not-installed" style="display: none;">
+        <button class="agents-not-installed-toggle">
+          Available to Install (<span class="not-installed-count">0</span>)
+        </button>
+        <div class="agents-not-installed-list" style="display: none; padding-bottom: 4px;"></div>
+      </div>
     `;
 
     const list = panel.querySelector('.agents-list') as HTMLElement;
-    
+    const notInstalledSection = panel.querySelector('.agents-not-installed') as HTMLElement;
+    const toggleBtn = panel.querySelector('.agents-not-installed-toggle') as HTMLElement;
+    const notInstalledList = panel.querySelector('.agents-not-installed-list') as HTMLElement;
+    const countSpan = panel.querySelector('.not-installed-count') as HTMLElement;
+
+    let showNotInstalled = false;
+    toggleBtn.addEventListener('click', () => {
+      showNotInstalled = !showNotInstalled;
+      notInstalledList.style.display = showNotInstalled ? 'block' : 'none';
+      toggleBtn.innerHTML = `${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (<span class="not-installed-count">${countSpan.textContent}</span>)`;
+    });
+
+    const detectedMap: Record<string, boolean> = {};
+
+    const checkCommand = (cmd: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const check = Platform.isWin ? `where ${cmd}` : `which ${cmd}`;
+        exec(check, { timeout: 2000 }, (error) => {
+          resolve(!error);
+        });
+      });
+    };
+
     const renderAgents = () => {
       list.empty();
+      notInstalledList.empty();
       const currentCommand = this.settings.agentCommand;
       const currentName = this.settings.agentName;
       
@@ -220,11 +250,17 @@ export class HypernovumView extends ItemView {
           name: currentName || 'Custom Agent',
           command: currentCommand,
           icon: currentName ? currentName[0].toUpperCase() : '?',
-          color: '#cc5de8'
+          color: '#cc5de8',
+          installHint: ''
         });
+        detectedMap[currentCommand] = true; // Assume custom is valid if selected
       }
-      
-      for (const agent of agentsToRender) {
+
+      const installed = agentsToRender.filter(a => detectedMap[a.command] !== false);
+      const notInstalled = agentsToRender.filter(a => detectedMap[a.command] === false);
+
+      // Render installed
+      for (const agent of installed) {
         const item = document.createElement('div');
         item.className = 'agents-item' + (currentCommand === agent.command ? ' active' : '');
         item.innerHTML = `
@@ -242,10 +278,53 @@ export class HypernovumView extends ItemView {
         });
         list.appendChild(item);
       }
+
+      // Render not installed
+      if (notInstalled.length > 0) {
+        notInstalledSection.style.display = 'block';
+        countSpan.textContent = notInstalled.length.toString();
+        toggleBtn.innerHTML = `${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (<span class="not-installed-count">${notInstalled.length}</span>)`;
+        
+        for (const agent of notInstalled) {
+          const item = document.createElement('div');
+          item.className = 'agents-item not-detected';
+          item.innerHTML = `
+            <div class="agents-icon-circle" style="background: ${agent.color}55">${agent.icon}</div>
+            <span class="agents-item-name">${agent.name}</span>
+            <button class="agents-install-pill" title="${agent.installHint}">Install</button>
+          `;
+          
+          const installBtn = item.querySelector('.agents-install-pill') as HTMLButtonElement;
+          installBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(agent.installHint);
+            installBtn.textContent = '\u2713 Copied';
+            installBtn.style.borderColor = '#00cc66';
+            installBtn.style.color = '#00cc66';
+            setTimeout(() => { 
+              installBtn.textContent = 'Install'; 
+              installBtn.style.borderColor = '';
+              installBtn.style.color = '';
+            }, 1500);
+          });
+          
+          notInstalledList.appendChild(item);
+        }
+      } else {
+        notInstalledSection.style.display = 'none';
+      }
     };
     
+    // Initial render assuming all are detected until check finishes
     renderAgents();
     container.appendChild(panel);
+
+    // Run async checks to detect installed agents
+    Promise.all(KNOWN_AGENTS.map(async (agent) => {
+      detectedMap[agent.command] = await checkCommand(agent.command);
+    })).then(() => {
+      renderAgents();
+    });
   }
 
   private addLegend(container: HTMLElement): void {
