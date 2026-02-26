@@ -7,6 +7,7 @@ import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonitor';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
+import { generateAgentContext, enrichAgentCommand } from '../utils/AgentContext';
 import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
@@ -393,12 +394,13 @@ export class HypernovumView extends ItemView {
     // Resolve the project directory path
     const projectPath = this.resolveProjectPath(project);
 
+    const agentName = this.settings.agentName || 'Claude Code';
     menu.addItem((item) => {
       item
-        .setTitle('🚀 Launch Claude')
+        .setTitle(`Launch ${agentName}`)
         .setIcon('terminal')
         .onClick(async () => {
-          await this.launchClaudeForProject(project, projectPath);
+          await this.launchAgentForProject(project, projectPath);
         });
     });
 
@@ -478,25 +480,31 @@ export class HypernovumView extends ItemView {
     return vaultBasePath;
   }
 
-  /** Launch Claude Code for a project */
-  private async launchClaudeForProject(project: ProjectData, projectPath: string): Promise<void> {
-    new Notice(`🚀 Launching Claude for ${project.title}...`);
+  /** Launch the configured agent for a project */
+  private async launchAgentForProject(project: ProjectData, projectPath: string): Promise<void> {
+    const agentName = this.settings.agentName || 'Claude Code';
+    const agentCommand = this.settings.agentCommand || 'claude';
+    new Notice(`Launching ${agentName} for ${project.title}...`);
 
     // Trigger visual launch effect (dramatic pulse + data flow)
     if (this.sceneManager) {
       this.sceneManager.triggerLaunchEffect(project.path);
     }
 
+    // Write agent context before launching
+    const vaultPath = (this.app.vault.adapter as any).basePath as string;
+    generateAgentContext(projectPath, vaultPath);
+
     const result = await TerminalLauncher.launch({
       projectPath,
-      command: 'claude',
+      command: enrichAgentCommand(agentCommand),
       projectName: project.title,
     });
 
     if (result.success) {
-      new Notice(`✓ Terminal launched for ${project.title}`);
+      new Notice(`Terminal launched for ${project.title}`);
     } else {
-      new Notice(`✗ Launch failed: ${result.message}`);
+      new Notice(`Launch failed: ${result.message}`);
     }
   }
 
@@ -544,35 +552,38 @@ export class HypernovumView extends ItemView {
   /** Show context menu for right-clicked Neural Core orb */
   private showOrbContextMenu(event: MouseEvent): void {
     const menu = new Menu();
+    const agentName = this.settings.agentName || 'Claude Code';
 
     menu.addItem((item) => {
       item
-        .setTitle('Launch Claude Code...')
+        .setTitle(`Launch ${agentName}...`)
         .setIcon('terminal')
         .onClick(async () => {
-          await this.launchClaudeFromOrb();
+          await this.launchAgentFromOrb();
         });
     });
 
     menu.showAtMouseEvent(event);
   }
 
-  /** Launch Claude Code from orb — opens folder picker first */
-  private async launchClaudeFromOrb(): Promise<void> {
+  /** Launch agent from orb — opens folder picker first */
+  private async launchAgentFromOrb(): Promise<void> {
+    const agentName = this.settings.agentName || 'Claude Code';
+
     // Try native Electron dialog (modern @electron/remote first, then legacy)
     const dialog = this.getElectronDialog();
     if (dialog) {
       try {
         const result = await dialog.showOpenDialog({
           properties: ['openDirectory', 'createDirectory'],
-          title: 'Select folder for Claude Code',
+          title: `Select folder for ${agentName}`,
         });
 
         if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
           return;
         }
 
-        await this.launchClaudeInFolder(result.filePaths[0]);
+        await this.launchAgentInFolder(result.filePaths[0]);
         return;
       } catch {
         // Dialog failed, fall through to modal
@@ -581,7 +592,7 @@ export class HypernovumView extends ItemView {
 
     // Fallback: text input modal
     new FolderInputModal(this.app, async (folderPath) => {
-      await this.launchClaudeInFolder(folderPath);
+      await this.launchAgentInFolder(folderPath);
     }).open();
   }
 
@@ -603,14 +614,20 @@ export class HypernovumView extends ItemView {
     return null;
   }
 
-  /** Shared launch logic for folder-based Claude launch */
-  private async launchClaudeInFolder(folderPath: string): Promise<void> {
+  /** Shared launch logic for folder-based agent launch */
+  private async launchAgentInFolder(folderPath: string): Promise<void> {
+    const agentName = this.settings.agentName || 'Claude Code';
+    const agentCommand = this.settings.agentCommand || 'claude';
     const projectName = path.basename(folderPath);
-    new Notice(`Launching Claude in ${projectName}...`);
+    new Notice(`Launching ${agentName} in ${projectName}...`);
+
+    // Write agent context before launching
+    const vaultPath = (this.app.vault.adapter as any).basePath as string;
+    generateAgentContext(folderPath, vaultPath);
 
     const launchResult = await TerminalLauncher.launch({
       projectPath: folderPath,
-      command: 'claude',
+      command: enrichAgentCommand(agentCommand),
       projectName,
     });
 
@@ -637,7 +654,7 @@ class FolderInputModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl('h3', { text: 'Launch Claude Code' });
+    contentEl.createEl('h3', { text: 'Launch Agent' });
     contentEl.createEl('p', { text: 'Enter the project folder path:' });
 
     new Setting(contentEl)
