@@ -21,6 +21,16 @@ const context = await esbuild.context({
   banner: { js: banner },
   entryPoints: [path.resolve(__dirname, 'src/main.ts')],
   bundle: true,
+  plugins: [
+    {
+      name: 'resolve-core',
+      setup(build) {
+        build.onResolve({ filter: /^@hypernovum\/core$/ }, args => {
+          return { path: path.resolve(__dirname, '../core/src/index.ts') };
+        });
+      },
+    },
+  ],
   external: [
     'obsidian',
     'electron',

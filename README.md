@@ -102,7 +102,7 @@ Built with [Three.js](https://threejs.org/), [Zustand](https://github.com/pmndrs
 
 ## Hypernovum Pro
 
-For a standalone desktop experience beyond Obsidian — with GLB model support, AI agent management, MCP server integration, and more — check out [Hypernovum Pro](https://hypernovum.dev).
+For a standalone desktop experience beyond Obsidian — with GLB model support, AI agent management, MCP server integration, and more — check out [Hypernovum Pro](https://studio.pardesco.com/hypernovum).
 
 ## License
 
