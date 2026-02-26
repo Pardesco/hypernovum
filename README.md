@@ -4,11 +4,7 @@ A 3D **Code City** dashboard for [Obsidian](https://obsidian.md) — visualize y
 
 Each project in your vault becomes a building. Status maps to color, priority to height, category to district. A central **Neural Core** pulses with activity as you work, and **Data Arteries** flow from the core to buildings when files change.
 
-![City overview — districts, Neural Core, and data arteries](site/assets/hypernovum_01.png)
-
-![Building selected with note details sidebar](site/assets/hypernovum_02.png)
-
-![Right-click context menu — Launch Claude, Open in Explorer, Focus Camera](site/assets/hypernovum_03.png)
+![Hypernovum Obsidian Plugin](site/assets/obsidian-app.png)
 
 ## Features
 
@@ -103,6 +99,10 @@ Built with [Three.js](https://threejs.org/), [Zustand](https://github.com/pmndrs
 ## Hypernovum Pro
 
 For a standalone desktop experience beyond Obsidian — with GLB model support, AI agent management, MCP server integration, and more — check out [Hypernovum Pro](https://studio.pardesco.com/hypernovum).
+
+![Hypernovum Pro](site/assets/hypernovum-pro.gif)
+
+![Hypernovum Pro Dashboard](site/assets/pro-app2.png)
 
 ## License
 
