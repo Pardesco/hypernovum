@@ -670,10 +670,11 @@ export class SceneManager {
       blockObjects.push(handle);
 
       // Invisible larger hitbox for easier click/hover detection (flat slab)
-      const hitBoxGeo = new THREE.BoxGeometry(4.5, 1.0, 4.5);
+      // Expanded vertically and horizontally to catch clicks from sharp camera angles
+      const hitBoxGeo = new THREE.BoxGeometry(10.0, 8.0, 10.0);
       const hitBoxMat = new THREE.MeshBasicMaterial({ visible: false });
       const hitBox = new THREE.Mesh(hitBoxGeo, hitBoxMat);
-      hitBox.position.set(handleX, 0.5, handleZ);
+      hitBox.position.set(handleX, 4.0, handleZ);
       hitBox.userData = { isDragHandle: true, category, visualHandle: handle };
       this.scene.add(hitBox);
       this.handleHitBoxes.push(hitBox);
@@ -1244,6 +1245,15 @@ export class SceneManager {
 
   private onMouseUp(_event: MouseEvent): void {
     if (this.isDragging) {
+      if (this.draggedBlock) {
+        // Persist the internal state immediately so background rebuilds (e.g. file edits)
+        // do not revert the user's manual dragging before they hit the Save Layout button.
+        const offset = this.blockOffsets.get(this.draggedBlock.category);
+        if (offset) {
+          this.savedPositions.set(this.draggedBlock.category, { ...offset });
+        }
+      }
+
       this.isDragging = false;
       this.draggedBlock = null;
       this.controls.enabled = true; // Re-enable camera controls
@@ -1393,7 +1403,7 @@ export class SceneManager {
       block.handle.position.set(handleX, 0.07, handleZ);
     }
     if (block.hitBox) {
-      block.hitBox.position.set(handleX, 0.5, handleZ);
+      block.hitBox.position.set(handleX, 4.0, handleZ);
     }
     // Update L-bracket vertices
     if (block.handleBracket) {
