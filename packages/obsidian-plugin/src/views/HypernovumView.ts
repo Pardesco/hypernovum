@@ -49,6 +49,12 @@ export class HypernovumView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    // Add CSS class for vault mode styling
+    if (this.settings.vaultMode) {
+      this.containerEl.addClass('vault-mode');
+    } else {
+      this.containerEl.removeClass('vault-mode');
+    }
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass('hypernovum-container');
@@ -63,8 +69,61 @@ export class HypernovumView extends ItemView {
     // Add legend overlay
     this.addLegend(container);
 
-    // Add agent switcher overlay
-    this.addAgentSwitcher(container);
+    // Add agent switcher overlay if not in Vault Mode
+    if (!this.settings.vaultMode) {
+      this.addAgentSwitcher(container);
+    } else {
+      container.addClass('vault-mode-active');
+
+      // In Vault Mode, let users right-click the background to create a new project district
+      const canvas = this.sceneManager.getCanvas();
+      canvas.addEventListener('contextmenu', (e: MouseEvent) => {
+        if (e.defaultPrevented) return; // Raycaster hit a building or orb
+        e.preventDefault();
+        const menu = new Menu();
+        menu.addItem((item) => {
+          item
+            .setTitle('Create New Project')
+            .setIcon('folder-plus')
+            .onClick(() => {
+              new FolderInputModal(this.app, async (folderPath) => {
+                try {
+                  // Attempt to create the folder if it doesn't exist
+                  let folderCreated = false;
+                  if (!this.app.vault.getAbstractFileByPath(folderPath)) {
+                    await this.app.vault.createFolder(folderPath);
+                    folderCreated = true;
+                  }
+                  // Ensure we have a markdown note acting as the district center
+                  const folderName = folderPath.split('/').pop() || 'New Project';
+                  const notePath = `${folderPath}/${folderName}.md`;
+                  if (!this.app.vault.getAbstractFileByPath(notePath)) {
+                    const newNote = await this.app.vault.create(notePath, `---
+type: project
+title: ${folderName}
+status: active
+priority: medium
+category: default
+---
+# ${folderName}
+`);
+                    this.app.workspace.openLinkText(newNote.path, '', false);
+                    new Notice(`Created new project: ${folderName}`);
+                  } else if (folderCreated) {
+                     new Notice(`Created project folder: ${folderPath}`);
+                  } else {
+                     new Notice(`Project folder already exists: ${folderPath}`);
+                  }
+                } catch (error: any) {
+                  new Notice(`Failed to create project: `);
+                }
+              }).open();
+            });
+        });
+        menu.showAtMouseEvent(e);
+      });
+    }
+
 
     // Add controls hint
     this.addControlsHint(container);
@@ -122,19 +181,21 @@ export class HypernovumView extends ItemView {
       })
     );
 
-    // Initialize Claude Code activity monitor
-    this.activityMonitor = new ActivityMonitor(this.app, {
-      onActivityStart: (status) => this.onClaudeActivityStart(status),
-      onActivityUpdate: (status) => this.onClaudeActivityUpdate(status),
-      onActivityStop: () => this.onClaudeActivityStop(),
-      onProjectChange: (newProject, oldProject) => {
-        console.log('[Hypernovum] Project changed:', oldProject, '->', newProject);
-      },
-    });
-    this.activityMonitor.start();
+    // Initialize Claude Code activity monitor only if not in Vault Mode
+    if (!this.settings.vaultMode) {
+      this.activityMonitor = new ActivityMonitor(this.app, {
+        onActivityStart: (status) => this.onClaudeActivityStart(status),
+        onActivityUpdate: (status) => this.onClaudeActivityUpdate(status),
+        onActivityStop: () => this.onClaudeActivityStop(),
+        onProjectChange: (newProject, oldProject) => {
+          console.log('[Hypernovum] Project changed:', oldProject, '->', newProject);
+        },
+      });
+      this.activityMonitor.start();
 
-    // Add activity indicator overlay
-    this.addActivityIndicator(container);
+      // Add activity indicator overlay
+      this.addActivityIndicator(container);
+    }
 
     // Add HUD title
     this.addHudTitle(container);
@@ -843,3 +904,5 @@ class FolderInputModal extends Modal {
     this.contentEl.empty();
   }
 }
+
+

@@ -14,6 +14,7 @@ const KNOWN_AGENTS = [
 
 /** Plugin-level settings extend core settings with agent configuration */
 export interface HypernovumSettings extends CoreSettings {
+  vaultMode: boolean;
   agentName: string;
   agentCommand: string;
 }
@@ -22,6 +23,7 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   ...CORE_DEFAULTS,
   agentName: 'Claude Code',
   agentCommand: 'claude',
+  vaultMode: false,
 };
 
 export type { BlockPosition };
@@ -134,6 +136,18 @@ export class SettingsTab extends PluginSettingTab {
     // Hide custom input unless "Custom..." is selected
     const isCustom = !KNOWN_AGENTS.some(a => a.command && a.command === this.plugin.settings.agentCommand);
     customSetting.settingEl.style.display = isCustom ? '' : 'none';
+
+    containerEl.createEl('h3', { text: 'Vault Mode' });
+
+    new Setting(containerEl)
+      .setName('Enable Vault Mode')
+      .setDesc('Disable AI agent features and use Hypernovum as a pure 3D visualization and navigation tool.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.vaultMode).onChange(async (value) => {
+          this.plugin.settings.vaultMode = value;
+          await this.plugin.saveSettings();
+        }),
+      );
 
     containerEl.createEl('h3', { text: 'Visual Effects' });
 

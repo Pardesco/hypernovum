@@ -91,13 +91,5 @@ Learn more: https://studio.pardesco.com/hypernovum
   }
 }
 
-/**
- * If the command is 'claude', enrich it with an initial prompt so Claude Code
- * immediately reads the setup file. Other agents are returned unchanged.
- */
-export function enrichAgentCommand(command: string): string {
-  if (command === 'claude') {
-    return 'claude "Read .hypernovum/SETUP.md for context about HYPERNOVUM, the Obsidian plugin that launched me into this project."';
-  }
-  return command;
-}
+// Note: Agent context is provided via .hypernovum/SETUP.md written by generateAgentContext().
+// No command enrichment needed — agents discover the file naturally.

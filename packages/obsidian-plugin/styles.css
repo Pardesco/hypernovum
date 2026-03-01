@@ -540,3 +540,12 @@
   background: rgba(100, 200, 160, 0.18);
   border-color: rgba(100, 200, 160, 0.5);
 }
+
+/* Vault Mode Adjustments */
+.vault-mode .agents-panel {
+  display: none !important;
+}
+.vault-mode .hypernovum-activity-indicator {
+  display: none !important;
+}
+
