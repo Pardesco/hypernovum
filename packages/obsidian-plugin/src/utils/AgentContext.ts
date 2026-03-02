@@ -75,6 +75,7 @@ This writes \`.hypernovum-status.json\` to the vault root. The plugin polls it a
 
 This project uses the **free Obsidian plugin**. For advanced features, there's also [HYPERNOVUM Pro](https://studio.pardesco.com/hypernovum) — a standalone desktop app with:
 
+- **Engram Persistent Agent Memory** — agents learn and remember your codebase across sessions
 - **MCP Server** — AI agents can query project health, search the portfolio, and get live data
 - **Tandem Terminal** — run two AI agents side by side on the same codebase
 - **Git Weather** — real-time commit velocity, churn scores, and hot file tracking

@@ -3,6 +3,7 @@ import process from 'process';
 import builtins from 'builtin-modules';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +31,18 @@ const context = await esbuild.context({
         });
       },
     },
+    {
+      name: 'copy-to-dev-vault',
+      setup(build) {
+        build.onEnd(() => {
+          if (fs.existsSync(vaultPluginDir)) {
+            fs.copyFileSync(path.resolve(__dirname, 'main.js'), path.resolve(vaultPluginDir, 'main.js'));
+            fs.copyFileSync(path.resolve(__dirname, 'manifest.json'), path.resolve(vaultPluginDir, 'manifest.json'));
+            fs.copyFileSync(path.resolve(__dirname, 'styles.css'), path.resolve(vaultPluginDir, 'styles.css'));
+          }
+        });
+      }
+    }
   ],
   external: [
     'obsidian',
@@ -53,7 +66,7 @@ const context = await esbuild.context({
   logLevel: 'info',
   sourcemap: prod ? false : 'inline',
   treeShaking: true,
-  outfile: path.resolve(vaultPluginDir, 'main.js'),
+  outfile: path.resolve(__dirname, 'main.js'),
   minify: prod,
   loader: {
     '.vert': 'text',
