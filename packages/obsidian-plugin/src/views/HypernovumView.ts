@@ -3,15 +3,19 @@ import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypernovum/core';
-import type { ProjectData, HypernovumSettings, BlockPosition, RaycastHit } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit } from '@hypernovum/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonitor';
+import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { generateAgentContext } from '../utils/AgentContext';
+import type { HypernovumSettings } from '../settings/SettingsTab';
 import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
+
+type VisualLayer = 'status' | 'git' | 'memory';
 
 export class HypernovumView extends ItemView {
   private plugin: HypernovumPlugin;
@@ -23,7 +27,21 @@ export class HypernovumView extends ItemView {
   private keyboardNav: KeyboardNav | null = null;
   private activityMonitor: ActivityMonitor | null = null;
   private activityIndicator: HTMLElement | null = null;
+  private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
+  private allProjects: ProjectData[] = [];
+  private filteredProjects: ProjectData[] = [];
+  private selectedProject: ProjectData | null = null;
+  private searchQuery = '';
+  private statusFilter = 'all';
+  private priorityFilter = 'all';
+  private categoryFilter = 'all';
+  private visualLayer: VisualLayer = 'status';
+  private inspectorPanel: HTMLElement | null = null;
+  private statusSelect: HTMLSelectElement | null = null;
+  private prioritySelect: HTMLSelectElement | null = null;
+  private categorySelect: HTMLSelectElement | null = null;
+  private summaryEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, app: App, plugin: HypernovumPlugin) {
     super(leaf);
@@ -68,6 +86,8 @@ export class HypernovumView extends ItemView {
 
     // Add legend overlay
     this.addLegend(container);
+    this.addCommandPanel(container);
+    this.addInspectorPanel(container);
 
     // Add agent switcher overlay if not in Vault Mode
     if (!this.settings.vaultMode) {
@@ -138,7 +158,7 @@ category: default
       this.sceneManager.getCanvas(),
     );
     this.raycaster.setClickHandler((hit) => {
-      // Open the clicked project's note in Obsidian
+      this.selectProject(hit.project);
       this.app.workspace.openLinkText(hit.project.path, '', false);
     });
 
@@ -214,15 +234,94 @@ category: default
 
   private async buildCity(): Promise<void> {
     // Parse vault metadata into project data
-    this.projects = await this.parser.parseProjects(this.settings);
+    this.allProjects = await this.parser.parseProjects(this.settings);
 
+    await Promise.all(this.allProjects.map(async (project) => {
+      const projectPath = this.resolveProjectPath(project);
+      const memoryContextPath = path.join(projectPath, '.hypernovum', 'MEMORY_CONTEXT.md');
+
+      if (existsSync(memoryContextPath)) {
+        project.hasMemoryContext = true;
+        project.memoryContextPath = memoryContextPath;
+      }
+
+      if (this.settings.enableGitActivity) {
+        const gitActivity = await this.gitCollector.collect(projectPath);
+        if (gitActivity) {
+          project.gitActivity = gitActivity;
+        }
+      }
+    }));
+
+    this.updateFilterOptions();
+    this.applyFiltersAndRebuild();
+  }
+
+  private applyFiltersAndRebuild(): void {
+    const query = this.searchQuery.toLowerCase().trim();
+    this.filteredProjects = this.allProjects.filter((project) => {
+      const fields = [
+        project.title,
+        project.path,
+        project.status,
+        project.priority,
+        project.category,
+        project.projectDir,
+        ...(project.stack ?? []),
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      return (!query || fields.includes(query))
+        && (this.statusFilter === 'all' || project.status === this.statusFilter)
+        && (this.priorityFilter === 'all' || project.priority === this.priorityFilter)
+        && (this.categoryFilter === 'all' || project.category === this.categoryFilter)
+        && (this.visualLayer !== 'memory' || project.hasMemoryContext);
+    });
+
+    this.projects = this.filteredProjects;
     // Run bin-packing layout
-    const districts = this.binPacker.packDistricts(this.projects);
+    const districts = this.binPacker.packDistricts(this.filteredProjects);
 
     // Create buildings in scene
     if (this.sceneManager) {
-      this.sceneManager.buildCity(this.projects, districts);
+      this.sceneManager.clearAllWeather();
+      this.sceneManager.buildCity(this.filteredProjects, districts);
+
+      if (this.visualLayer === 'git') {
+        this.filteredProjects.forEach((project) => {
+          if (!project.gitActivity) return;
+          this.sceneManager?.applyWeather(project.path, {
+            ...project.gitActivity,
+            projectPath: project.path,
+          });
+        });
+      }
     }
+
+    this.updateSummary();
+    this.updateInspector();
+  }
+
+  private updateFilterOptions(): void {
+    const applyOptions = (select: HTMLSelectElement | null, values: string[], current: string) => {
+      if (!select) return;
+      const selected = values.includes(current) ? current : 'all';
+      select.replaceChildren();
+      values.forEach((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value === 'all' ? 'All' : value;
+        select.appendChild(option);
+      });
+      select.value = selected;
+    };
+
+    const statuses = ['all', ...Array.from(new Set(this.allProjects.map((p) => p.status).filter(Boolean))).sort()];
+    const priorities = ['all', ...Array.from(new Set(this.allProjects.map((p) => p.priority).filter(Boolean))).sort()];
+    const categories = ['all', ...Array.from(new Set(this.allProjects.map((p) => p.category).filter(Boolean))).sort()];
+
+    applyOptions(this.statusSelect, statuses, this.statusFilter);
+    applyOptions(this.prioritySelect, priorities, this.priorityFilter);
+    applyOptions(this.categorySelect, categories, this.categoryFilter);
   }
 
   private cycleByStatus(status: string): void {
@@ -465,6 +564,189 @@ category: default
     container.appendChild(saveBtn);
   }
 
+  private addCommandPanel(container: HTMLElement): void {
+    const panel = document.createElement('div');
+    panel.className = 'hypernovum-command-panel';
+    panel.innerHTML = `
+      <div class="command-panel-header">
+        <span class="command-panel-title">PROJECTS</span>
+        <span class="command-panel-summary">Loading...</span>
+      </div>
+      <input class="command-search" type="search" placeholder="Search projects" />
+      <div class="command-row">
+        <label>Layer</label>
+        <select class="layer-select">
+          <option value="status">Status</option>
+          <option value="git">Git Activity</option>
+          <option value="memory">Memory Ready</option>
+        </select>
+      </div>
+      <div class="command-filters">
+        <select class="status-select"><option value="all">All status</option></select>
+        <select class="priority-select"><option value="all">All priority</option></select>
+        <select class="category-select"><option value="all">All categories</option></select>
+      </div>
+    `;
+
+    const searchInput = panel.querySelector('.command-search') as HTMLInputElement;
+    const layerSelect = panel.querySelector('.layer-select') as HTMLSelectElement;
+    this.statusSelect = panel.querySelector('.status-select') as HTMLSelectElement;
+    this.prioritySelect = panel.querySelector('.priority-select') as HTMLSelectElement;
+    this.categorySelect = panel.querySelector('.category-select') as HTMLSelectElement;
+    this.summaryEl = panel.querySelector('.command-panel-summary') as HTMLElement;
+
+    searchInput.addEventListener('input', () => {
+      this.searchQuery = searchInput.value;
+      this.applyFiltersAndRebuild();
+    });
+
+    layerSelect.addEventListener('change', () => {
+      this.visualLayer = layerSelect.value as VisualLayer;
+      this.applyFiltersAndRebuild();
+    });
+
+    this.statusSelect.addEventListener('change', () => {
+      this.statusFilter = this.statusSelect?.value ?? 'all';
+      this.applyFiltersAndRebuild();
+    });
+
+    this.prioritySelect.addEventListener('change', () => {
+      this.priorityFilter = this.prioritySelect?.value ?? 'all';
+      this.applyFiltersAndRebuild();
+    });
+
+    this.categorySelect.addEventListener('change', () => {
+      this.categoryFilter = this.categorySelect?.value ?? 'all';
+      this.applyFiltersAndRebuild();
+    });
+
+    container.appendChild(panel);
+  }
+
+  private addInspectorPanel(container: HTMLElement): void {
+    const panel = document.createElement('div');
+    panel.className = 'hypernovum-project-inspector';
+    panel.innerHTML = '<div class="inspector-empty">Select a project</div>';
+    this.inspectorPanel = panel;
+    container.appendChild(panel);
+  }
+
+  private selectProject(project: ProjectData): void {
+    this.selectedProject = project;
+
+    if (project.position && this.sceneManager) {
+      this.sceneManager.setFocusedProject(project);
+    }
+
+    this.updateInspector();
+  }
+
+  private updateSummary(): void {
+    if (!this.summaryEl) return;
+    const gitCount = this.allProjects.filter((p) => p.gitActivity).length;
+    const memoryCount = this.allProjects.filter((p) => p.hasMemoryContext).length;
+    this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory`;
+  }
+
+  private updateInspector(): void {
+    if (!this.inspectorPanel) return;
+
+    if (!this.selectedProject) {
+      this.inspectorPanel.innerHTML = '<div class="inspector-empty">Select a project</div>';
+      return;
+    }
+
+    const project = this.selectedProject;
+    const projectPath = this.resolveProjectPath(project);
+    const git = project.gitActivity;
+    const memoryState = project.hasMemoryContext ? 'Ready' : 'Not found';
+
+    this.inspectorPanel.innerHTML = `
+      <div class="inspector-header">
+        <span class="inspector-kicker">PROJECT</span>
+        <h3>${this.escapeHtml(project.title)}</h3>
+      </div>
+      <div class="inspector-grid">
+        <div><span>Status</span><strong>${this.escapeHtml(project.status)}</strong></div>
+        <div><span>Priority</span><strong>${this.escapeHtml(project.priority)}</strong></div>
+        <div><span>Category</span><strong>${this.escapeHtml(project.category)}</strong></div>
+        <div><span>Memory</span><strong>${memoryState}</strong></div>
+      </div>
+      <div class="inspector-section">
+        <span class="section-label">Git Signals</span>
+        <div class="signal-row"><span>Branch</span><strong>${this.escapeHtml(git?.activeBranch ?? 'n/a')}</strong></div>
+        <div class="signal-row"><span>Last commit</span><strong>${git?.lastCommitDate ? this.formatRelativeTime(git.lastCommitDate) : 'n/a'}</strong></div>
+        <div class="signal-row"><span>30d commits</span><strong>${git?.commitsLast30d ?? 0}</strong></div>
+        <div class="signal-row"><span>Working tree</span><strong>${git?.hasUncommittedChanges ? 'Changed' : 'Clean'}</strong></div>
+      </div>
+      <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
+      <div class="inspector-actions">
+        <button data-action="note">Open Note</button>
+        <button data-action="folder">Folder</button>
+        <button data-action="agent">Launch Agent</button>
+        <button data-action="context">Context</button>
+        <button data-action="focus">Focus</button>
+      </div>
+    `;
+
+    this.inspectorPanel.querySelector('[data-action="note"]')?.addEventListener('click', () => {
+      this.app.workspace.openLinkText(project.path, '', false);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="folder"]')?.addEventListener('click', async () => {
+      const result = await TerminalLauncher.openInExplorer(projectPath);
+      new Notice(result.success ? `Opened ${project.title} folder` : `Failed to open folder: ${result.message}`);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="agent"]')?.addEventListener('click', async () => {
+      await this.launchAgentForProject(project, projectPath);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="context"]')?.addEventListener('click', () => {
+      this.copyAgentContext(project, projectPath);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="focus"]')?.addEventListener('click', () => {
+      if (project.position && this.sceneManager) {
+        this.sceneManager.focusOnPosition(project.position);
+        this.sceneManager.setFocusedProject(project);
+      }
+    });
+  }
+
+  private copyAgentContext(project: ProjectData, projectPath: string): void {
+    const vaultPath = (this.app.vault.adapter as any).basePath as string;
+    generateAgentContext(projectPath, vaultPath, {
+      project,
+      weather: project.gitActivity ?? null,
+      memoryContextPath: project.memoryContextPath ?? null,
+    });
+
+    const setupPath = path.join(projectPath, '.hypernovum', 'SETUP.md');
+    navigator.clipboard.writeText(setupPath);
+    new Notice('Agent context path copied');
+  }
+
+  private formatRelativeTime(epochMs: number): string {
+    const elapsedMs = Date.now() - epochMs;
+    const days = Math.floor(elapsedMs / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return '1 day ago';
+    if (days < 30) return `${days} days ago`;
+    const months = Math.floor(days / 30);
+    return months === 1 ? '1 month ago' : `${months} months ago`;
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[char] ?? char));
+  }
+
   private async saveLayout(positions: BlockPosition[]): Promise<void> {
     this.plugin.settings.blockPositions = positions;
     await this.plugin.saveSettings();
@@ -613,6 +895,15 @@ category: default
 
     menu.addItem((item) => {
       item
+        .setTitle('Inspect Project')
+        .setIcon('panel-right')
+        .onClick(() => {
+          this.selectProject(project);
+        });
+    });
+
+    menu.addItem((item) => {
+      item
         .setTitle('📂 Open in Explorer')
         .setIcon('folder-open')
         .onClick(async () => {
@@ -643,7 +934,7 @@ category: default
         .onClick(() => {
           if (project.position && this.sceneManager) {
             this.sceneManager.focusOnPosition(project.position);
-            this.sceneManager.setFocusedProject(project);
+            this.selectProject(project);
           }
         });
     });
@@ -700,7 +991,11 @@ category: default
 
     // Write agent context before launching
     const vaultPath = (this.app.vault.adapter as any).basePath as string;
-    generateAgentContext(projectPath, vaultPath);
+    generateAgentContext(projectPath, vaultPath, {
+      project,
+      weather: project.gitActivity ?? null,
+      memoryContextPath: project.memoryContextPath ?? null,
+    });
 
     const result = await TerminalLauncher.launch({
       projectPath,

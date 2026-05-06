@@ -1504,6 +1504,25 @@ export class SceneManager {
       <div class="tooltip-row"><span>Files:</span> ${project.noteCount}</div>
     `;
 
+    if (project.gitActivity) {
+      const lastCommit = project.gitActivity.lastCommitDate
+        ? this.formatRelativeTime(project.gitActivity.lastCommitDate)
+        : 'none';
+      html += `
+        <div class="tooltip-enriched-section">
+          <div class="tooltip-row tooltip-enriched"><span>Git:</span> ${lastCommit}</div>
+          <div class="tooltip-row tooltip-enriched"><span>Branch:</span> ${this.escapeHtml(project.gitActivity.activeBranch || 'unknown')}</div>
+          <div class="tooltip-row tooltip-enriched"><span>30d commits:</span> ${project.gitActivity.commitsLast30d}</div>
+        </div>
+      `;
+    }
+
+    if (project.hasMemoryContext) {
+      html += `
+        <div class="tooltip-row tooltip-enriched"><span>Memory:</span> <span class="tooltip-memory">Context ready</span></div>
+      `;
+    }
+
     if (project.stack && project.stack.length > 0) {
       html += `
         <div class="tooltip-stack-section">
@@ -1573,6 +1592,17 @@ export class SceneManager {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  private formatRelativeTime(epochMs: number): string {
+    const diff = Date.now() - epochMs;
+    if (diff < 60_000) return 'just now';
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
   }
 
   private animate = (): void => {

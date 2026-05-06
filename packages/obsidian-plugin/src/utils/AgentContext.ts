@@ -1,11 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { ProjectData, WeatherData } from '@hypernovum/core';
 
 /**
  * Write .hypernovum/SETUP.md into a project directory before launching an agent.
  * Gives the agent immediate context about HYPERNOVUM and how to work with project data.
  */
-export function generateAgentContext(projectDir: string, vaultPath: string): void {
+export function generateAgentContext(
+  projectDir: string,
+  vaultPath: string,
+  opts?: { project?: ProjectData; weather?: WeatherData | null; memoryContextPath?: string | null },
+): void {
   try {
     const hvDir = path.join(projectDir, '.hypernovum');
     fs.mkdirSync(hvDir, { recursive: true });
@@ -27,8 +32,22 @@ HYPERNOVUM is a 3D "code city" that visualizes projects as buildings in a cyberp
 
 ## This Project
 
+- **Project title:** ${opts?.project?.title || path.basename(projectDir)}
 - **Project directory:** \`${projectDir.replace(/\\/g, '/')}\`
 - **Obsidian vault:** \`${vaultPath.replace(/\\/g, '/')}\`
+- **Project note:** ${opts?.project?.path ? `\`${opts.project.path}\`` : '_Unknown_'}
+- **Status:** ${opts?.project?.status || 'unknown'}
+- **Priority:** ${opts?.project?.priority || 'unknown'}
+- **Category:** ${opts?.project?.category || 'unknown'}
+
+## Current Signals
+
+- **Active branch:** ${opts?.weather?.activeBranch || 'unknown'}
+- **Last commit:** ${opts?.weather?.lastCommitDate ? new Date(opts.weather.lastCommitDate).toISOString() : 'unknown'}
+- **Commits in last 7 days:** ${opts?.weather?.commitsLast7d ?? 'unknown'}
+- **Commits in last 30 days:** ${opts?.weather?.commitsLast30d ?? 'unknown'}
+- **Uncommitted changes:** ${opts?.weather ? (opts.weather.hasUncommittedChanges ? 'yes' : 'no') : 'unknown'}
+- **Memory context:** ${opts?.memoryContextPath ? `available at \`${opts.memoryContextPath.replace(/\\/g, '/')}\`` : 'none detected'}
 
 ## How Projects Are Defined
 

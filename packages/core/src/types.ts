@@ -30,6 +30,12 @@ export interface ProjectData {
   stack?: string[];
   /** Absolute path to project directory (for terminal launch) */
   projectDir?: string;
+  /** True when .hypernovum/MEMORY_CONTEXT.md exists for this project */
+  hasMemoryContext?: boolean;
+  /** Absolute path to memory context file when present */
+  memoryContextPath?: string;
+  /** Last collected read-only Git activity for this project */
+  gitActivity?: WeatherData;
 
   // Populated by layout engine
   position?: { x: number; y: number; z: number };
@@ -82,6 +88,8 @@ export interface HypernovumSettings {
   bloomIntensity: number;
   /** Enable atmospheric fog effect */
   enableAtmosphere: boolean;
+  /** Enable read-only local Git activity overlay */
+  enableGitActivity: boolean;
 }
 
 /**
@@ -106,6 +114,8 @@ export interface WeatherData {
   staleBranchCount: number;
   /** Normalized churn score 0-100 */
   churnScore: number;
+  /** Active branch name when available */
+  activeBranch?: string;
 }
 
 /** Default settings values */
@@ -119,4 +129,5 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   enableBloom: false,
   bloomIntensity: 0.8,
   enableAtmosphere: false,
+  enableGitActivity: true,
 };

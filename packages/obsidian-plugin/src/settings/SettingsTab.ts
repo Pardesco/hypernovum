@@ -89,6 +89,16 @@ export class SettingsTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(containerEl)
+      .setName('Git activity layer')
+      .setDesc('Read local Git metadata from projectDir folders to show stale, hot, dirty, and branch status.')
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.enableGitActivity).onChange(async (value) => {
+          this.plugin.settings.enableGitActivity = value;
+          await this.plugin.saveSettings();
+        }),
+      );
+
     containerEl.createEl('h3', { text: 'Agent' });
 
     new Setting(containerEl)

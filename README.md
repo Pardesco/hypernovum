@@ -1,6 +1,6 @@
 # Hypernovum
 
-A 3D **Code City** dashboard for [Obsidian](https://obsidian.md) — visualize your projects as a living cyberpunk cityscape.
+A 3D project dashboard for [Obsidian](https://obsidian.md). Visualize notes as a code city, track Git activity, inspect project status, and launch AI coding agents from your vault.
 
 Each project in your vault becomes a building. Status maps to color, priority to height, category to district. A central **Neural Core** pulses with activity as you work, and **Data Arteries** flow from the core to buildings when files change.
 
@@ -16,8 +16,11 @@ Each project in your vault becomes a building. Status maps to color, priority to
 - **Hover tooltips** showing status, priority, health, and tech stack
 
 ### Interactions
+- **Search and filters** for quickly narrowing the city by title, status, priority, category, path, or stack
+- **Visual layers** for status, read-only Git activity, and memory-ready projects
+- **Project inspector** with note/folder/agent/context/focus actions
 - **Click** a building to open its note
-- **Right-click** a building for context menu (Launch Claude, Open in Explorer, Open Note, Focus Camera)
+- **Right-click** a building for context menu (Launch Agent, Inspect Project, Open in Explorer, Open Note, Focus Camera)
 - **Right-click** the Neural Core orb to launch Claude Code in any folder via OS folder picker
 - **Double-click** a building to enter move mode (reposition individual buildings)
 - **Drag handles** to rearrange entire category blocks
@@ -33,8 +36,14 @@ Each project in your vault becomes a building. Status maps to color, priority to
 - **Activity Monitor** polls `.hypernovum-status.json` for real-time Claude Code status
 - **Persistent streaming artery** while Claude is actively working on a project
 - **Activity indicator overlay** shows current project and action
-- **Terminal Launcher** — right-click any building or the Neural Core to launch Claude Code
+- **Terminal Launcher** for launching Claude Code, Codex, Gemini CLI, Aider, or a custom agent command
+- **Agent context handoff** writes `.hypernovum/SETUP.md` with project metadata, Git signals, and memory context pointers before launch
 - **Heartbeat script** (`scripts/heartbeat.js`) for Claude Code hooks integration
+
+### Git & Memory Signals
+- **Read-only Git activity layer** shows recent commit velocity, branch, working-tree state, stale projects, and merge conflict signals
+- **Memory-ready filter** finds projects that already have `.hypernovum/MEMORY_CONTEXT.md`
+- **Funding metadata** is included for users who want to support the free plugin
 
 ### HUD
 - **HYPERNOVUM** neon title with flashing block cursor at top center
@@ -98,7 +107,7 @@ Built with [Three.js](https://threejs.org/), [Zustand](https://github.com/pmndrs
 
 ## Hypernovum Pro
 
-For a standalone desktop experience beyond Obsidian — featuring Engram Persistent Agent Memory (agents remember your codebase across sessions), AI agent management, MCP server integration, and more — check out [Hypernovum Pro](https://studio.pardesco.com/hypernovum).
+This Obsidian plugin remains free and open source. For a standalone desktop experience beyond Obsidian — featuring full Engram Persistent Agent Memory, AI agent management, MCP server integration, Tandem Terminal, broader project scanning, and more — check out [Hypernovum Pro](https://studio.pardesco.com/hypernovum).
 
 ![Hypernovum Pro](site/assets/hypernovum-pro.gif)
 

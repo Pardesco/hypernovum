@@ -3,8 +3,9 @@
   "name": "Hypernovum",
   "version": "0.3.0",
   "minAppVersion": "1.0.0",
-  "description": "3D Code City Dashboard — visualize your vault as a cityscape where buildings encode project health, priority, and momentum.",
+  "description": "3D project dashboard for Obsidian: visualize notes as a code city, track Git activity, inspect project status, and launch AI coding agents.",
   "author": "Randall Morgan",
   "authorUrl": "https://github.com/pardesco",
+  "fundingUrl": "https://github.com/sponsors/pardesco",
   "isDesktopOnly": true
 }

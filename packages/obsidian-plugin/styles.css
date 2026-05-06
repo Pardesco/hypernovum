@@ -86,6 +86,21 @@
 .hypernovum-tooltip .status-paused { color: #3366cc; }
 .hypernovum-tooltip .status-complete { color: #9966cc; }
 
+.hypernovum-tooltip .tooltip-enriched-section {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(100, 140, 180, 0.2);
+}
+
+.hypernovum-tooltip .tooltip-enriched {
+  color: rgba(190, 220, 255, 0.86);
+}
+
+.hypernovum-tooltip .tooltip-memory {
+  color: #66e0a3;
+  font-weight: 600;
+}
+
 /* Stack tooltip (on foundation hover - follows cursor) */
 .hypernovum-stack-tooltip {
   background: linear-gradient(135deg, rgba(30, 30, 50, 0.95), rgba(20, 20, 35, 0.95));
@@ -545,7 +560,247 @@
 .vault-mode .agents-panel {
   display: none !important;
 }
+
+/* Project command panel */
+.hypernovum-command-panel {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 170;
+  width: min(380px, calc(100% - 360px));
+  min-width: 300px;
+  padding: 10px;
+  border: 1px solid rgba(120, 150, 190, 0.25);
+  border-radius: 8px;
+  background: rgba(6, 10, 18, 0.9);
+  color: rgba(230, 235, 250, 0.9);
+  font-family: var(--font-interface);
+  backdrop-filter: blur(12px);
+}
+
+.command-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.command-panel-title {
+  font-family: var(--font-monospace, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(210, 225, 255, 0.65);
+}
+
+.command-panel-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: rgba(170, 190, 220, 0.64);
+}
+
+.command-search {
+  width: 100%;
+  height: 30px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(120, 150, 190, 0.25);
+  border-radius: 6px;
+  background: rgba(12, 18, 30, 0.8);
+  color: rgba(240, 245, 255, 0.95);
+  font-size: 12px;
+}
+
+.command-row {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.command-row label {
+  font-size: 10px;
+  color: rgba(170, 190, 220, 0.64);
+  text-transform: uppercase;
+}
+
+.command-row select,
+.command-filters select {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(120, 150, 190, 0.22);
+  border-radius: 6px;
+  background: rgba(12, 18, 30, 0.82);
+  color: rgba(235, 240, 255, 0.88);
+  font-size: 11px;
+}
+
+.command-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+/* Project inspector */
+.hypernovum-project-inspector {
+  position: absolute;
+  top: 66px;
+  right: 16px;
+  z-index: 160;
+  width: 320px;
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid rgba(120, 150, 190, 0.25);
+  border-radius: 8px;
+  background: rgba(6, 10, 18, 0.9);
+  color: rgba(230, 235, 250, 0.9);
+  font-family: var(--font-interface);
+  backdrop-filter: blur(12px);
+}
+
+.inspector-empty {
+  font-size: 12px;
+  color: rgba(170, 190, 220, 0.58);
+}
+
+.inspector-header {
+  margin-bottom: 12px;
+}
+
+.inspector-kicker,
+.section-label {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(170, 190, 220, 0.6);
+}
+
+.inspector-header h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.inspector-grid div,
+.signal-row {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(120, 150, 190, 0.16);
+  border-radius: 6px;
+  background: rgba(18, 26, 42, 0.55);
+}
+
+.inspector-grid span,
+.signal-row span {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  color: rgba(170, 190, 220, 0.6);
+}
+
+.inspector-grid strong,
+.signal-row strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: rgba(240, 245, 255, 0.94);
+}
+
+.inspector-section {
+  margin-bottom: 12px;
+}
+
+.signal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.signal-row span,
+.signal-row strong {
+  margin: 0;
+}
+
+.inspector-path {
+  margin-bottom: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(180, 200, 230, 0.64);
+  font-family: var(--font-monospace, monospace);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.inspector-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.inspector-actions button {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(120, 170, 220, 0.28);
+  border-radius: 6px;
+  background: rgba(25, 45, 70, 0.72);
+  color: rgba(240, 245, 255, 0.88);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.inspector-actions button:hover {
+  border-color: rgba(140, 190, 240, 0.48);
+  background: rgba(34, 60, 92, 0.84);
+}
 .vault-mode .hypernovum-activity-indicator {
   display: none !important;
+}
+
+@media (max-width: 920px) {
+  .hypernovum-command-panel {
+    top: 58px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    min-width: 0;
+    transform: none;
+  }
+
+  .hypernovum-project-inspector {
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: 58px;
+    width: auto;
+    max-height: 36%;
+  }
+
+  .hypernovum-legend {
+    display: none;
+  }
 }
 
