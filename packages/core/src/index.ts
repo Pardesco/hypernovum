@@ -1,5 +1,6 @@
-// Version tracking — update after every meaningful change to core
-export const CORE_BUILD_VERSION = '2026-02-26-5efc807';
+// Version tracking — 'dev' in source; the build script stamps dist with
+// `<pkg version>+<git short hash>.<date>` so the artifact can't drift silently.
+export const CORE_BUILD_VERSION = 'dev';
 
 // Types
 export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData } from './types';

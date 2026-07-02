@@ -57,6 +57,7 @@ export class SceneManager {
   private tooltipLeader: THREE.Group | null = null;
   private buildings: THREE.Mesh[] = [];
   private foundations: THREE.Mesh[] = [];
+  private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -397,6 +398,7 @@ export class SceneManager {
     });
     this.buildings = [];
     this.foundations = [];
+    this.blockedEdgeGlows = [];
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
@@ -772,8 +774,9 @@ export class SceneManager {
     foundationWireframe.userData = { isFoundation: true, project };
     this.scene.add(foundationWireframe);
 
-    // Building shape varies by category (via BuildingFactory)
-    const geometry = BuildingFactory.createBuilding(project);
+    // Building silhouette: category-specific parametric shape where one is
+    // mapped, status/height-based BuildingFactory shape otherwise
+    const geometry = this.createBuildingGeometry(project);
 
     // Try shader material if enabled, fallback to standard material
     let material: THREE.Material;
@@ -827,32 +830,59 @@ export class SceneManager {
     wireframe.position.copy(mesh.position);
     wireframe.userData = { isBuilding: true, project, isEdgeGlow: true };
     this.scene.add(wireframe);
+    if (project.status === 'blocked') {
+      this.blockedEdgeGlows.push(wireframe);
+    }
   }
 
-  private createBuildingGeometry(category: string, width: number, height: number, depth: number): THREE.BufferGeometry {
-    // Procedural Sci-Fi Architecture - parametric silhouettes
-    switch (category) {
+  /**
+   * Building silhouette selection. Categories with a mapped parametric shape
+   * get their GeometryFactory silhouette; everything else falls back to the
+   * status/height-driven BuildingFactory shapes (so unmapped categories keep
+   * the established look — the old default-to-plain-box behavior flattened
+   * the city, which is part of why this wiring was previously reverted).
+   *
+   * GeometryFactory shapes are CENTER-anchored while createBuilding expects
+   * bottom-anchored geometry (base at y=0) — bottom-anchor via bounding box.
+   */
+  private createBuildingGeometry(project: ProjectData): THREE.BufferGeometry {
+    const { width, height, depth } = project.dimensions!;
+    let geometry: THREE.BufferGeometry;
+
+    switch (project.category) {
       case 'web-apps':
-        // "The Helix Tower" - twisting tower representing the stack
-        return GeometryFactory.createHelixTower(width, height, depth);
+        // "The Helix Tower" — twisting tower representing the stack
+        geometry = GeometryFactory.createHelixTower(width, height, depth);
+        break;
       case 'visualization':
-        // "The Data Shard" - dual-crystal, abstract mathematical
-        return GeometryFactory.createDataShard(width * 0.7, height);
+        // "The Data Shard" — the octahedron spans ±h, so pass height/2
+        // for a total visual height of `height`
+        geometry = GeometryFactory.createDataShard(width * 0.7, height / 2);
+        break;
       case 'infrastructure':
-        // "The Brutalist Ziggurat" - heavy stepped pyramid
-        return GeometryFactory.createZiggurat(width, height, depth);
+        // "The Brutalist Ziggurat" — heavy stepped pyramid
+        geometry = GeometryFactory.createZiggurat(width, height, depth);
+        break;
       case 'trading':
-        // "The Quant Blade" - sharp triangular prism, aggressive
-        return GeometryFactory.createQuantBlade(width, height);
+        // "The Quant Blade" — sharp triangular prism, aggressive
+        geometry = GeometryFactory.createQuantBlade(width, height);
+        break;
       case 'obsidian-plugins':
-        // "The Modular Hive" - hexagonal column
-        return GeometryFactory.createHive(width / 2, height);
+        // "The Modular Hive" — hexagonal column
+        geometry = GeometryFactory.createHive(width / 2, height);
+        break;
       case 'content':
-        // "The Memory Core" - ribbed cylinder
-        return GeometryFactory.createMemoryCore(width / 2, height);
+        // "The Memory Core" — ribbed cylinder
+        geometry = GeometryFactory.createMemoryCore(width / 2, height);
+        break;
       default:
-        return GeometryFactory.createDefault(width, height, depth);
+        // Bottom-anchored already — BuildingFactory translates its shapes
+        return BuildingFactory.createBuilding(project);
     }
+
+    geometry.computeBoundingBox();
+    geometry.translate(0, -geometry.boundingBox!.min.y, 0);
+    return geometry;
   }
 
   private createFallbackMaterial(project: ProjectData, baseColor: THREE.Color): THREE.MeshStandardMaterial {
@@ -1775,16 +1805,12 @@ export class SceneManager {
       mat.emissiveIntensity = 0.25 + Math.sin(elapsed * 2 + handle.position.x * 0.5) * 0.15;
     }
 
-    // Animate edge glow for blocked buildings
-    this.scene.traverse((obj) => {
-      if (obj instanceof THREE.LineSegments && obj.userData.isEdgeGlow) {
-        const project = obj.userData.project as ProjectData;
-        if (project?.status === 'blocked') {
-          const mat = obj.material as THREE.LineBasicMaterial;
-          mat.opacity = 0.4 + Math.sin(elapsed * 4) * 0.25;
-        }
-      }
-    });
+    // Animate edge glow for blocked buildings — tracked array, NOT a
+    // full-scene traverse (that walked every object in the graph per frame)
+    for (const glow of this.blockedEdgeGlows) {
+      const mat = glow.material as THREE.LineBasicMaterial;
+      mat.opacity = 0.4 + Math.sin(elapsed * 4) * 0.25;
+    }
 
     // Clamp pan target so camera can't drift into the void
     const t = this.controls.target;

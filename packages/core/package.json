@@ -1,6 +1,6 @@
 {
   "name": "@hypernovum/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Platform-agnostic 3D city visualization engine for code projects",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,7 +15,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --build --force && node -e \"const fs=require('fs');fs.mkdirSync('dist/shaders',{recursive:true});fs.copyFileSync('src/shaders/building.vert','dist/shaders/building.vert');fs.copyFileSync('src/shaders/building.frag','dist/shaders/building.frag')\"",
+    "build": "tsc --build --force && node scripts/stamp-build.mjs",
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
     "prepublishOnly": "npm run clean && npm run build"
   },

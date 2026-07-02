@@ -105,6 +105,31 @@ correct. Fully ungated — Pro is a separate app, not an unlock (right call).
   copies the plugin into `.obsidian/plugins/`), but loose `Untitled*.md/.base`
   files and stale `tsconfig.tsbuildinfo` are committed/untracked noise.
 
+## Status update (2026-07-02, same day)
+
+**Done in commit `207a8cb` (marketplace readiness):**
+- TerminalLauncher injection fixed (argv-only Windows/Linux, layered
+  AppleScript+shell escaping on macOS) AND the fallback chain actually works now
+  (spawn() errors are async; a spawn-event helper resolves each attempt).
+- Agent switcher innerHTML → createEl/textContent; swallowed create-project
+  error fixed; head-injected <style> replaced with the existing
+  `.hypernovum-cursor` class; console.logs removed; orphan src/styles.css deleted.
+- Release plumbing: `versions.json`, root `manifest.json`,
+  `.github/workflows/release.yml` (tag-triggered, verifies tag == manifest
+  version, attaches main.js/manifest.json/styles.css); main.js untracked.
+
+## Marketplace submission path (remaining)
+
+1. Push master, then bump to **0.3.1**: plugin `manifest.json` + `package.json`,
+   mirror to root `manifest.json`, add `"0.3.1": "1.0.0"` to `versions.json`.
+2. `git tag 0.3.1 && git push origin 0.3.1` — NO "v" prefix; the workflow builds
+   and creates the release with the three required assets.
+3. Submit a PR to `obsidianmd/obsidian-releases` adding the plugin to
+   `community-plugins.json` (id `hypernovum`, repo `Pardesco/hypernovum`).
+   Review queue is typically a few weeks.
+4. Before submitting: drop "for Obsidian" from the manifest description
+   (reviewers flag it as redundant).
+
 ## Suggested order of work
 
 1. Plugin security + review-blockers (items 1–5) — small, high-stakes.
