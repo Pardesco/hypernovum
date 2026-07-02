@@ -1,0 +1,52 @@
+# Builds the Obsidian plugin and attaches the three release assets Obsidian
+# requires (main.js, manifest.json, styles.css) to the tagged GitHub release.
+#
+# Release flow:
+#   1. Bump version in packages/obsidian-plugin/manifest.json + package.json,
+#      mirror to root manifest.json, and add the entry to versions.json.
+#   2. git tag <version> (tag must EXACTLY match manifest "version", no "v" prefix)
+#   3. git push origin <version>
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build core + plugin
+        run: npm run build
+
+      - name: Verify tag matches manifest version
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./packages/obsidian-plugin/manifest.json').version")
+          if [ "$MANIFEST_VERSION" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match manifest version ${MANIFEST_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Create release with plugin assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            packages/obsidian-plugin/main.js \
+            packages/obsidian-plugin/manifest.json \
+            packages/obsidian-plugin/styles.css

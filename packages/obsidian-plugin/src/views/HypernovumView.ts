@@ -135,7 +135,7 @@ category: default
                      new Notice(`Project folder already exists: ${folderPath}`);
                   }
                 } catch (error: any) {
-                  new Notice(`Failed to create project: `);
+                  new Notice(`Failed to create project: ${error?.message ?? error}`);
                 }
               }).open();
             });
@@ -208,7 +208,6 @@ category: default
         onActivityUpdate: (status) => this.onClaudeActivityUpdate(status),
         onActivityStop: () => this.onClaudeActivityStop(),
         onProjectChange: (newProject, oldProject) => {
-          console.log('[Hypernovum] Project changed:', oldProject, '->', newProject);
         },
       });
       this.activityMonitor.start();
@@ -419,14 +418,14 @@ category: default
       const installed = agentsToRender.filter(a => detectedMap[a.command] !== false);
       const notInstalled = agentsToRender.filter(a => detectedMap[a.command] === false);
 
-      // Render installed
+      // Render installed — DOM API, not innerHTML: agent.name/icon can come
+      // from user settings (custom agent) and must land as text, not markup.
       for (const agent of installed) {
         const item = document.createElement('div');
         item.className = 'agents-item' + (currentCommand === agent.command ? ' active' : '');
-        item.innerHTML = `
-          <div class="agents-icon-circle" style="background: ${agent.color}">${agent.icon}</div>
-          <span class="agents-item-name">${agent.name}</span>
-        `;
+        const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
+        iconCircle.style.background = agent.color;
+        item.createSpan({ cls: 'agents-item-name', text: agent.name });
         if (currentCommand === agent.command) {
           item.style.borderLeftColor = agent.color;
         }
@@ -443,18 +442,22 @@ category: default
       if (notInstalled.length > 0) {
         notInstalledSection.style.display = 'block';
         countSpan.textContent = notInstalled.length.toString();
-        toggleBtn.innerHTML = `${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (<span class="not-installed-count">${notInstalled.length}</span>)`;
-        
+        toggleBtn.empty();
+        toggleBtn.appendText(`${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (`);
+        toggleBtn.createSpan({ cls: 'not-installed-count', text: String(notInstalled.length) });
+        toggleBtn.appendText(')');
+
         for (const agent of notInstalled) {
           const item = document.createElement('div');
           item.className = 'agents-item not-detected';
-          item.innerHTML = `
-            <div class="agents-icon-circle" style="background: ${agent.color}55">${agent.icon}</div>
-            <span class="agents-item-name">${agent.name}</span>
-            <button class="agents-install-pill" title="${agent.installHint}">Install</button>
-          `;
-          
-          const installBtn = item.querySelector('.agents-install-pill') as HTMLButtonElement;
+          const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
+          iconCircle.style.background = `${agent.color}55`;
+          item.createSpan({ cls: 'agents-item-name', text: agent.name });
+          const installBtn = item.createEl('button', {
+            cls: 'agents-install-pill',
+            text: 'Install',
+            attr: { title: agent.installHint },
+          });
           installBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             navigator.clipboard.writeText(agent.installHint);
@@ -757,7 +760,6 @@ category: default
   private triggerRandomFlow(): void {
     if (this.projects.length === 0 || !this.sceneManager) return;
     const randomProject = this.projects[Math.floor(Math.random() * this.projects.length)];
-    console.log('[Hypernovum] Debug flow triggered for:', randomProject.title);
     this.sceneManager.triggerFlow(randomProject.path);
   }
 
@@ -798,7 +800,6 @@ category: default
 
   /** Handle Claude Code activity start */
   private onClaudeActivityStart(status: ActivityStatus): void {
-    console.log('[Hypernovum] Claude activity started:', status);
 
     this.updateActivityIndicator(status, true);
 
@@ -809,7 +810,6 @@ category: default
     if (project) {
       this.sceneManager.startStreaming(project.path);
     } else {
-      console.log('[Hypernovum] No matching project found for:', status.project);
     }
   }
 
@@ -831,7 +831,6 @@ category: default
 
   /** Handle Claude Code activity stop */
   private onClaudeActivityStop(): void {
-    console.log('[Hypernovum] Claude activity stopped');
 
     this.updateActivityIndicator(null, false);
 
@@ -1036,17 +1035,11 @@ category: default
 
     const cursor = document.createElement('span');
     cursor.textContent = '\u2588';
-    cursor.style.animation = 'cursor-blink 1.06s step-end infinite';
+    // Keyframes + animation live in styles.css (.hypernovum-cursor) \u2014 never
+    // inject <style> into document.head; it leaks across plugin reloads.
+    cursor.className = 'hypernovum-cursor';
     title.textContent = 'HYPERNOVUM';
     title.appendChild(cursor);
-
-    // Inject cursor blink keyframes if not already present
-    if (!document.getElementById('hypernovum-cursor-anim')) {
-      const style = document.createElement('style');
-      style.id = 'hypernovum-cursor-anim';
-      style.textContent = '@keyframes cursor-blink { 0%,50%{opacity:1} 50.01%,100%{opacity:0} }';
-      document.head.appendChild(style);
-    }
 
     container.appendChild(title);
   }

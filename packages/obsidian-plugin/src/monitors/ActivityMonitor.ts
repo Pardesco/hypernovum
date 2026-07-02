@@ -51,7 +51,6 @@ export class ActivityMonitor {
     if (this.pollTimer !== null) return;
 
     this.pollTimer = window.setInterval(() => this.poll(), this.pollInterval);
-    console.log('[Hypernovum] Activity monitor started');
 
     // Initial poll
     this.poll();
@@ -63,7 +62,6 @@ export class ActivityMonitor {
       window.clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
-    console.log('[Hypernovum] Activity monitor stopped');
   }
 
   /** Check current activity status */

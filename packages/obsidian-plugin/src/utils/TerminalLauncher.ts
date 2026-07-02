@@ -15,11 +15,40 @@ export interface LaunchOptions {
 }
 
 /**
- * Escape a string for safe embedding in AppleScript single-quoted strings.
- * Replaces \ with \\ and ' with '\'' (end quote, escaped quote, start quote).
+ * Escape for the AppleScript double-quoted string layer: \ and " would
+ * otherwise terminate/escape the script string itself.
  */
-function escapeAppleScript(str: string): string {
-  return str.replace(/\\/g, '\\\\').replace(/'/g, "'\\''");
+function escapeAppleScriptString(str: string): string {
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * POSIX shell single-quote escaping: close quote, escaped quote, reopen.
+ * Wraps the value so the shell treats it as one literal argument.
+ */
+function shellQuote(str: string): string {
+  return `'${str.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Spawn detached and resolve true once the process actually starts, false on
+ * spawn failure (e.g. binary not found). spawn() errors are ASYNC — a
+ * try/catch around spawn() never sees ENOENT, so fallbacks must wait for the
+ * 'spawn'/'error' events.
+ */
+function spawnDetached(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, {
+      ...opts,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.once('spawn', () => {
+      child.unref();
+      resolve(true);
+    });
+    child.once('error', () => resolve(false));
+  });
 }
 
 /**
@@ -35,7 +64,6 @@ export class TerminalLauncher {
     const { projectPath, command = 'claude', projectName } = options;
     const platform = this.getPlatform();
 
-    console.log(`[Hypernovum] Launching terminal for: ${projectPath} on ${platform}`);
 
     try {
       switch (platform) {
@@ -84,47 +112,35 @@ export class TerminalLauncher {
   ): Promise<LaunchResult> {
     // Normalize path for Windows
     const normalizedPath = projectPath.replace(/\//g, '\\');
+    const title = projectName || path.basename(projectPath);
 
-    // Try Windows Terminal first (wt), fall back to cmd
-    try {
-      // Windows Terminal with tab title
-      const title = projectName || path.basename(projectPath);
-      const child = spawn('wt', [
-        '-d', normalizedPath,
-        '--title', title,
-        'cmd', '/k', command
-      ], {
-        detached: true,
-        stdio: 'ignore',
-        shell: true,
-      });
-      child.unref();
-
+    // Try Windows Terminal first. Everything goes as argv — no shell:true, so
+    // metacharacters in the path/title can't be interpreted by an outer shell.
+    // (`command` is intentionally a command line; cmd /k runs it as such.)
+    const wtOk = await spawnDetached('wt.exe', [
+      '-d', normalizedPath,
+      '--title', title,
+      'cmd', '/k', command,
+    ]);
+    if (wtOk) {
       return {
         success: true,
         message: `Launched Windows Terminal in ${title}`,
         platform: 'windows',
       };
-    } catch (wtError) {
-      // Fallback to basic cmd
-      console.log('[Hypernovum] Windows Terminal not found, using cmd.exe');
+    }
 
-      const child = spawn('cmd', [
-        '/c', 'start', 'cmd', '/k',
-        `cd /d "${normalizedPath}" && ${command}`
-      ], {
-        detached: true,
-        stdio: 'ignore',
-        shell: true,
-      });
-      child.unref();
-
+    // Fallback: plain cmd window. cwd via options — nothing interpolated.
+    const cmdOk = await spawnDetached('cmd.exe', ['/k', command], { cwd: normalizedPath });
+    if (cmdOk) {
       return {
         success: true,
         message: `Launched cmd.exe in ${projectPath}`,
         platform: 'windows',
       };
     }
+
+    return { success: false, message: 'Could not launch a terminal', platform: 'windows' };
   }
 
   /**
@@ -136,9 +152,12 @@ export class TerminalLauncher {
     command: string,
     projectName?: string
   ): Promise<LaunchResult> {
-    const safePath = escapeAppleScript(projectPath);
-    const safeCommand = escapeAppleScript(command);
-    const cdAndRun = `cd '${safePath}' && ${safeCommand}`;
+    // Two escaping layers: the inner SHELL command (path single-quoted so the
+    // shell sees one literal), then the whole thing escaped for the
+    // AppleScript double-quoted string it gets embedded in ('"' would
+    // otherwise terminate the script string).
+    const shellCommand = `cd ${shellQuote(projectPath)} && ${command}`;
+    const cdAndRun = escapeAppleScriptString(shellCommand);
 
     // Try iTerm2 first — most popular macOS terminal for developers
     const iTermScript = `
@@ -173,19 +192,16 @@ export class TerminalLauncher {
     const terminalScript = `
       tell application "Terminal"
         activate
-        do script "cd '${safePath}' && ${safeCommand}"
+        do script "${cdAndRun}"
       end tell
     `;
 
-    const child = spawn('osascript', ['-e', terminalScript], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
-
+    const ok = await spawnDetached('osascript', ['-e', terminalScript]);
     return {
-      success: true,
-      message: `Launched Terminal.app in ${projectName || projectPath}`,
+      success: ok,
+      message: ok
+        ? `Launched Terminal.app in ${projectName || projectPath}`
+        : 'Could not launch a terminal',
       platform: 'macos',
     };
   }
@@ -215,30 +231,26 @@ export class TerminalLauncher {
     command: string,
     projectName?: string
   ): Promise<LaunchResult> {
-    // Common Linux terminal emulators in order of preference
-    const terminals = [
-      { cmd: 'gnome-terminal', args: ['--working-directory', projectPath, '--', 'bash', '-c', `${command}; exec bash`] },
-      { cmd: 'konsole', args: ['--workdir', projectPath, '-e', 'bash', '-c', `${command}; exec bash`] },
-      { cmd: 'xfce4-terminal', args: ['--working-directory', projectPath, '-e', `bash -c "${command}; exec bash"`] },
-      { cmd: 'xterm', args: ['-e', `cd "${projectPath}" && ${command} && bash`] },
+    // Common Linux terminal emulators in order of preference. Working
+    // directory goes via flag or spawn cwd — the project path is never
+    // interpolated into a shell string. (`command` is intentionally a command
+    // line, executed by the inner bash -c.)
+    const runCommand = `${command}; exec bash`;
+    const terminals: { cmd: string; args: string[]; cwd?: string }[] = [
+      { cmd: 'gnome-terminal', args: ['--working-directory', projectPath, '--', 'bash', '-c', runCommand] },
+      { cmd: 'konsole', args: ['--workdir', projectPath, '-e', 'bash', '-c', runCommand] },
+      { cmd: 'xfce4-terminal', args: ['--working-directory', projectPath, '-x', 'bash', '-c', runCommand] },
+      { cmd: 'xterm', args: ['-e', 'bash', '-c', runCommand], cwd: projectPath },
     ];
 
     for (const terminal of terminals) {
-      try {
-        const child = spawn(terminal.cmd, terminal.args, {
-          detached: true,
-          stdio: 'ignore',
-        });
-        child.unref();
-
+      const ok = await spawnDetached(terminal.cmd, terminal.args, { cwd: terminal.cwd });
+      if (ok) {
         return {
           success: true,
           message: `Launched ${terminal.cmd} in ${projectName || projectPath}`,
           platform: 'linux',
         };
-      } catch {
-        // Try next terminal
-        continue;
       }
     }
 

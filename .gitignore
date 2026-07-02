@@ -29,3 +29,6 @@ data.json
 projects/
 Untitled.base
 nul
+
+# Plugin build output (attached to GitHub releases by CI, not tracked)
+packages/obsidian-plugin/main.js
