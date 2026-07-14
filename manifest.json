@@ -3,7 +3,7 @@
   "name": "Hypernovum",
   "version": "0.3.0",
   "minAppVersion": "1.0.0",
-  "description": "3D project dashboard for Obsidian: visualize notes as a code city, track Git activity, inspect project status, and launch AI coding agents.",
+  "description": "Agent-ops 3D IDE for your second brain: visualize your vault as a Three.js code city, dispatch AI coding agents with full context, post research quests, and track Git activity live.",
   "author": "Randall Morgan",
   "authorUrl": "https://github.com/pardesco",
   "fundingUrl": "https://github.com/sponsors/pardesco",

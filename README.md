@@ -1,8 +1,8 @@
-# Hypernovum
+# Hypernovum — Agent Ops for Your Second Brain
 
-A 3D project dashboard for [Obsidian](https://obsidian.md). Visualize notes as a code city, track Git activity, inspect project status, and launch AI coding agents from your vault.
+A **3D IDE and agent-ops dashboard** for [Obsidian](https://obsidian.md), built on **Three.js**. Hypernovum turns your vault — your **second brain** — into a living cyberpunk code city: visualize projects and their backlinks in 3D, dispatch **AI coding agents** (Claude Code, GPT Codex, Antigravity CLI) with full vault context, post research quests for agents to resolve, and watch your entire fleet work in real time.
 
-Each project in your vault becomes a building. Status maps to color, priority to height, category to district. A central **Neural Core** pulses with activity as you work, and **Data Arteries** flow from the core to buildings when files change.
+Each project note becomes a building. Status maps to color, priority to height, category to district, vault backlinks to glowing **Neural Link** arcs. A central **Neural Core** pulses with activity as you work, **Data Arteries** flow to buildings when files change, and every active agent orbits its building as a colored orb.
 
 ![Hypernovum Obsidian Plugin](site/assets/obsidian-app.png)
 
@@ -15,15 +15,18 @@ Each project in your vault becomes a building. Status maps to color, priority to
 - **Smart labels** with CSS2D rendering and leader lines
 - **Hover tooltips** showing status, priority, health, and tech stack
 
+### Second Brain & Agent Ops
+- **Prepare vault for AI agents** — one click writes a marker-fenced `AGENTS.md` at the vault root: project schema, live inventory, quest board, skills roster, and heartbeat protocol, so any CLI agent instantly understands your second brain
+- **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md — resolving a quest (move it to `answered:`) fires an emerald shockwave at the building
+- **Abilities roster**: agent skills (`SKILL.md` files in vault or `~/.claude/skills/`) listed in the agents panel — click to copy an invocation
+- **Neural Links**: toggle vault backlinks between projects as pulsing violet knowledge arcs — your knowledge graph as city infrastructure
+- **Agent fleet presence**: multiple agents in the heartbeat file each get their own colored orb orbiting the building they're working on
+- **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
+
 ### Interactions
 - **Search and filters** for quickly narrowing the city by title, status, priority, category, path, or stack
 - **Visual scan modes**: status, read-only Git activity, memory-ready, task-progress ramp, recency heatmap, and tech-stack colors — with an adaptive legend
-- **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md — resolving a quest (move it to `answered:`) fires an emerald shockwave at the building
-- **Abilities roster**: agent skills (`SKILL.md` files in vault or `~/.claude/skills/`) listed in the agents panel — click to copy an invocation
-- **Neural Links**: toggle vault backlinks between projects as pulsing violet knowledge arcs — your second brain's link structure as city infrastructure
-- **Agent fleet presence**: multiple agents in the heartbeat file each get their own colored orb orbiting the building they're working on
 - **City overview**: the inspector doubles as a district analytics readout (per-district counts, active %, open quests) when nothing is selected
-- **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
 - **Snapshot**: one click saves a clean cinematic PNG of the city (title card, no HUD) into your vault
 - **Project inspector** with note/folder/agent/context/focus actions
 - **Click** a building to open its note
@@ -54,9 +57,9 @@ Each project in your vault becomes a building. Status maps to color, priority to
 
 ### HUD
 - **HYPERNOVUM** neon title with flashing block cursor at top center
-- **Legend panel** showing status colors and priority heights
-- **Controls hint** overlay
-- **Save Layout** button for persisting block positions
+- **Adaptive SCAN-MODE legend** that re-renders per visual layer (status chips, gradient ramps, live stack roster)
+- **Controls hint** overlay with all mouse and keyboard shortcuts
+- **Save Layout** and **Snapshot** buttons
 
 ## Platform Support
 
@@ -80,6 +83,8 @@ status: active
 priority: high
 category: web-apps
 stack: [TypeScript, React, Vite]
+questions:            # optional research quests for AI agents
+  - "Which vector DB fits this workload?"
 projectDir: C:\Users\me\projects\my-project   # Windows
 # projectDir: /Users/me/projects/my-project   # macOS
 # projectDir: /home/me/projects/my-project    # Linux
@@ -125,3 +130,7 @@ This Obsidian plugin remains free and open source. For a standalone desktop expe
 ## License
 
 [AGPL-3.0](LICENSE) — Free to use, modify, and distribute. Any modified version that is deployed must also be open-sourced under AGPL-3.0.
+
+---
+
+*Keywords: agent ops, second brain, 3D IDE, Three.js IDE, Obsidian plugin, AI agents, Claude Code, agentic coding, code city, knowledge graph visualization, project dashboard, PKM, developer tools*
