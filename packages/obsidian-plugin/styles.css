@@ -221,10 +221,36 @@
 .hypernovum-legend .legend-range {
   display: flex;
   justify-content: space-between;
-  width: calc(4 * 14px + 3 * 6px);
   margin-top: 4px;
   font-size: 9px;
   color: rgba(170, 190, 220, 0.5);
+}
+
+.hypernovum-legend .legend-skyline .legend-range {
+  width: calc(4 * 14px + 3 * 6px);
+}
+
+.hypernovum-legend .legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hypernovum-legend .legend-gradient {
+  height: 8px;
+  min-width: 150px;
+  border-radius: 2px;
+}
+
+.hypernovum-legend .legend-note {
+  margin-top: 8px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: rgba(170, 190, 220, 0.5);
+}
+
+.hypernovum-legend .legend-footnote {
+  margin-top: 8px;
 }
 
 /* Controls hint */

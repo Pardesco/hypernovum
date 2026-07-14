@@ -15,7 +15,75 @@ import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
 
-type VisualLayer = 'status' | 'git' | 'memory';
+type VisualLayer = 'status' | 'git' | 'memory' | 'tasks' | 'recency' | 'stack';
+
+/** Dim slate for buildings with no data in the active scan mode */
+const NO_DATA_COLOR = 0x39415c;
+
+/** Task completion ramp: danger red → amber → quest-complete green */
+const TASK_RAMP = [0xff3355, 0xffaa22, 0x22ff88];
+
+/** Recency thermal ramp: white-hot (today) → cold blue (60d+) */
+const RECENCY_RAMP = [0xffe9a8, 0xff8844, 0xcc4477, 0x5f3a9e, 0x22335c];
+
+/** Canonical colors for common stacks; anything else gets a stable hashed hue */
+const STACK_COLORS: Record<string, number> = {
+  typescript: 0x3f8fd6,
+  javascript: 0xf7df1e,
+  python: 0x4b8bbe,
+  rust: 0xf74c00,
+  go: 0x00add8,
+  react: 0x61dafb,
+  vue: 0x42b883,
+  svelte: 0xff3e00,
+  astro: 0xff5d01,
+  node: 0x6cc24a,
+  'node.js': 0x6cc24a,
+  'three.js': 0x9c88ff,
+  threejs: 0x9c88ff,
+  'c#': 0x9b4f96,
+  godot: 0x478cbf,
+  unity: 0xd8d8d8,
+  blender: 0xf5792a,
+  swift: 0xf05138,
+  kotlin: 0x7f52ff,
+};
+
+function lerpHex(a: number, b: number, t: number): number {
+  const r = Math.round(((a >> 16) & 255) + (((b >> 16) & 255) - ((a >> 16) & 255)) * t);
+  const g = Math.round(((a >> 8) & 255) + (((b >> 8) & 255) - ((a >> 8) & 255)) * t);
+  const bl = Math.round((a & 255) + ((b & 255) - (a & 255)) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
+function rampHex(stops: number[], t: number): number {
+  const clamped = Math.min(Math.max(t, 0), 1);
+  const seg = clamped * (stops.length - 1);
+  const i = Math.min(Math.floor(seg), stops.length - 2);
+  return lerpHex(stops[i], stops[i + 1], seg - i);
+}
+
+function hslToHex(h: number, s: number, l: number): number {
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8) | Math.round(f(4) * 255);
+}
+
+function stackColor(name: string): number {
+  const key = name.trim().toLowerCase();
+  if (STACK_COLORS[key] !== undefined) return STACK_COLORS[key];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  const hue = ((hash % 360) + 360) % 360;
+  return hslToHex(hue, 0.65, 0.55);
+}
+
+function hexCss(hex: number): string {
+  return `#${hex.toString(16).padStart(6, '0')}`;
+}
 
 export class HypernovumView extends ItemView {
   private plugin: HypernovumPlugin;
@@ -46,6 +114,7 @@ export class HypernovumView extends ItemView {
   private summaryEl: HTMLElement | null = null;
   private emptyStateEl: HTMLElement | null = null;
   private hudTopLeft: HTMLElement | null = null;
+  private legendEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, app: App, plugin: HypernovumPlugin) {
     super(leaf);
@@ -303,12 +372,38 @@ category: default
             projectPath: project.path,
           });
         });
+      } else if (this.visualLayer === 'tasks' || this.visualLayer === 'recency' || this.visualLayer === 'stack') {
+        this.sceneManager.applyLayerColors(this.computeLayerColors(this.visualLayer));
       }
     }
 
     this.updateSummary();
     this.updateInspector();
     this.updateEmptyState();
+    this.renderLegend();
+  }
+
+  /** Per-project colors for the data-visualization scan modes */
+  private computeLayerColors(layer: 'tasks' | 'recency' | 'stack'): Map<string, number> {
+    const map = new Map<string, number>();
+    const now = Date.now();
+
+    for (const project of this.filteredProjects) {
+      let color = NO_DATA_COLOR;
+      if (layer === 'tasks') {
+        if (project.totalTasks && project.totalTasks > 0) {
+          color = rampHex(TASK_RAMP, (project.completedTasks ?? 0) / project.totalTasks);
+        }
+      } else if (layer === 'recency') {
+        const days = (now - project.lastModified) / 86400000;
+        color = rampHex(RECENCY_RAMP, days / 60);
+      } else {
+        const primary = project.stack?.[0];
+        if (primary) color = stackColor(primary);
+      }
+      map.set(project.path, color);
+    }
+    return map;
   }
 
   private updateFilterOptions(): void {
@@ -516,30 +611,133 @@ category: default
     const legend = document.createElement('div');
     legend.className = 'hypernovum-legend';
     legend.innerHTML = `
-      <div class="legend-kicker">CITY INDEX</div>
-      <div class="legend-section">
-        <div class="legend-label">Status &middot; Color</div>
-        <div class="legend-grid">
-          <div class="legend-item"><span class="legend-chip active"></span>Active</div>
-          <div class="legend-item"><span class="legend-chip blocked"></span>Blocked</div>
-          <div class="legend-item"><span class="legend-chip paused"></span>Paused</div>
-          <div class="legend-item"><span class="legend-chip complete"></span>Complete</div>
-        </div>
-      </div>
-      <div class="legend-section">
-        <div class="legend-label">Priority &middot; Height</div>
-        <div class="legend-skyline">
-          <div class="legend-bars">
-            <div class="legend-bar h1"></div>
-            <div class="legend-bar h2"></div>
-            <div class="legend-bar h3"></div>
-            <div class="legend-bar h4"></div>
-          </div>
-          <div class="legend-range"><span>Low</span><span>Critical</span></div>
-        </div>
-      </div>
+      <div class="legend-kicker"></div>
+      <div class="legend-body"></div>
     `;
+    this.legendEl = legend;
     container.appendChild(legend);
+    this.renderLegend();
+  }
+
+  /** Adaptive legend — reads out whatever the active scan mode encodes */
+  private renderLegend(): void {
+    if (!this.legendEl) return;
+    const kicker = this.legendEl.querySelector('.legend-kicker') as HTMLElement;
+    const body = this.legendEl.querySelector('.legend-body') as HTMLElement;
+    if (!kicker || !body) return;
+
+    const modeNames: Record<VisualLayer, string> = {
+      status: 'STATUS',
+      git: 'GIT ACTIVITY',
+      memory: 'MEMORY',
+      tasks: 'TASK PROGRESS',
+      recency: 'RECENCY',
+      stack: 'TECH STACK',
+    };
+    kicker.textContent = `SCAN · ${modeNames[this.visualLayer]}`;
+
+    const chip = (color: string) =>
+      `<span class="legend-chip" style="background:${color};box-shadow:0 0 6px ${color}88"></span>`;
+
+    switch (this.visualLayer) {
+      case 'git':
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Signal &middot; Meaning</div>
+            <div class="legend-list">
+              <div class="legend-item">${chip('#ff6600')}Hot glow &mdash; high commit churn</div>
+              <div class="legend-item">${chip('#dd3333')}Glitch &mdash; merge conflict</div>
+              <div class="legend-item">${chip('#6b6b7a')}Dim &mdash; stale repository</div>
+            </div>
+            <div class="legend-note">Status colors still apply beneath signals</div>
+          </div>
+        `;
+        break;
+
+      case 'memory': {
+        const ready = this.allProjects.filter((p) => p.hasMemoryContext).length;
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Filter &middot; Memory</div>
+            <div class="legend-list">
+              <div class="legend-item">${chip('#66e0a3')}Memory-ready projects only</div>
+            </div>
+            <div class="legend-note">${ready} of ${this.allProjects.length} projects carry MEMORY_CONTEXT.md</div>
+          </div>
+        `;
+        break;
+      }
+
+      case 'tasks':
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Completion &middot; Color</div>
+            <div class="legend-gradient" style="background:linear-gradient(to right,${TASK_RAMP.map(hexCss).join(',')})"></div>
+            <div class="legend-range"><span>0%</span><span>100%</span></div>
+            <div class="legend-list legend-footnote">
+              <div class="legend-item">${chip(hexCss(NO_DATA_COLOR))}No tasks tracked</div>
+            </div>
+          </div>
+        `;
+        break;
+
+      case 'recency':
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Last Touched &middot; Heat</div>
+            <div class="legend-gradient" style="background:linear-gradient(to right,${RECENCY_RAMP.map(hexCss).join(',')})"></div>
+            <div class="legend-range"><span>Today</span><span>60d+</span></div>
+          </div>
+        `;
+        break;
+
+      case 'stack': {
+        const counts = new Map<string, number>();
+        for (const p of this.allProjects) {
+          const primary = p.stack?.[0]?.trim();
+          if (primary) counts.set(primary, (counts.get(primary) ?? 0) + 1);
+        }
+        const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+        const rows = top.map(([name, count]) =>
+          `<div class="legend-item">${chip(hexCss(stackColor(name)))}${this.escapeHtml(name)} · ${count}</div>`
+        ).join('');
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Primary Stack &middot; Color</div>
+            <div class="legend-list">
+              ${rows || `<div class="legend-item">${chip(hexCss(NO_DATA_COLOR))}No stacks declared</div>`}
+            </div>
+            ${rows ? `<div class="legend-list legend-footnote"><div class="legend-item">${chip(hexCss(NO_DATA_COLOR))}No stack declared</div></div>` : ''}
+          </div>
+        `;
+        break;
+      }
+
+      default:
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Status &middot; Color</div>
+            <div class="legend-grid">
+              <div class="legend-item"><span class="legend-chip active"></span>Active</div>
+              <div class="legend-item"><span class="legend-chip blocked"></span>Blocked</div>
+              <div class="legend-item"><span class="legend-chip paused"></span>Paused</div>
+              <div class="legend-item"><span class="legend-chip complete"></span>Complete</div>
+            </div>
+          </div>
+          <div class="legend-section">
+            <div class="legend-label">Priority &middot; Height</div>
+            <div class="legend-skyline">
+              <div class="legend-bars">
+                <div class="legend-bar h1"></div>
+                <div class="legend-bar h2"></div>
+                <div class="legend-bar h3"></div>
+                <div class="legend-bar h4"></div>
+              </div>
+              <div class="legend-range"><span>Low</span><span>Critical</span></div>
+            </div>
+          </div>
+        `;
+    }
   }
 
   private addControlsHint(container: HTMLElement): void {
@@ -667,6 +865,9 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
           <option value="status">Status</option>
           <option value="git">Git Activity</option>
           <option value="memory">Memory Ready</option>
+          <option value="tasks">Task Progress</option>
+          <option value="recency">Recency</option>
+          <option value="stack">Tech Stack</option>
         </select>
       </div>
       <div class="command-filters">

@@ -916,6 +916,42 @@ export class SceneManager {
     return geometry;
   }
 
+  /**
+   * Recolor buildings (and their edge glows) for a data-visualization layer.
+   * Colors map project path → hex color; buildings absent from the map keep
+   * their status color. Call right after buildCity — rebuilding restores
+   * status colors, so there is no separate clear step.
+   */
+  applyLayerColors(colors: Map<string, number>): void {
+    const tint = new THREE.Color();
+    for (const building of this.buildings) {
+      const project = building.userData.project as ProjectData | undefined;
+      if (!project) continue;
+      const hex = colors.get(project.path);
+      if (hex === undefined) continue;
+      tint.setHex(hex);
+      const shaderMat = this.shaderMaterials.get(building);
+      if (shaderMat) {
+        (shaderMat.uniforms.uColor.value as THREE.Color).copy(tint);
+      } else {
+        const mat = building.material as THREE.MeshStandardMaterial;
+        mat.color.copy(tint);
+        mat.emissive.copy(tint);
+      }
+    }
+
+    // Edge glows are separate scene objects — retint to match
+    this.scene.traverse((obj) => {
+      if (obj instanceof THREE.LineSegments && obj.userData.isEdgeGlow) {
+        const project = obj.userData.project as ProjectData | undefined;
+        const hex = project ? colors.get(project.path) : undefined;
+        if (hex === undefined) return;
+        const mat = obj.material as THREE.LineBasicMaterial;
+        mat.color.setHex(hex).multiplyScalar(this.useBloom ? 2.5 : 1.8);
+      }
+    });
+  }
+
   private createFallbackMaterial(project: ProjectData, baseColor: THREE.Color): THREE.MeshStandardMaterial {
     const emissiveIntensity = project.status === 'blocked' ? 0.3 :
       project.status === 'active' ? 0.2 : 0.1;
