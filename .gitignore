@@ -27,8 +27,13 @@ data.json
 
 # Test data
 projects/
-Untitled.base
 nul
+
+# Obsidian vault scratch (this repo doubles as the dev vault)
+/Untitled*.md
+/Untitled*.base
+/Untitled*.canvas
+/20??-??-??.md
 
 # Plugin build output (attached to GitHub releases by CI, not tracked)
 packages/obsidian-plugin/main.js
