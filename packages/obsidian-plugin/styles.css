@@ -101,40 +101,33 @@
   font-weight: 600;
 }
 
-/* Stack tooltip (on foundation hover - follows cursor) */
-.hypernovum-stack-tooltip {
-  background: linear-gradient(135deg, rgba(30, 30, 50, 0.95), rgba(20, 20, 35, 0.95));
-  border: 1px solid rgba(100, 120, 180, 0.4);
-  border-radius: 6px;
-  padding: 8px 12px;
-  pointer-events: none;
-  user-select: none;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
-  margin-left: 8px;
+/* Tooltip tech stack section */
+.hypernovum-tooltip .tooltip-stack-section {
   margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(100, 140, 180, 0.2);
 }
 
-.hypernovum-stack-tooltip .stack-header {
+.hypernovum-tooltip .tooltip-stack-header {
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 1.5px;
   color: rgba(150, 170, 220, 0.8);
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
-.hypernovum-stack-tooltip .stack-list {
+.hypernovum-tooltip .tooltip-stack-list {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 3px;
 }
 
-.hypernovum-stack-tooltip .stack-item {
+.hypernovum-tooltip .tooltip-stack-item {
   font-size: 10px;
   font-family: var(--font-monospace, monospace);
   color: #e0e8ff;
   background: rgba(80, 100, 160, 0.3);
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 3px;
   border: 1px solid rgba(100, 130, 200, 0.3);
 }
@@ -144,64 +137,94 @@
   position: absolute;
   bottom: 16px;
   left: 16px;
-  background: rgba(10, 10, 20, 0.85);
-  border: 1px solid rgba(100, 100, 140, 0.25);
-  border-radius: 8px;
-  padding: 12px 16px;
-  font-family: var(--font-interface);
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(8px);
   z-index: 100;
+  min-width: 190px;
+  padding: 12px 14px;
+  border: 1px solid rgba(120, 150, 190, 0.25);
+  border-radius: 8px;
+  background: rgba(6, 10, 18, 0.9);
+  color: rgba(230, 235, 250, 0.9);
+  font-family: var(--font-interface);
+  backdrop-filter: blur(12px);
 }
 
-.hypernovum-legend h4 {
-  margin: 0 0 10px 0;
-  font-size: 11px;
-  font-weight: 600;
+.hypernovum-legend .legend-kicker {
+  margin-bottom: 10px;
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(170, 190, 220, 0.6);
+}
+
+.hypernovum-legend .legend-section + .legend-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(120, 150, 190, 0.14);
+}
+
+.hypernovum-legend .legend-label {
+  margin-bottom: 7px;
+  font-size: 9px;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(170, 190, 220, 0.45);
 }
 
-.hypernovum-legend-section {
-  margin-bottom: 12px;
+.hypernovum-legend .legend-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
 }
 
-.hypernovum-legend-section:last-child {
-  margin-bottom: 0;
-}
-
-.hypernovum-legend-item {
+.hypernovum-legend .legend-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 4px 0;
+  gap: 7px;
+  font-size: 11px;
+  color: rgba(230, 235, 250, 0.82);
 }
 
-.hypernovum-legend-color {
-  width: 12px;
-  height: 12px;
+.hypernovum-legend .legend-chip {
+  width: 9px;
+  height: 9px;
   border-radius: 2px;
   flex-shrink: 0;
 }
 
-.hypernovum-legend-color.active { background: #00cc66; }
-.hypernovum-legend-color.blocked { background: #cc3333; }
-.hypernovum-legend-color.paused { background: #3366cc; }
-.hypernovum-legend-color.complete { background: #9966cc; }
+.hypernovum-legend .legend-chip.active { background: #00cc66; box-shadow: 0 0 6px rgba(0, 204, 102, 0.55); }
+.hypernovum-legend .legend-chip.blocked { background: #cc3333; box-shadow: 0 0 6px rgba(204, 51, 51, 0.55); }
+.hypernovum-legend .legend-chip.paused { background: #3366cc; box-shadow: 0 0 6px rgba(51, 102, 204, 0.55); }
+.hypernovum-legend .legend-chip.complete { background: #9966cc; box-shadow: 0 0 6px rgba(153, 102, 204, 0.55); }
 
-.hypernovum-legend-height {
+.hypernovum-legend .legend-bars {
   display: flex;
   align-items: flex-end;
-  gap: 2px;
-  height: 16px;
+  gap: 6px;
+  height: 20px;
+  width: max-content;
+  padding-bottom: 1px;
+  border-bottom: 1px solid rgba(120, 150, 190, 0.25);
 }
 
-.hypernovum-legend-bar {
-  width: 6px;
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: 1px;
+.hypernovum-legend .legend-bar {
+  width: 14px;
+  border-radius: 1px 1px 0 0;
+  background: linear-gradient(to top, rgba(140, 170, 220, 0.18), rgba(190, 215, 255, 0.55));
+}
+
+.hypernovum-legend .legend-bar.h1 { height: 4px; }
+.hypernovum-legend .legend-bar.h2 { height: 9px; }
+.hypernovum-legend .legend-bar.h3 { height: 14px; }
+.hypernovum-legend .legend-bar.h4 { height: 20px; }
+
+.hypernovum-legend .legend-range {
+  display: flex;
+  justify-content: space-between;
+  width: calc(4 * 14px + 3 * 6px);
+  margin-top: 4px;
+  font-size: 9px;
+  color: rgba(170, 190, 220, 0.5);
 }
 
 /* Controls hint */
@@ -209,21 +232,31 @@
   position: absolute;
   bottom: 16px;
   right: 16px;
-  background: rgba(10, 10, 20, 0.7);
-  border: 1px solid rgba(100, 100, 140, 0.2);
-  border-radius: 6px;
-  padding: 8px 12px;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 150, 190, 0.18);
+  border-radius: 8px;
+  background: rgba(6, 10, 18, 0.75);
   font-family: var(--font-monospace, monospace);
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  z-index: 100;
+  color: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.hypernovum-controls .controls-row {
+  display: contents;
 }
 
 .hypernovum-controls kbd {
+  justify-self: start;
   background: rgba(255, 255, 255, 0.1);
-  padding: 2px 5px;
+  padding: 1px 5px;
   border-radius: 3px;
-  margin-right: 4px;
+  font-family: inherit;
 }
 
 /* Save layout button */
@@ -254,10 +287,10 @@
   transform: translateY(0);
 }
 
-/* Building move mode indicator */
+/* Building move mode indicator (bottom center — top center is occupied by the HUD title) */
 .hypernovum-move-indicator {
   position: absolute;
-  top: 16px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(135deg, rgba(200, 120, 40, 0.95), rgba(180, 100, 30, 0.95));
@@ -279,45 +312,26 @@
   50% { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 16px rgba(255, 150, 50, 0.5); }
 }
 
-/* Holographic anchor hover label */
-.hypernovum-anchor-label {
-  font-family: var(--font-monospace, monospace);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  color: rgba(200, 230, 255, 0.95);
-  background: rgba(10, 20, 40, 0.8);
-  border: 1px solid rgba(100, 180, 255, 0.4);
-  padding: 4px 10px;
-  border-radius: 3px;
-  white-space: nowrap;
-  pointer-events: none;
-  user-select: none;
-  text-shadow: 0 0 8px rgba(100, 180, 255, 0.6);
-  animation: anchor-fade-in 0.2s ease-out;
-}
-
-.hypernovum-anchor-label .anchor-bracket {
-  color: rgba(100, 180, 255, 0.8);
-  font-weight: 400;
-}
-
-@keyframes anchor-fade-in {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+/* Top-left HUD stack — agents panel + activity indicator flow in a column
+   so they can never overlap each other. */
+.hypernovum-hud-topleft {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 160;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 /* Claude Code Activity Indicator */
 .hypernovum-activity-indicator {
-  position: absolute;
-  top: 16px;
-  left: 16px;
   background: linear-gradient(135deg, rgba(10, 20, 30, 0.95), rgba(5, 15, 25, 0.95));
   border: 1px solid rgba(0, 255, 255, 0.3);
   border-radius: 8px;
   padding: 10px 14px;
   font-family: var(--font-monospace, monospace);
-  z-index: 150;
   min-width: 140px;
   backdrop-filter: blur(8px);
   transition: all 0.3s ease;
@@ -425,10 +439,6 @@
 
 /* Agents Panel */
 .agents-panel {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 160;
   font-family: var(--font-interface);
   border-radius: 8px;
   border: 1px solid rgba(100, 100, 140, 0.25);
@@ -554,6 +564,30 @@
 .agents-install-pill:hover {
   background: rgba(100, 200, 160, 0.18);
   border-color: rgba(100, 200, 160, 0.5);
+}
+
+.agents-prepare-btn {
+  margin: 4px 8px 8px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(120, 170, 220, 0.28);
+  border-radius: 6px;
+  background: rgba(25, 45, 70, 0.72);
+  color: rgba(240, 245, 255, 0.85);
+  font-family: var(--font-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.agents-prepare-btn:hover:not(:disabled) {
+  border-color: rgba(140, 190, 240, 0.48);
+  background: rgba(34, 60, 92, 0.84);
+}
+
+.agents-prepare-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 /* Vault Mode Adjustments */
@@ -780,6 +814,98 @@
   display: none !important;
 }
 
+/* Empty state — no projects found, or filters exclude everything */
+.hypernovum-empty-state {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 180;
+  width: min(420px, calc(100% - 48px));
+  padding: 20px;
+  border: 1px solid rgba(120, 150, 190, 0.25);
+  border-radius: 8px;
+  background: rgba(6, 10, 18, 0.92);
+  color: rgba(230, 235, 250, 0.9);
+  font-family: var(--font-interface);
+  backdrop-filter: blur(12px);
+}
+
+.hypernovum-empty-state .empty-kicker {
+  margin-bottom: 8px;
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(170, 190, 220, 0.6);
+}
+
+.hypernovum-empty-state h3 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.hypernovum-empty-state p {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(190, 205, 230, 0.75);
+}
+
+.hypernovum-empty-state pre {
+  margin: 0 0 14px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 150, 190, 0.16);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  font-family: var(--font-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(200, 220, 255, 0.85);
+  overflow-x: auto;
+}
+
+.hypernovum-empty-state .empty-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hypernovum-empty-state button {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid rgba(120, 170, 220, 0.28);
+  border-radius: 6px;
+  background: rgba(25, 45, 70, 0.72);
+  color: rgba(240, 245, 255, 0.88);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.hypernovum-empty-state button:hover {
+  border-color: rgba(140, 190, 240, 0.48);
+  background: rgba(34, 60, 92, 0.84);
+}
+
+/* Canvas focus ring — keyboard focus only; mouse clicks stay clean */
+.hypernovum-container canvas:focus {
+  outline: none;
+}
+
+.hypernovum-container canvas:focus-visible {
+  outline: 1px solid rgba(0, 255, 255, 0.45);
+  outline-offset: -1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hypernovum-cursor,
+  .hypernovum-move-indicator,
+  .hypernovum-activity-indicator .activity-dot.pulsing {
+    animation: none;
+  }
+}
+
 @media (max-width: 920px) {
   .hypernovum-command-panel {
     top: 58px;
@@ -799,7 +925,9 @@
     max-height: 36%;
   }
 
-  .hypernovum-legend {
+  .hypernovum-legend,
+  .hypernovum-controls,
+  .hypernovum-hud-topleft {
     display: none;
   }
 }

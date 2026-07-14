@@ -19,14 +19,14 @@ export class KeyboardNav {
     this.canvas = canvas;
     this.canvas.tabIndex = 0; // Make canvas focusable
 
+    // Focus ring is styled in styles.css via :focus-visible so mouse clicks
+    // don't paint an outline around the entire viewport.
     this.canvas.addEventListener('focus', () => {
       this.isFocused = true;
-      this.canvas.style.outline = '3px solid #00ffff';
     });
 
     this.canvas.addEventListener('blur', () => {
       this.isFocused = false;
-      this.canvas.style.outline = 'none';
     });
 
     this.boundHandler = (e: KeyboardEvent) => this.handleKeyPress(e);

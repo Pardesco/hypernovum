@@ -16,7 +16,7 @@ If you want to view the source, please visit the GitHub repository.
 const prod = process.argv[2] === 'production';
 
 // Output to vault's plugin folder (two levels up from packages/obsidian-plugin)
-const vaultPluginDir = path.resolve(__dirname, '../../.obsidian/plugins/hypernovum');
+const vaultPluginDir = path.resolve(__dirname, '../../.obsidian/plugins/obsidian-hypernovum');
 
 const context = await esbuild.context({
   banner: { js: banner },

@@ -6,9 +6,8 @@ import type { BlockPosition, HypernovumSettings as CoreSettings } from '@hyperno
 /** Known CLI agents — users can also enter a custom command */
 const KNOWN_AGENTS = [
   { name: 'Claude Code', command: 'claude' },
-  { name: 'Gemini CLI', command: 'gemini' },
   { name: 'GPT Codex', command: 'codex' },
-  { name: 'Aider', command: 'aider' },
+  { name: 'Antigravity CLI', command: 'agy' },
   { name: 'Custom...', command: '' },
 ];
 
@@ -39,8 +38,6 @@ export class SettingsTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-
-    containerEl.createEl('h2', { text: 'Hypernovum Settings' });
 
     new Setting(containerEl)
       .setName('Project tag')
@@ -99,7 +96,7 @@ export class SettingsTab extends PluginSettingTab {
         }),
       );
 
-    containerEl.createEl('h3', { text: 'Agent' });
+    new Setting(containerEl).setName('Agent launcher').setHeading();
 
     new Setting(containerEl)
       .setName('Agent')
@@ -147,10 +144,21 @@ export class SettingsTab extends PluginSettingTab {
     const isCustom = !KNOWN_AGENTS.some(a => a.command && a.command === this.plugin.settings.agentCommand);
     customSetting.settingEl.style.display = isCustom ? '' : 'none';
 
-    containerEl.createEl('h3', { text: 'Vault Mode' });
+    new Setting(containerEl)
+      .setName('Prepare vault for AI agents')
+      .setDesc('Write an AGENTS.md file at the vault root with the project schema and a live project inventory, so any CLI agent understands this vault. Safe to re-run; only the Hypernovum section is updated.')
+      .addButton((btn) =>
+        btn
+          .setButtonText('Write AGENTS.md')
+          .onClick(async () => {
+            await this.plugin.prepareVaultForAgents();
+          }),
+      );
+
+    new Setting(containerEl).setName('Vault mode').setHeading();
 
     new Setting(containerEl)
-      .setName('Enable Vault Mode')
+      .setName('Enable vault mode')
       .setDesc('Disable AI agent features and use Hypernovum as a pure 3D visualization and navigation tool.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.vaultMode).onChange(async (value) => {
@@ -159,7 +167,7 @@ export class SettingsTab extends PluginSettingTab {
         }),
       );
 
-    containerEl.createEl('h3', { text: 'Visual Effects' });
+    new Setting(containerEl).setName('Visual effects').setHeading();
 
     new Setting(containerEl)
       .setName('Procedural shaders')

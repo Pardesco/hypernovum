@@ -1,6 +1,8 @@
-import { Plugin } from 'obsidian';
+import { Notice, Plugin } from 'obsidian';
 import { HypernovumView, VIEW_TYPE } from './views/HypernovumView';
 import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
+import { ProjectParser } from './parsers/ProjectParser';
+import { prepareVaultForAgents } from './utils/VaultAgentSetup';
 
 export default class HypernovumPlugin extends Plugin {
   settings: HypernovumSettings = DEFAULT_SETTINGS;
@@ -26,6 +28,12 @@ export default class HypernovumPlugin extends Plugin {
       callback: () => this.activateView(),
     });
 
+    this.addCommand({
+      id: 'prepare-vault-for-agents',
+      name: 'Prepare vault for AI agents',
+      callback: () => this.prepareVaultForAgents(),
+    });
+
     // Settings tab
     this.addSettingTab(new SettingsTab(this.app, this));
   }
@@ -47,6 +55,21 @@ export default class HypernovumPlugin extends Plugin {
     const activeLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     if (activeLeaves.length > 0) {
       this.app.workspace.revealLeaf(activeLeaves[0]);
+    }
+  }
+
+  /** Write/refresh the Hypernovum section of the vault-root AGENTS.md */
+  async prepareVaultForAgents(): Promise<void> {
+    try {
+      const projects = await new ProjectParser(this.app).parseProjects(this.settings);
+      const result = await prepareVaultForAgents(this.app, projects);
+      new Notice(
+        result.created
+          ? `AGENTS.md created — ${result.projectCount} projects indexed for AI agents`
+          : `AGENTS.md updated — ${result.projectCount} projects indexed for AI agents`,
+      );
+    } catch (error: any) {
+      new Notice(`Failed to prepare vault: ${error?.message ?? error}`);
     }
   }
 

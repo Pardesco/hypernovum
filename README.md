@@ -36,7 +36,7 @@ Each project in your vault becomes a building. Status maps to color, priority to
 - **Activity Monitor** polls `.hypernovum-status.json` for real-time Claude Code status
 - **Persistent streaming artery** while Claude is actively working on a project
 - **Activity indicator overlay** shows current project and action
-- **Terminal Launcher** for launching Claude Code, Codex, Gemini CLI, Aider, or a custom agent command
+- **Terminal Launcher** for launching Claude Code, GPT Codex, Antigravity CLI, or a custom agent command
 - **Agent context handoff** writes `.hypernovum/SETUP.md` with project metadata, Git signals, and memory context pointers before launch
 - **Heartbeat script** (`scripts/heartbeat.js`) for Claude Code hooks integration
 
@@ -82,6 +82,8 @@ projectDir: C:\Users\me\projects\my-project   # Windows
 ## AI Integration
 
 Hypernovum has **no built-in AI**. External AI tools (Claude Code, etc.) read `SCHEMA.md` to learn the frontmatter format, scan your project directories, and write frontmatter to vault notes. Hypernovum renders the result.
+
+**Prepare vault for AI agents** (command palette, settings, or the agents panel) writes an `AGENTS.md` at the vault root containing the frontmatter schema, a live inventory of your projects, and instructions for making agent activity visible in the city — so any CLI agent launched in the vault immediately understands your second brain. Safe to re-run: only the marked Hypernovum section is regenerated; the rest of an existing `AGENTS.md` is preserved.
 
 The `scripts/heartbeat.js` script can be wired into Claude Code hooks to enable real-time activity visualization:
 

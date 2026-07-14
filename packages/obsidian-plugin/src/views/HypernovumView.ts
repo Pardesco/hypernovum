@@ -41,7 +41,11 @@ export class HypernovumView extends ItemView {
   private statusSelect: HTMLSelectElement | null = null;
   private prioritySelect: HTMLSelectElement | null = null;
   private categorySelect: HTMLSelectElement | null = null;
+  private layerSelect: HTMLSelectElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
   private summaryEl: HTMLElement | null = null;
+  private emptyStateEl: HTMLElement | null = null;
+  private hudTopLeft: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, app: App, plugin: HypernovumPlugin) {
     super(leaf);
@@ -88,10 +92,16 @@ export class HypernovumView extends ItemView {
     this.addLegend(container);
     this.addCommandPanel(container);
     this.addInspectorPanel(container);
+    this.addEmptyState(container);
 
     // Add agent switcher overlay if not in Vault Mode
     if (!this.settings.vaultMode) {
-      this.addAgentSwitcher(container);
+      // Top-left overlays stack in a flex column so the agents panel and
+      // activity indicator never overlap each other.
+      this.hudTopLeft = document.createElement('div');
+      this.hudTopLeft.className = 'hypernovum-hud-topleft';
+      container.appendChild(this.hudTopLeft);
+      this.addAgentSwitcher(this.hudTopLeft);
     } else {
       container.addClass('vault-mode-active');
 
@@ -213,7 +223,7 @@ category: default
       this.activityMonitor.start();
 
       // Add activity indicator overlay
-      this.addActivityIndicator(container);
+      this.addActivityIndicator(this.hudTopLeft ?? container);
     }
 
     // Add HUD title
@@ -298,6 +308,7 @@ category: default
 
     this.updateSummary();
     this.updateInspector();
+    this.updateEmptyState();
   }
 
   private updateFilterOptions(): void {
@@ -347,9 +358,8 @@ category: default
   private addAgentSwitcher(container: HTMLElement): void {
     const KNOWN_AGENTS = [
       { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b', installHint: 'npm i -g @anthropic-ai/claude-code' },
-      { id: 'gemini', name: 'Gemini CLI', command: 'gemini', icon: 'G', color: '#4d96ff', installHint: 'npm i -g @google/gemini-cli' },
       { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77', installHint: 'npm i -g @openai/codex' },
-      { id: 'aider', name: 'Aider', command: 'aider', icon: 'A', color: '#ff6b6b', installHint: 'pipx install aider-chat' },
+      { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', icon: 'A', color: '#4d96ff', installHint: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' },
     ];
 
     const panel = document.createElement('div');
@@ -358,7 +368,7 @@ category: default
       <div class="agents-header">
         <div>
           <span class="agents-title">AGENTS</span>
-          <div class="agents-subtitle">Select an agent, click building, launch</div>
+          <div class="agents-subtitle">Right-click a building to launch</div>
         </div>
       </div>
       <div class="agents-list"></div>
@@ -368,7 +378,19 @@ category: default
         </button>
         <div class="agents-not-installed-list" style="display: none; padding-bottom: 4px;"></div>
       </div>
+      <button class="agents-prepare-btn" title="Write AGENTS.md at the vault root so agents understand your projects">Prepare vault &middot; AGENTS.md</button>
     `;
+
+    const prepareBtn = panel.querySelector('.agents-prepare-btn') as HTMLButtonElement;
+    prepareBtn.addEventListener('click', async () => {
+      prepareBtn.disabled = true;
+      await this.plugin.prepareVaultForAgents();
+      prepareBtn.textContent = '✓ AGENTS.md updated';
+      setTimeout(() => {
+        prepareBtn.textContent = 'Prepare vault · AGENTS.md';
+        prepareBtn.disabled = false;
+      }, 2000);
+    });
 
     const list = panel.querySelector('.agents-list') as HTMLElement;
     const notInstalledSection = panel.querySelector('.agents-not-installed') as HTMLElement;
@@ -494,50 +516,26 @@ category: default
     const legend = document.createElement('div');
     legend.className = 'hypernovum-legend';
     legend.innerHTML = `
-      <div class="hypernovum-legend-section">
-        <h4>Status (Color)</h4>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-color active"></div>
-          <span>Active</span>
-        </div>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-color blocked"></div>
-          <span>Blocked</span>
-        </div>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-color paused"></div>
-          <span>Paused</span>
-        </div>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-color complete"></div>
-          <span>Complete</span>
+      <div class="legend-kicker">CITY INDEX</div>
+      <div class="legend-section">
+        <div class="legend-label">Status &middot; Color</div>
+        <div class="legend-grid">
+          <div class="legend-item"><span class="legend-chip active"></span>Active</div>
+          <div class="legend-item"><span class="legend-chip blocked"></span>Blocked</div>
+          <div class="legend-item"><span class="legend-chip paused"></span>Paused</div>
+          <div class="legend-item"><span class="legend-chip complete"></span>Complete</div>
         </div>
       </div>
-      <div class="hypernovum-legend-section">
-        <h4>Priority (Height)</h4>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-height">
-            <div class="hypernovum-legend-bar" style="height: 16px;"></div>
+      <div class="legend-section">
+        <div class="legend-label">Priority &middot; Height</div>
+        <div class="legend-skyline">
+          <div class="legend-bars">
+            <div class="legend-bar h1"></div>
+            <div class="legend-bar h2"></div>
+            <div class="legend-bar h3"></div>
+            <div class="legend-bar h4"></div>
           </div>
-          <span>Critical</span>
-        </div>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-height">
-            <div class="hypernovum-legend-bar" style="height: 10px;"></div>
-          </div>
-          <span>High</span>
-        </div>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-height">
-            <div class="hypernovum-legend-bar" style="height: 6px;"></div>
-          </div>
-          <span>Medium</span>
-        </div>
-        <div class="hypernovum-legend-item">
-          <div class="hypernovum-legend-height">
-            <div class="hypernovum-legend-bar" style="height: 3px;"></div>
-          </div>
-          <span>Low</span>
+          <div class="legend-range"><span>Low</span><span>Critical</span></div>
         </div>
       </div>
     `;
@@ -548,11 +546,98 @@ category: default
     const controls = document.createElement('div');
     controls.className = 'hypernovum-controls';
     controls.innerHTML = `
-      <kbd>Click</kbd> Open note<br>
-      <kbd>Right-drag</kbd> Pan<br>
-      <kbd>Scroll</kbd> Zoom
+      <div class="controls-row"><kbd>Click</kbd><span>Open note</span></div>
+      <div class="controls-row"><kbd>Right-click</kbd><span>Actions menu</span></div>
+      <div class="controls-row"><kbd>Dbl-click</kbd><span>Move building</span></div>
+      <div class="controls-row"><kbd>Right-drag</kbd><span>Pan</span></div>
+      <div class="controls-row"><kbd>Scroll</kbd><span>Zoom</span></div>
+      <div class="controls-row"><kbd>B / S</kbd><span>Cycle blocked / stale</span></div>
+      <div class="controls-row"><kbd>Space</kbd><span>Reset camera</span></div>
     `;
     container.appendChild(controls);
+  }
+
+  private addEmptyState(container: HTMLElement): void {
+    const el = document.createElement('div');
+    el.className = 'hypernovum-empty-state';
+    el.style.display = 'none';
+    this.emptyStateEl = el;
+    container.appendChild(el);
+  }
+
+  private updateEmptyState(): void {
+    const el = this.emptyStateEl;
+    if (!el) return;
+
+    const noProjects = this.allProjects.length === 0;
+    const noMatches = !noProjects && this.filteredProjects.length === 0;
+
+    if (!noProjects && !noMatches) {
+      el.style.display = 'none';
+      return;
+    }
+
+    el.empty();
+    el.style.display = 'block';
+
+    if (noProjects) {
+      el.createDiv({ cls: 'empty-kicker', text: 'AWAITING CITY DATA' });
+      el.createEl('h3', { text: 'No project notes found' });
+      el.createEl('p', { text: 'Hypernovum builds the city from notes tagged as projects. Add this frontmatter to any note:' });
+      el.createEl('pre', { text: '---\ntags: [project]\nstatus: active\npriority: high\ncategory: web-apps\n---' });
+      const actions = el.createDiv({ cls: 'empty-actions' });
+      const btn = actions.createEl('button', { text: 'Create sample project' });
+      btn.addEventListener('click', () => this.createSampleProject());
+      if (!this.settings.vaultMode) {
+        const prepBtn = actions.createEl('button', { text: 'Prepare vault for agents' });
+        prepBtn.addEventListener('click', () => this.plugin.prepareVaultForAgents());
+      }
+    } else {
+      el.createDiv({ cls: 'empty-kicker', text: 'NO SIGNAL' });
+      el.createEl('h3', { text: 'No projects match' });
+      el.createEl('p', { text: 'The current search and filters exclude every project.' });
+      const btn = el.createEl('button', { text: 'Clear filters' });
+      btn.addEventListener('click', () => this.clearFilters());
+    }
+  }
+
+  private async createSampleProject(): Promise<void> {
+    const notePath = 'Sample Project.md';
+    try {
+      if (!this.app.vault.getAbstractFileByPath(notePath)) {
+        await this.app.vault.create(notePath, `---
+tags: [project]
+title: Sample Project
+status: active
+priority: high
+category: web-apps
+stack: [TypeScript, Three.js]
+---
+
+# Sample Project
+
+Duplicate this note and edit the frontmatter to add your own projects to the city.
+`);
+      }
+      this.app.workspace.openLinkText(notePath, '', false);
+      await this.buildCity();
+    } catch (error: any) {
+      new Notice(`Failed to create sample project: ${error?.message ?? error}`);
+    }
+  }
+
+  private clearFilters(): void {
+    this.searchQuery = '';
+    this.statusFilter = 'all';
+    this.priorityFilter = 'all';
+    this.categoryFilter = 'all';
+    this.visualLayer = 'status';
+    if (this.searchInput) this.searchInput.value = '';
+    if (this.statusSelect) this.statusSelect.value = 'all';
+    if (this.prioritySelect) this.prioritySelect.value = 'all';
+    if (this.categorySelect) this.categorySelect.value = 'all';
+    if (this.layerSelect) this.layerSelect.value = 'status';
+    this.applyFiltersAndRebuild();
   }
 
   private addSaveButton(container: HTMLElement): void {
@@ -593,6 +678,8 @@ category: default
 
     const searchInput = panel.querySelector('.command-search') as HTMLInputElement;
     const layerSelect = panel.querySelector('.layer-select') as HTMLSelectElement;
+    this.searchInput = searchInput;
+    this.layerSelect = layerSelect;
     this.statusSelect = panel.querySelector('.status-select') as HTMLSelectElement;
     this.prioritySelect = panel.querySelector('.priority-select') as HTMLSelectElement;
     this.categorySelect = panel.querySelector('.category-select') as HTMLSelectElement;
@@ -894,7 +981,7 @@ category: default
 
     menu.addItem((item) => {
       item
-        .setTitle('Inspect Project')
+        .setTitle('Inspect project')
         .setIcon('panel-right')
         .onClick(() => {
           this.selectProject(project);
@@ -903,7 +990,7 @@ category: default
 
     menu.addItem((item) => {
       item
-        .setTitle('📂 Open in Explorer')
+        .setTitle('Open folder')
         .setIcon('folder-open')
         .onClick(async () => {
           const result = await TerminalLauncher.openInExplorer(projectPath);
@@ -919,7 +1006,7 @@ category: default
 
     menu.addItem((item) => {
       item
-        .setTitle('📝 Open Note')
+        .setTitle('Open note')
         .setIcon('file-text')
         .onClick(() => {
           this.app.workspace.openLinkText(project.path, '', false);
@@ -928,7 +1015,7 @@ category: default
 
     menu.addItem((item) => {
       item
-        .setTitle('🎯 Focus Camera')
+        .setTitle('Focus camera')
         .setIcon('crosshair')
         .onClick(() => {
           if (project.position && this.sceneManager) {
@@ -1012,26 +1099,8 @@ category: default
   /** Add neon HUD title at top center */
   private addHudTitle(container: HTMLElement): void {
     const title = document.createElement('div');
+    // All styling lives in styles.css (.hypernovum-hud-title).
     title.className = 'hypernovum-hud-title';
-    Object.assign(title.style, {
-      position: 'absolute',
-      top: '14px',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      fontFamily: 'monospace',
-      fontSize: '16px',
-      fontWeight: '700',
-      letterSpacing: '6px',
-      color: '#b366ff',
-      textShadow: '0 0 12px #b366ff, 0 0 24px rgba(179,102,255,0.4)',
-      background: 'rgba(10, 10, 20, 0.6)',
-      border: '1px solid rgba(179, 102, 255, 0.2)',
-      borderRadius: '4px',
-      padding: '6px 18px',
-      zIndex: '200',
-      pointerEvents: 'none',
-      userSelect: 'none',
-    });
 
     const cursor = document.createElement('span');
     cursor.textContent = '\u2588';
