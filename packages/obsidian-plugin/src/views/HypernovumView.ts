@@ -10,6 +10,7 @@ import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonito
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { generateAgentContext } from '../utils/AgentContext';
+import { scanSkills } from '../utils/SkillsScanner';
 import type { HypernovumSettings } from '../settings/SettingsTab';
 import type HypernovumPlugin from '../main';
 
@@ -467,6 +468,10 @@ category: default
         </div>
       </div>
       <div class="agents-list"></div>
+      <div class="agents-abilities" style="display: none;">
+        <div class="agents-abilities-header">ABILITIES &middot; <span class="abilities-count">0</span></div>
+        <div class="agents-abilities-list"></div>
+      </div>
       <div class="agents-not-installed" style="display: none;">
         <button class="agents-not-installed-toggle">
           Available to Install (<span class="not-installed-count">0</span>)
@@ -605,6 +610,51 @@ category: default
     })).then(() => {
       renderAgents();
     });
+
+    this.renderAbilities(panel);
+  }
+
+  /**
+   * ABILITIES section — agent skills discovered from SKILL.md files
+   * (vault .claude/skills/ and global ~/.claude/skills/). Click copies an
+   * invocation phrase to paste into any agent prompt.
+   */
+  private renderAbilities(panel: HTMLElement): void {
+    const section = panel.querySelector('.agents-abilities') as HTMLElement;
+    const list = panel.querySelector('.agents-abilities-list') as HTMLElement;
+    const count = panel.querySelector('.abilities-count') as HTMLElement;
+    if (!section || !list || !count) return;
+
+    const vaultPath = (this.app.vault.adapter as any).basePath as string;
+    const skills = scanSkills(vaultPath);
+    if (skills.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = 'block';
+    count.textContent = String(skills.length);
+    list.empty();
+
+    for (const skill of skills) {
+      const item = list.createDiv({ cls: 'agents-item ability' });
+      item.createSpan({ cls: 'ability-gem', text: '◆' });
+      item.createSpan({ cls: 'agents-item-name', text: skill.name });
+      item.createSpan({ cls: 'ability-scope', text: skill.scope === 'vault' ? 'V' : 'G' });
+      item.title = `${skill.description || skill.name}\n${skill.path}\nClick to copy invocation`;
+      item.addEventListener('click', () => {
+        navigator.clipboard.writeText(`Use the "${skill.name}" skill (${skill.path})`);
+        const gem = item.querySelector('.ability-gem') as HTMLElement;
+        if (gem) {
+          gem.textContent = '✓';
+          gem.classList.add('copied');
+          setTimeout(() => {
+            gem.textContent = '◆';
+            gem.classList.remove('copied');
+          }, 1200);
+        }
+      });
+    }
   }
 
   private addLegend(container: HTMLElement): void {
@@ -970,6 +1020,11 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <div class="signal-row"><span>30d commits</span><strong>${git?.commitsLast30d ?? 0}</strong></div>
         <div class="signal-row"><span>Working tree</span><strong>${git?.hasUncommittedChanges ? 'Changed' : 'Clean'}</strong></div>
       </div>
+      ${project.questions && project.questions.length > 0 ? `
+      <div class="inspector-section">
+        <span class="section-label">Open Quests</span>
+        ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
+      </div>` : ''}
       <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
       <div class="inspector-actions">
         <button data-action="note">Open Note</button>

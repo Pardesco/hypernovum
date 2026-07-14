@@ -60,6 +60,7 @@ export class SceneManager {
   private foundations: THREE.Mesh[] = [];
   private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
   private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
+  private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -402,6 +403,7 @@ export class SceneManager {
     this.foundations = [];
     this.blockedEdgeGlows = [];
     this.roofBeacons = [];
+    this.questMarkers = [];
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
@@ -863,6 +865,30 @@ export class SceneManager {
       beacon.userData = { isBuilding: true, project, isRoofDetail: true };
       mesh.add(beacon);
       this.roofBeacons.push(beacon);
+    }
+
+    // Quest marker — floating gold gem over projects with open research questions
+    if (project.questions && project.questions.length > 0) {
+      geometry.computeBoundingBox();
+      const topY = geometry.boundingBox ? geometry.boundingBox.max.y : height;
+      const questMat = new THREE.MeshStandardMaterial({
+        color: 0xffcc44,
+        emissive: 0xffaa22,
+        emissiveIntensity: 1.2,
+        flatShading: true,
+      });
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), questMat);
+      const baseY = topY + 1.2;
+      gem.position.set(0, baseY, 0);
+      gem.userData = {
+        isBuilding: true,
+        project,
+        isQuestMarker: true,
+        baseY,
+        bobPhase: (x * 7 + z * 13) % (Math.PI * 2),
+      };
+      mesh.add(gem);
+      this.questMarkers.push(gem);
     }
   }
 
@@ -1620,6 +1646,12 @@ export class SceneManager {
       `;
     }
 
+    if (project.questions && project.questions.length > 0) {
+      html += `
+        <div class="tooltip-row tooltip-enriched"><span>Quests:</span> <span class="tooltip-quest">${project.questions.length} open</span></div>
+      `;
+    }
+
     if (project.stack && project.stack.length > 0) {
       html += `
         <div class="tooltip-stack-section">
@@ -1763,6 +1795,13 @@ export class SceneManager {
           material.uniforms.uPulse.value = 1.0;
         }
       }
+    }
+
+    // Quest gems: slow spin + gentle bob
+    for (const gem of this.questMarkers) {
+      gem.rotation.y = elapsed * 1.2;
+      gem.position.y = (gem.userData.baseY as number) +
+        Math.sin(elapsed * 2 + (gem.userData.bobPhase as number)) * 0.15;
     }
 
     // Pulse critical-priority warning beacons (slow aircraft-light blink)

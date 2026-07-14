@@ -63,8 +63,20 @@ export class ProjectParser {
       noteCount: fm.noteCount ?? 1,
       ...taskData,
       stack: this.parseStack(fm.stack),
+      questions: this.parseQuestions(fm.questions ?? fm.quests),
       projectDir: typeof fm.projectDir === 'string' ? fm.projectDir : undefined,
     };
+  }
+
+  private parseQuestions(raw: unknown): string[] | undefined {
+    if (Array.isArray(raw)) {
+      const questions = raw.map(String).map((s) => s.trim()).filter((s) => s.length > 0);
+      return questions.length > 0 ? questions : undefined;
+    }
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      return [raw.trim()];
+    }
+    return undefined;
   }
 
   private normalizeStatus(raw: string | undefined): string {

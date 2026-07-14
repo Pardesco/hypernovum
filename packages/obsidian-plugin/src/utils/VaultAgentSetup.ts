@@ -1,5 +1,6 @@
 import type { App } from 'obsidian';
 import type { ProjectData } from '@hypernovum/core';
+import type { AgentSkill } from './SkillsScanner';
 
 const START_MARKER = '<!-- hypernovum:start -->';
 const END_MARKER = '<!-- hypernovum:end -->';
@@ -23,8 +24,9 @@ export interface PrepareVaultResult {
 export async function prepareVaultForAgents(
   app: App,
   projects: ProjectData[],
+  skills: AgentSkill[] = [],
 ): Promise<PrepareVaultResult> {
-  const section = buildSection(projects);
+  const section = buildSection(projects, skills);
   const adapter = app.vault.adapter;
   const exists = await adapter.exists(AGENTS_FILE);
 
@@ -50,9 +52,11 @@ export async function prepareVaultForAgents(
   return { created: false, projectCount: projects.length };
 }
 
-function buildSection(projects: ProjectData[]): string {
+function buildSection(projects: ProjectData[], skills: AgentSkill[]): string {
   const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const inventory = buildInventory(projects);
+  const questBoard = buildQuestBoard(projects);
+  const skillsRoster = buildSkillsRoster(skills);
 
   return `${START_MARKER}
 ## Hypernovum project city
@@ -77,6 +81,8 @@ category: web-apps      # groups buildings into districts
 stack: [TypeScript, React]
 health: 85              # optional 0-100 health score
 projectDir: "C:/path/to/repo"   # optional absolute or vault-relative path
+questions:              # optional open research questions — rendered as quest markers
+  - "Which vector DB fits this workload?"
 ---
 \`\`\`
 
@@ -88,6 +94,10 @@ projectDir: "C:/path/to/repo"   # optional absolute or vault-relative path
 Keep frontmatter values current as work progresses (e.g. flip \`status\` to \`blocked\` when a project stalls) — the city is only as truthful as the notes.
 
 ${inventory}
+
+${questBoard}
+
+${skillsRoster}
 
 ### Per-project agent context
 
@@ -127,6 +137,47 @@ No project notes exist yet — this vault is waiting to be populated. Use the sc
 | Title | Status | Priority | Category | Note | Directory |
 |-------|--------|----------|----------|------|-----------|
 ${rows.join('\n')}${truncated}`;
+}
+
+function buildQuestBoard(projects: ProjectData[]): string {
+  const withQuests = projects.filter((p) => p.questions && p.questions.length > 0);
+  const total = withQuests.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
+
+  if (total === 0) {
+    return `### Research quest board (0 open)
+
+No open quests. Users post quests by adding a \`questions:\` list to a project note's frontmatter — check here on future runs.`;
+  }
+
+  const rows = withQuests.flatMap((p) =>
+    (p.questions ?? []).map((q) => `- **${p.title}** (\`${p.path}\`): ${q.replace(/\r?\n/g, ' ')}`)
+  );
+
+  return `### Research quest board (${total} open)
+
+Open questions posted by the user. If your current task touches one of these projects — or you were asked to work the quest board — pick a quest up:
+
+${rows.join('\n')}
+
+When you resolve a quest: write the answer (with sources) into the project note body, then remove the entry from the note's \`questions:\` list. The city clears the quest marker automatically.`;
+}
+
+function buildSkillsRoster(skills: AgentSkill[]): string {
+  if (skills.length === 0) {
+    return `### Available skills
+
+No SKILL.md files found in \`.claude/skills/\` (vault) or \`~/.claude/skills/\` (global).`;
+  }
+
+  const rows = skills.map((s) =>
+    `- **${s.name}** (${s.scope}) — ${s.description || 'no description'}\n  \`${s.path.replace(/\\/g, '/')}\``
+  );
+
+  return `### Available skills
+
+Reusable skills installed on this machine. Read a skill's SKILL.md before using it:
+
+${rows.join('\n')}`;
 }
 
 function escapeCell(value: string): string {

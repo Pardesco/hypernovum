@@ -3,6 +3,7 @@ import { HypernovumView, VIEW_TYPE } from './views/HypernovumView';
 import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
 import { ProjectParser } from './parsers/ProjectParser';
 import { prepareVaultForAgents } from './utils/VaultAgentSetup';
+import { scanSkills } from './utils/SkillsScanner';
 
 export default class HypernovumPlugin extends Plugin {
   settings: HypernovumSettings = DEFAULT_SETTINGS;
@@ -62,7 +63,9 @@ export default class HypernovumPlugin extends Plugin {
   async prepareVaultForAgents(): Promise<void> {
     try {
       const projects = await new ProjectParser(this.app).parseProjects(this.settings);
-      const result = await prepareVaultForAgents(this.app, projects);
+      const vaultPath = (this.app.vault.adapter as any).basePath as string;
+      const skills = scanSkills(vaultPath);
+      const result = await prepareVaultForAgents(this.app, projects, skills);
       new Notice(
         result.created
           ? `AGENTS.md created — ${result.projectCount} projects indexed for AI agents`

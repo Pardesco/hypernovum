@@ -28,6 +28,8 @@ export interface ProjectData {
   completedTasks?: number;
   /** Tech stack (e.g. ["Three.js", "TypeScript", "Vite"]) */
   stack?: string[];
+  /** Open research questions — rendered as quest markers and published to agents */
+  questions?: string[];
   /** Absolute path to project directory (for terminal launch) */
   projectDir?: string;
   /** True when .hypernovum/MEMORY_CONTEXT.md exists for this project */

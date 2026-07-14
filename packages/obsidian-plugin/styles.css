@@ -592,6 +592,58 @@
   border-color: rgba(100, 200, 160, 0.5);
 }
 
+/* Abilities (agent skills) section */
+.agents-abilities {
+  border-top: 1px solid rgba(100, 100, 140, 0.15);
+  padding: 4px 0;
+}
+
+.agents-abilities-header {
+  padding: 6px 12px 2px;
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(255, 204, 100, 0.55);
+}
+
+.agents-abilities-list {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.agents-item.ability {
+  border-left: 3px solid transparent;
+}
+
+.agents-item.ability:hover {
+  border-left-color: rgba(255, 204, 68, 0.6);
+}
+
+.ability-gem {
+  width: 20px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 10px;
+  color: rgba(255, 204, 68, 0.85);
+  text-shadow: 0 0 6px rgba(255, 204, 68, 0.5);
+}
+
+.ability-gem.copied {
+  color: #00cc66;
+  text-shadow: 0 0 6px rgba(0, 204, 102, 0.5);
+}
+
+.ability-scope {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px solid rgba(150, 170, 220, 0.25);
+  border-radius: 3px;
+  font-family: var(--font-monospace, monospace);
+  font-size: 8px;
+  color: rgba(170, 190, 220, 0.55);
+}
+
 .agents-prepare-btn {
   margin: 4px 8px 8px;
   height: 26px;
@@ -801,6 +853,31 @@
 .signal-row span,
 .signal-row strong {
   margin: 0;
+}
+
+/* Quest rows (open research questions) */
+.quest-row {
+  display: flex;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 204, 68, 0.22);
+  border-radius: 6px;
+  background: rgba(60, 45, 15, 0.35);
+  color: rgba(255, 228, 170, 0.9);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.quest-gem {
+  flex-shrink: 0;
+  color: rgba(255, 204, 68, 0.85);
+  text-shadow: 0 0 6px rgba(255, 204, 68, 0.5);
+}
+
+.hypernovum-tooltip .tooltip-quest {
+  color: #ffcc44;
+  font-weight: 600;
 }
 
 .inspector-path {
