@@ -9,6 +9,7 @@ import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherD
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
+import { RooftopFactory } from '../renderers/RooftopFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
 
@@ -58,6 +59,7 @@ export class SceneManager {
   private buildings: THREE.Mesh[] = [];
   private foundations: THREE.Mesh[] = [];
   private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
+  private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -399,6 +401,7 @@ export class SceneManager {
     this.buildings = [];
     this.foundations = [];
     this.blockedEdgeGlows = [];
+    this.roofBeacons = [];
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
@@ -832,6 +835,34 @@ export class SceneManager {
     this.scene.add(wireframe);
     if (project.status === 'blocked') {
       this.blockedEdgeGlows.push(wireframe);
+    }
+
+    // Rooftop detail kit — children of the building mesh so they move and
+    // dispose with it (clearCity traverses recursively; raycaster does not).
+    const roof = RooftopFactory.createRooftop(project, geometry);
+    if (roof.detail) {
+      const detailMat = new THREE.MeshStandardMaterial({
+        color: 0x232838,
+        roughness: 0.55,
+        metalness: 0.75,
+        flatShading: true,
+      });
+      const detailMesh = new THREE.Mesh(roof.detail, detailMat);
+      detailMesh.castShadow = true;
+      detailMesh.userData = { isBuilding: true, project, isRoofDetail: true };
+      mesh.add(detailMesh);
+    }
+    if (roof.beaconPosition) {
+      const beaconMat = new THREE.MeshStandardMaterial({
+        color: 0xff3344,
+        emissive: 0xff3344,
+        emissiveIntensity: 1.6,
+      });
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), beaconMat);
+      beacon.position.copy(roof.beaconPosition);
+      beacon.userData = { isBuilding: true, project, isRoofDetail: true };
+      mesh.add(beacon);
+      this.roofBeacons.push(beacon);
     }
   }
 
@@ -1695,6 +1726,15 @@ export class SceneManager {
         if (isBeingStreamed) {
           material.uniforms.uPulse.value = 1.0;
         }
+      }
+    }
+
+    // Pulse critical-priority warning beacons (slow aircraft-light blink)
+    if (this.roofBeacons.length > 0) {
+      const blink = (Math.sin(elapsed * 2.4) + 1) / 2;
+      const intensity = 0.3 + blink * 2.0;
+      for (const beacon of this.roofBeacons) {
+        (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
       }
     }
 

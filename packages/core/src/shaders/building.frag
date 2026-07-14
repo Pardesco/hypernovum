@@ -30,8 +30,10 @@ void main() {
   windowRows = clamp(windowRows, 4.0, 20.0);
 
   vec2 windowGrid = fract(vUv * vec2(windowCols, windowRows));
-  float isWindow = step(0.15, windowGrid.x) * step(0.15, windowGrid.y) *
-                   step(windowGrid.x, 0.85) * step(windowGrid.y, 0.85);
+  // Soft-edged panes read as inset glass instead of painted-on decals
+  float wx = smoothstep(0.12, 0.18, windowGrid.x) * (1.0 - smoothstep(0.82, 0.88, windowGrid.x));
+  float wy = smoothstep(0.12, 0.18, windowGrid.y) * (1.0 - smoothstep(0.82, 0.88, windowGrid.y));
+  float isWindow = wx * wy;
 
   // === FILL-FROM-BOTTOM ILLUMINATION ===
   // Window ID (row 0 = bottom, row N-1 = top)
@@ -54,11 +56,16 @@ void main() {
 
   // Terminal pulse: lit windows breathe brighter
   float terminalPulse = uPulse * (sin(uTime * 3.0) * 0.3 + 0.3);
-  vec3 windowColor = windowBaseColor * (0.8 + terminalPulse) * lightOn;
+
+  // Per-window brightness variation — occupied floors, not a light switch
+  float winVar = 0.7 + 0.3 * random(windowID + vec2(3.7, 9.1));
+  vec3 windowColor = windowBaseColor * (0.8 + terminalPulse) * lightOn * winVar;
 
   // === WALL COLOR ===
   vec3 decayColor = vec3(0.3, 0.25, 0.2);
   vec3 wallColor = mix(uColor * 0.6, decayColor, uDecay * 0.5);
+  // Vertical gradient: grounded shadow at the base, lifted crown at the top
+  wallColor *= 0.72 + 0.4 * vUv.y;
 
   // === COMBINE ===
   vec3 finalColor = mix(wallColor, windowColor, isWindow * lightOn);
@@ -97,9 +104,10 @@ void main() {
   finalColor += uColor * glowAmount;
 
   // === EDGE GLOW (rim lighting) ===
+  // Constant faint fresnel gives every tower a glass edge; pulse/completion boost it
   float rim = 1.0 - max(dot(normalize(vNormal), vec3(0.0, 0.0, 1.0)), 0.0);
   rim = pow(rim, 2.0);
-  finalColor += uColor * rim * 0.3 * max(uPulse, uLitPercent * 0.3);
+  finalColor += uColor * rim * (0.08 + 0.3 * max(uPulse, uLitPercent * 0.3));
 
   // === DECAY DITHERING ===
   if (uDecay > 0.6) {
