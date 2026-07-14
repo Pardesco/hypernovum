@@ -30,6 +30,8 @@ export interface ProjectData {
   stack?: string[];
   /** Open research questions — rendered as quest markers and published to agents */
   questions?: string[];
+  /** Resolved research questions (moved from questions: by agents or the user) */
+  answeredQuestions?: string[];
   /** Absolute path to project directory (for terminal launch) */
   projectDir?: string;
   /** True when .hypernovum/MEMORY_CONTEXT.md exists for this project */
@@ -62,6 +64,16 @@ export interface Bounds {
 
 /** City activity state for Neural Core visualization */
 export type CityState = 'IDLE' | 'STREAMING' | 'BULK_UPDATE' | 'ERROR';
+
+/** An undirected knowledge link between two projects (from vault backlinks) */
+export interface LinkEdge {
+  /** Project note path (endpoint A) */
+  from: string;
+  /** Project note path (endpoint B) */
+  to: string;
+  /** Combined link count between the two projects */
+  count: number;
+}
 
 /** Saved block position for user-arranged city layout */
 export interface BlockPosition {

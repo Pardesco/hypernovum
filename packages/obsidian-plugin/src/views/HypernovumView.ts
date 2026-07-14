@@ -3,10 +3,10 @@ import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, LinkEdge } from '@hypernovum/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
-import { ActivityMonitor, type ActivityStatus } from '../monitors/ActivityMonitor';
+import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { generateAgentContext } from '../utils/AgentContext';
@@ -106,6 +106,7 @@ export class HypernovumView extends ItemView {
   private priorityFilter = 'all';
   private categoryFilter = 'all';
   private visualLayer: VisualLayer = 'status';
+  private showLinks = false;
   private inspectorPanel: HTMLElement | null = null;
   private statusSelect: HTMLSelectElement | null = null;
   private prioritySelect: HTMLSelectElement | null = null;
@@ -116,6 +117,7 @@ export class HypernovumView extends ItemView {
   private emptyStateEl: HTMLElement | null = null;
   private hudTopLeft: HTMLElement | null = null;
   private legendEl: HTMLElement | null = null;
+  private lastQuestCounts = new Map<string, number>();
 
   constructor(leaf: WorkspaceLeaf, app: App, plugin: HypernovumPlugin) {
     super(leaf);
@@ -289,6 +291,7 @@ category: default
         onActivityStop: () => this.onClaudeActivityStop(),
         onProjectChange: (newProject, oldProject) => {
         },
+        onFleetUpdate: (agents) => this.onFleetUpdate(agents),
       });
       this.activityMonitor.start();
 
@@ -332,8 +335,22 @@ category: default
       }
     }));
 
+    // Detect quests resolved since the last parse — celebrate after rebuild
+    const resolvedPaths: string[] = [];
+    for (const project of this.allProjects) {
+      const prev = this.lastQuestCounts.get(project.path) ?? 0;
+      const open = project.questions?.length ?? 0;
+      if (open < prev) resolvedPaths.push(project.path);
+      this.lastQuestCounts.set(project.path, open);
+    }
+
     this.updateFilterOptions();
     this.applyFiltersAndRebuild();
+
+    // Emerald shockwave on every building whose quest count dropped
+    for (const path of resolvedPaths) {
+      this.sceneManager?.flashBuilding(path);
+    }
   }
 
   private applyFiltersAndRebuild(): void {
@@ -376,12 +393,45 @@ category: default
       } else if (this.visualLayer === 'tasks' || this.visualLayer === 'recency' || this.visualLayer === 'stack') {
         this.sceneManager.applyLayerColors(this.computeLayerColors(this.visualLayer));
       }
+
+      if (this.showLinks) {
+        this.sceneManager.showLinkArcs(this.computeLinkEdges());
+      }
     }
 
     this.updateSummary();
     this.updateInspector();
     this.updateEmptyState();
     this.renderLegend();
+  }
+
+  /**
+   * Backlink edges between visible projects. A file belongs to a project if
+   * it IS the project note or lives inside the project's folder; links whose
+   * endpoints belong to two different projects become undirected edges.
+   */
+  private computeLinkEdges(): LinkEdge[] {
+    const resolved = this.app.metadataCache.resolvedLinks as Record<string, Record<string, number>>;
+    const projects = this.filteredProjects;
+    const byNote = new Map(projects.map((p) => [p.path, p]));
+    const owners = projects.map((p) => ({ prefix: p.path.replace(/\.md$/, '/'), project: p }));
+    const ownerOf = (file: string): ProjectData | undefined =>
+      byNote.get(file) ?? owners.find((o) => file.startsWith(o.prefix))?.project;
+
+    const edges = new Map<string, LinkEdge>();
+    for (const [source, targets] of Object.entries(resolved)) {
+      const a = ownerOf(source);
+      if (!a) continue;
+      for (const [target, count] of Object.entries(targets)) {
+        const b = ownerOf(target);
+        if (!b || b === a) continue;
+        const key = a.path < b.path ? `${a.path}|${b.path}` : `${b.path}|${a.path}`;
+        const edge = edges.get(key) ?? { from: a.path, to: b.path, count: 0 };
+        edge.count += count;
+        edges.set(key, edge);
+      }
+    }
+    return [...edges.values()];
   }
 
   /** Per-project colors for the data-visualization scan modes */
@@ -898,6 +948,64 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       }
     });
     container.appendChild(saveBtn);
+
+    const snapBtn = document.createElement('button');
+    snapBtn.className = 'hypernovum-save-btn hypernovum-snapshot-btn';
+    snapBtn.textContent = 'Snapshot';
+    snapBtn.title = 'Save a clean PNG of the city (no HUD) into the vault';
+    snapBtn.addEventListener('click', () => this.captureSnapshot());
+    container.appendChild(snapBtn);
+  }
+
+  /** Capture the city, composite a title card, and save as a PNG in the vault */
+  private async captureSnapshot(): Promise<void> {
+    if (!this.sceneManager) return;
+    try {
+      const dataUrl = this.sceneManager.captureSnapshot();
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('capture failed'));
+        img.src = dataUrl;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0);
+
+      // Cinematic lower-third title card
+      const barH = Math.max(54, Math.round(img.height * 0.09));
+      const gradient = ctx.createLinearGradient(0, img.height - barH * 1.6, 0, img.height);
+      gradient.addColorStop(0, 'rgba(6, 10, 18, 0)');
+      gradient.addColorStop(1, 'rgba(6, 10, 18, 0.92)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, img.height - barH * 1.6, img.width, barH * 1.6);
+
+      const pad = Math.round(barH * 0.42);
+      ctx.fillStyle = '#b366ff';
+      ctx.font = `700 ${Math.round(barH * 0.34)}px monospace`;
+      ctx.shadowColor = '#b366ff';
+      ctx.shadowBlur = 12;
+      ctx.fillText('H Y P E R N O V U M', pad, img.height - pad);
+      ctx.shadowBlur = 0;
+
+      const date = new Date().toISOString().slice(0, 10);
+      const stats = `${this.filteredProjects.length} PROJECTS · ${date}`;
+      ctx.fillStyle = 'rgba(200, 215, 240, 0.75)';
+      ctx.font = `${Math.round(barH * 0.22)}px monospace`;
+      const statsWidth = ctx.measureText(stats).width;
+      ctx.fillText(stats, img.width - statsWidth - pad, img.height - pad);
+
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('encode failed');
+      const notePath = `Hypernovum Snapshot ${date}.png`;
+      await this.app.vault.adapter.writeBinary(notePath, await blob.arrayBuffer());
+      new Notice(`Snapshot saved: ${notePath}`);
+    } catch (error: any) {
+      new Notice(`Snapshot failed: ${error?.message ?? error}`);
+    }
   }
 
   private addCommandPanel(container: HTMLElement): void {
@@ -925,6 +1033,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <select class="priority-select"><option value="all">All priority</option></select>
         <select class="category-select"><option value="all">All categories</option></select>
       </div>
+      <button class="links-toggle" title="Show vault backlinks between projects as knowledge arcs">NEURAL LINKS &middot; OFF</button>
     `;
 
     const searchInput = panel.querySelector('.command-search') as HTMLInputElement;
@@ -961,6 +1070,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       this.applyFiltersAndRebuild();
     });
 
+    const linksToggle = panel.querySelector('.links-toggle') as HTMLButtonElement;
+    linksToggle.addEventListener('click', () => {
+      this.showLinks = !this.showLinks;
+      linksToggle.textContent = `NEURAL LINKS · ${this.showLinks ? 'ON' : 'OFF'}`;
+      linksToggle.classList.toggle('active', this.showLinks);
+      if (this.showLinks) {
+        this.sceneManager?.showLinkArcs(this.computeLinkEdges());
+      } else {
+        this.sceneManager?.clearLinkArcs();
+      }
+    });
+
     container.appendChild(panel);
   }
 
@@ -986,14 +1107,16 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (!this.summaryEl) return;
     const gitCount = this.allProjects.filter((p) => p.gitActivity).length;
     const memoryCount = this.allProjects.filter((p) => p.hasMemoryContext).length;
-    this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory`;
+    const questCount = this.allProjects.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
+    const questPart = questCount > 0 ? ` | ◆ ${questCount} quests` : '';
+    this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory${questPart}`;
   }
 
   private updateInspector(): void {
     if (!this.inspectorPanel) return;
 
     if (!this.selectedProject) {
-      this.inspectorPanel.innerHTML = '<div class="inspector-empty">Select a project</div>';
+      this.renderCityOverview();
       return;
     }
 
@@ -1005,6 +1128,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.inspectorPanel.innerHTML = `
       <div class="inspector-header">
         <span class="inspector-kicker">PROJECT</span>
+        <button class="inspector-close" title="Back to city overview">✕</button>
         <h3>${this.escapeHtml(project.title)}</h3>
       </div>
       <div class="inspector-grid">
@@ -1022,7 +1146,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       </div>
       ${project.questions && project.questions.length > 0 ? `
       <div class="inspector-section">
-        <span class="section-label">Open Quests</span>
+        <span class="section-label">Open Quests${project.answeredQuestions?.length ? ` · ${project.answeredQuestions.length} resolved` : ''}</span>
         ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
       </div>` : ''}
       <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
@@ -1034,6 +1158,11 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <button data-action="focus">Focus</button>
       </div>
     `;
+
+    this.inspectorPanel.querySelector('.inspector-close')?.addEventListener('click', () => {
+      this.selectedProject = null;
+      this.updateInspector();
+    });
 
     this.inspectorPanel.querySelector('[data-action="note"]')?.addEventListener('click', () => {
       this.app.workspace.openLinkText(project.path, '', false);
@@ -1058,6 +1187,56 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         this.sceneManager.setFocusedProject(project);
       }
     });
+  }
+
+  /** District analytics readout shown when no building is selected */
+  private renderCityOverview(): void {
+    if (!this.inspectorPanel) return;
+    const projects = this.filteredProjects;
+
+    if (projects.length === 0) {
+      this.inspectorPanel.innerHTML = '<div class="inspector-empty">No projects in view</div>';
+      return;
+    }
+
+    const active = projects.filter((p) => p.status === 'active').length;
+    const blocked = projects.filter((p) => p.status === 'blocked').length;
+    const quests = projects.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
+    const commits30d = projects.reduce((sum, p) => sum + (p.gitActivity?.commitsLast30d ?? 0), 0);
+
+    const districts = new Map<string, ProjectData[]>();
+    for (const p of projects) {
+      const list = districts.get(p.category) ?? [];
+      list.push(p);
+      districts.set(p.category, list);
+    }
+    const districtRows = [...districts.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .map(([category, list]) => {
+        const activeCount = list.filter((p) => p.status === 'active').length;
+        const questCount = list.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
+        const questPart = questCount > 0 ? ` · ◆${questCount}` : '';
+        return `<div class="signal-row"><span>${this.escapeHtml(category)}</span><strong>${list.length} · ${activeCount} active${questPart}</strong></div>`;
+      })
+      .join('');
+
+    this.inspectorPanel.innerHTML = `
+      <div class="inspector-header">
+        <span class="inspector-kicker">CITY OVERVIEW</span>
+        <h3>${projects.length} projects</h3>
+      </div>
+      <div class="inspector-grid">
+        <div><span>Active</span><strong>${active}</strong></div>
+        <div><span>Blocked</span><strong>${blocked}</strong></div>
+        <div><span>Open quests</span><strong>${quests}</strong></div>
+        <div><span>30d commits</span><strong>${commits30d}</strong></div>
+      </div>
+      <div class="inspector-section">
+        <span class="section-label">Districts</span>
+        ${districtRows}
+      </div>
+      <div class="inspector-empty">Select a building for details</div>
+    `;
   }
 
   private copyAgentContext(project: ProjectData, projectPath: string): void {
@@ -1139,6 +1318,19 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     indicator.style.display = 'none'; // Hidden by default
     container.appendChild(indicator);
     this.activityIndicator = indicator;
+  }
+
+  /** Render one orbiting orb per active agent (fleet presence) */
+  private onFleetUpdate(agents: AgentPresence[]): void {
+    if (!this.sceneManager) return;
+    this.sceneManager.updateAgentPresence(
+      agents.map((a) => ({
+        id: a.id,
+        projectPath: a.project
+          ? this.sceneManager?.findProjectByName(a.project)?.path ?? null
+          : null,
+      })),
+    );
   }
 
   /** Handle Claude Code activity start */

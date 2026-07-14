@@ -4,6 +4,7 @@ import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/Se
 import { ProjectParser } from './parsers/ProjectParser';
 import { prepareVaultForAgents } from './utils/VaultAgentSetup';
 import { scanSkills } from './utils/SkillsScanner';
+import { generateDailyBriefing } from './utils/BriefingGenerator';
 
 export default class HypernovumPlugin extends Plugin {
   settings: HypernovumSettings = DEFAULT_SETTINGS;
@@ -33,6 +34,12 @@ export default class HypernovumPlugin extends Plugin {
       id: 'prepare-vault-for-agents',
       name: 'Prepare vault for AI agents',
       callback: () => this.prepareVaultForAgents(),
+    });
+
+    this.addCommand({
+      id: 'generate-daily-briefing',
+      name: 'Generate daily briefing',
+      callback: () => this.generateDailyBriefing(),
     });
 
     // Settings tab
@@ -73,6 +80,18 @@ export default class HypernovumPlugin extends Plugin {
       );
     } catch (error: any) {
       new Notice(`Failed to prepare vault: ${error?.message ?? error}`);
+    }
+  }
+
+  /** Write a data-digest briefing note (status, attention list, quests, git heat) */
+  async generateDailyBriefing(): Promise<void> {
+    try {
+      const projects = await new ProjectParser(this.app).parseProjects(this.settings);
+      const notePath = await generateDailyBriefing(this.app, projects);
+      this.app.workspace.openLinkText(notePath, '', false);
+      new Notice('Daily briefing generated');
+    } catch (error: any) {
+      new Notice(`Failed to generate briefing: ${error?.message ?? error}`);
     }
   }
 

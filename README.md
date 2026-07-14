@@ -18,8 +18,13 @@ Each project in your vault becomes a building. Status maps to color, priority to
 ### Interactions
 - **Search and filters** for quickly narrowing the city by title, status, priority, category, path, or stack
 - **Visual scan modes**: status, read-only Git activity, memory-ready, task-progress ramp, recency heatmap, and tech-stack colors — with an adaptive legend
-- **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md
+- **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md — resolving a quest (move it to `answered:`) fires an emerald shockwave at the building
 - **Abilities roster**: agent skills (`SKILL.md` files in vault or `~/.claude/skills/`) listed in the agents panel — click to copy an invocation
+- **Neural Links**: toggle vault backlinks between projects as pulsing violet knowledge arcs — your second brain's link structure as city infrastructure
+- **Agent fleet presence**: multiple agents in the heartbeat file each get their own colored orb orbiting the building they're working on
+- **City overview**: the inspector doubles as a district analytics readout (per-district counts, active %, open quests) when nothing is selected
+- **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
+- **Snapshot**: one click saves a clean cinematic PNG of the city (title card, no HUD) into your vault
 - **Project inspector** with note/folder/agent/context/focus actions
 - **Click** a building to open its note
 - **Right-click** a building for context menu (Launch Agent, Inspect Project, Open in Explorer, Open Note, Focus Camera)

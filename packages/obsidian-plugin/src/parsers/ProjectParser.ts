@@ -64,6 +64,7 @@ export class ProjectParser {
       ...taskData,
       stack: this.parseStack(fm.stack),
       questions: this.parseQuestions(fm.questions ?? fm.quests),
+      answeredQuestions: this.parseQuestions(fm.answered ?? fm.quests_done),
       projectDir: typeof fm.projectDir === 'string' ? fm.projectDir : undefined,
     };
   }

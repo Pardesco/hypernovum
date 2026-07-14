@@ -111,6 +111,14 @@ While working on a project, you can light up its building in the city by writing
 { "active": true, "project": "My Project", "action": "editing", "lastPing": 1700000000000 }
 \`\`\`
 
+If several agents run at once, use the fleet format instead — each agent read-modify-writes only its own entry (matched by \`id\`), and every active agent appears as its own orbiting light in the city:
+
+\`\`\`json
+{ "agents": [
+  { "id": "claude-alpha", "name": "Claude", "project": "My Project", "action": "editing", "active": true, "lastPing": 1700000000000 }
+] }
+\`\`\`
+
 Update \`lastPing\` (epoch ms) every few seconds while active; the plugin treats pings older than 10 seconds as idle. Set \`"active": false\` (or stop updating) when done. \`project\` must match the project note's title.
 ${END_MARKER}`;
 }
@@ -159,7 +167,7 @@ Open questions posted by the user. If your current task touches one of these pro
 
 ${rows.join('\n')}
 
-When you resolve a quest: write the answer (with sources) into the project note body, then remove the entry from the note's \`questions:\` list. The city clears the quest marker automatically.`;
+When you resolve a quest: write the answer (with sources) into the project note body, then move the entry from the note's \`questions:\` list to an \`answered:\` list in the same frontmatter. The city fires a resolution shockwave and clears the quest marker automatically.`;
 }
 
 function buildSkillsRoster(skills: AgentSkill[]): string {

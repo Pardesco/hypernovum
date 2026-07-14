@@ -5,7 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
+import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, LinkEdge } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
@@ -61,6 +61,9 @@ export class SceneManager {
   private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
   private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
   private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
+  private linkArcs: THREE.Mesh[] = []; // backlink knowledge arcs between buildings
+  private questBursts: { mesh: THREE.Mesh; start: number }[] = []; // quest-resolved shockwaves
+  private agentOrbs = new Map<string, { orb: THREE.Mesh; path: string; baseY: number; phase: number }>(); // fleet presence
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -404,6 +407,9 @@ export class SceneManager {
     this.blockedEdgeGlows = [];
     this.roofBeacons = [];
     this.questMarkers = [];
+    this.clearLinkArcs();
+    this.questBursts = [];
+    this.agentOrbs.clear(); // orbs are building children — disposed with the city above
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
@@ -940,6 +946,148 @@ export class SceneManager {
     geometry.computeBoundingBox();
     geometry.translate(0, -geometry.boundingBox!.min.y, 0);
     return geometry;
+  }
+
+  /**
+   * Render backlink knowledge arcs between buildings. Arcs are violet
+   * additive tubes that rise with distance, pulse gently, and thicken with
+   * link count. Rebuilt whenever the city rebuilds; cleared via clearLinkArcs.
+   */
+  showLinkArcs(edges: LinkEdge[]): void {
+    this.clearLinkArcs();
+
+    for (const edge of edges) {
+      const a = this.buildingPathMap.get(edge.from);
+      const b = this.buildingPathMap.get(edge.to);
+      if (!a || !b) continue;
+
+      const geoA = a.geometry as THREE.BufferGeometry;
+      const geoB = b.geometry as THREE.BufferGeometry;
+      geoA.computeBoundingBox();
+      geoB.computeBoundingBox();
+      const start = new THREE.Vector3(a.position.x, a.position.y + (geoA.boundingBox?.max.y ?? 5) * 0.9, a.position.z);
+      const end = new THREE.Vector3(b.position.x, b.position.y + (geoB.boundingBox?.max.y ?? 5) * 0.9, b.position.z);
+
+      const dist = start.distanceTo(end);
+      const control = start.clone().add(end).multiplyScalar(0.5);
+      control.y += Math.max(3, dist * 0.35);
+
+      const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+      const radius = 0.05 + Math.min(edge.count, 6) * 0.015;
+      const tube = new THREE.TubeGeometry(curve, 24, radius, 5, false);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xb38cff, // brand violet — distinct from the cyan activity arteries
+        transparent: true,
+        opacity: 0.32,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const arc = new THREE.Mesh(tube, mat);
+      arc.userData = {
+        isLinkArc: true,
+        baseOpacity: 0.2 + Math.min(edge.count, 6) * 0.04,
+        pulsePhase: (start.x + end.z) % (Math.PI * 2),
+      };
+      this.scene.add(arc);
+      this.linkArcs.push(arc);
+    }
+  }
+
+  clearLinkArcs(): void {
+    for (const arc of this.linkArcs) {
+      arc.geometry.dispose();
+      (arc.material as THREE.Material).dispose();
+      this.scene.remove(arc);
+    }
+    this.linkArcs = [];
+  }
+
+  /**
+   * Agent fleet presence: one glowing orb per active agent, orbiting the
+   * building it is working on. Each agent id gets a stable hue. Orbs are
+   * children of the building mesh (they move and dispose with it); the
+   * activity monitor re-sends presence every poll, so rebuilds self-heal.
+   */
+  updateAgentPresence(agents: { id: string; projectPath: string | null }[]): void {
+    const seen = new Set<string>();
+
+    for (const agent of agents) {
+      if (!agent.projectPath) continue;
+      const building = this.buildingPathMap.get(agent.projectPath);
+      if (!building) continue;
+      seen.add(agent.id);
+
+      const existing = this.agentOrbs.get(agent.id);
+      if (existing && existing.path === agent.projectPath) continue;
+
+      // Reparent or create
+      if (existing) {
+        existing.orb.parent?.remove(existing.orb);
+        existing.orb.geometry.dispose();
+        (existing.orb.material as THREE.Material).dispose();
+        this.agentOrbs.delete(agent.id);
+      }
+
+      const geo = building.geometry as THREE.BufferGeometry;
+      geo.computeBoundingBox();
+      const baseY = (geo.boundingBox?.max.y ?? 5) + 1.8;
+
+      // Stable hue per agent id
+      let hash = 0;
+      for (let i = 0; i < agent.id.length; i++) hash = (hash * 31 + agent.id.charCodeAt(i)) | 0;
+      const color = new THREE.Color().setHSL((((hash % 360) + 360) % 360) / 360, 0.75, 0.6);
+
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.26, 12, 12),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.8 }),
+      );
+      orb.position.set(0, baseY, 0);
+      orb.userData = { isBuilding: true, isAgentOrb: true, project: building.userData.project };
+      building.add(orb);
+      this.agentOrbs.set(agent.id, {
+        orb,
+        path: agent.projectPath,
+        baseY,
+        phase: (((hash % 628) + 628) % 628) / 100,
+      });
+    }
+
+    // Remove orbs for agents that went idle or vanished
+    for (const [id, entry] of this.agentOrbs) {
+      if (seen.has(id)) continue;
+      // Keep entries whose agent was simply unresolvable this tick? No — the
+      // monitor re-sends the full fresh list every poll, so absence = gone.
+      entry.orb.parent?.remove(entry.orb);
+      entry.orb.geometry.dispose();
+      (entry.orb.material as THREE.Material).dispose();
+      this.agentOrbs.delete(id);
+    }
+  }
+
+  /**
+   * Quest-resolved celebration: an expanding emerald shockwave ring at the
+   * building's base. Self-disposing after ~1.5s.
+   */
+  flashBuilding(projectPath: string, colorHex = 0x22ff88): void {
+    const building = this.buildingPathMap.get(projectPath);
+    if (!building) return;
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.15, 40),
+      new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(building.position.x, 0.15, building.position.z);
+    ring.userData = { isQuestBurst: true };
+    this.scene.add(ring);
+    this.questBursts.push({ mesh: ring, start: this.clock.getElapsedTime() });
   }
 
   /**
@@ -1797,6 +1945,42 @@ export class SceneManager {
       }
     }
 
+    // Agent orbs orbit their buildings
+    for (const entry of this.agentOrbs.values()) {
+      const t = elapsed * 1.6 + entry.phase;
+      entry.orb.position.set(
+        Math.cos(t) * 0.9,
+        entry.baseY + Math.sin(elapsed * 2.3 + entry.phase) * 0.12,
+        Math.sin(t) * 0.9,
+      );
+    }
+
+    // Knowledge arcs breathe softly
+    for (const arc of this.linkArcs) {
+      const base = arc.userData.baseOpacity as number;
+      (arc.material as THREE.MeshBasicMaterial).opacity =
+        base * (0.75 + 0.25 * Math.sin(elapsed * 1.5 + (arc.userData.pulsePhase as number)));
+    }
+
+    // Quest-resolved shockwaves: expand and fade, then self-dispose
+    if (this.questBursts.length > 0) {
+      const alive: { mesh: THREE.Mesh; start: number }[] = [];
+      for (const burst of this.questBursts) {
+        const t = elapsed - burst.start;
+        if (t > 1.5) {
+          burst.mesh.geometry.dispose();
+          (burst.mesh.material as THREE.Material).dispose();
+          this.scene.remove(burst.mesh);
+          continue;
+        }
+        const scale = 1 + t * 7;
+        burst.mesh.scale.set(scale, scale, scale);
+        (burst.mesh.material as THREE.MeshBasicMaterial).opacity = 0.85 * (1 - t / 1.5);
+        alive.push(burst);
+      }
+      this.questBursts = alive;
+    }
+
     // Quest gems: slow spin + gentle bob
     for (const gem of this.questMarkers) {
       gem.rotation.y = elapsed * 1.2;
@@ -2005,6 +2189,20 @@ export class SceneManager {
   resetCamera(): void {
     this.fitCameraToCity(this.buildings.map(b => b.userData.project).filter(Boolean));
     this.focusedProject = null;
+  }
+
+  /**
+   * Capture the current 3D frame as a PNG data URL. Renders a fresh frame
+   * synchronously before reading pixels (drawing buffer is not preserved).
+   * HUD overlays and CSS2D labels are DOM, so the capture is a clean render.
+   */
+  captureSnapshot(): string {
+    if (this.composer) {
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
+    return this.renderer.domElement.toDataURL('image/png');
   }
 
   focusOnPosition(position: { x: number; y: number; z: number }): void {

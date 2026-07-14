@@ -11,11 +11,23 @@ export interface ActivityStatus {
   stoppedAt?: number;
 }
 
+/** One agent's presence when the status file carries a fleet (agents array) */
+export interface AgentPresence {
+  id: string;
+  name?: string;
+  project: string | null;
+  action: string | null;
+  lastPing: number;
+  active: boolean;
+}
+
 export interface ActivityCallbacks {
   onActivityStart?: (status: ActivityStatus) => void;
   onActivityUpdate?: (status: ActivityStatus) => void;
   onActivityStop?: () => void;
   onProjectChange?: (newProject: string | null, oldProject: string | null) => void;
+  /** Called every poll with all fresh (active, recently pinged) agents */
+  onFleetUpdate?: (agents: AgentPresence[]) => void;
 }
 
 /**
@@ -67,26 +79,29 @@ export class ActivityMonitor {
   /** Check current activity status */
   private async poll(): Promise<void> {
     try {
-      const status = await this.readStatusFile();
-
-      if (!status) {
-        // No status file - treat as idle
-        if (this.isActive) {
-          this.transitionToIdle();
-        }
-        return;
-      }
-
+      const raw = await this.readStatusFile();
       const now = Date.now();
-      const timeSinceLastPing = now - status.lastPing;
 
-      // Check if we should consider this idle (stale ping)
-      if (timeSinceLastPing > this.idleTimeout || !status.active) {
+      // Fleet extraction: agents array (multi-agent) or legacy single object
+      const agents = this.extractAgents(raw);
+      const fresh = agents.filter((a) => a.active && now - a.lastPing <= this.idleTimeout);
+      this.callbacks.onFleetUpdate?.(fresh);
+
+      if (fresh.length === 0) {
         if (this.isActive) {
           this.transitionToIdle();
         }
         return;
       }
+
+      // Primary agent drives the legacy single-status callbacks
+      const primary = fresh[0];
+      const status: ActivityStatus = {
+        active: true,
+        project: primary.project,
+        action: fresh.length > 1 ? `${fresh.length} agents active` : primary.action,
+        lastPing: primary.lastPing,
+      };
 
       // Active status with recent ping
       const wasActive = this.isActive;
@@ -121,8 +136,30 @@ export class ActivityMonitor {
     this.callbacks.onActivityStop?.();
   }
 
+  /** Normalize the status file into a list of agent presences */
+  private extractAgents(raw: any): AgentPresence[] {
+    if (!raw) return [];
+    if (Array.isArray(raw.agents)) {
+      return raw.agents.map((a: any, i: number) => ({
+        id: String(a.id ?? `agent-${i}`),
+        name: typeof a.name === 'string' ? a.name : undefined,
+        project: typeof a.project === 'string' ? a.project : null,
+        action: typeof a.action === 'string' ? a.action : null,
+        lastPing: Number(a.lastPing) || 0,
+        active: a.active !== false,
+      }));
+    }
+    return [{
+      id: 'default',
+      project: typeof raw.project === 'string' ? raw.project : null,
+      action: typeof raw.action === 'string' ? raw.action : null,
+      lastPing: Number(raw.lastPing) || 0,
+      active: raw.active !== false,
+    }];
+  }
+
   /** Read and parse the status file (uses vault adapter to bypass file index) */
-  private async readStatusFile(): Promise<ActivityStatus | null> {
+  private async readStatusFile(): Promise<any | null> {
     try {
       // Use vault adapter for direct disk access — getAbstractFileByPath() may not
       // index externally-created files (heartbeat.js writes directly to filesystem)
@@ -130,7 +167,7 @@ export class ActivityMonitor {
       if (!exists) return null;
 
       const content = await this.app.vault.adapter.read(this.statusFilePath);
-      return JSON.parse(content) as ActivityStatus;
+      return JSON.parse(content);
     } catch {
       return null;
     }
