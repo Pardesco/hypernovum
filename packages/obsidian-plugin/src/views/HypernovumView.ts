@@ -11,6 +11,7 @@ import { AgentRegistry, type AgentSession } from '../monitors/AgentRegistry';
 import { detectConflicts, type ConflictRecord } from '../monitors/ConflictDetector';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
+import { mapLimit } from '../utils/concurrency';
 import { generateAgentContext } from '../utils/AgentContext';
 import { scanSkills } from '../utils/SkillsScanner';
 import type { HypernovumSettings } from '../settings/SettingsTab';
@@ -364,7 +365,9 @@ category: default
     // Parse vault metadata into project data
     this.allProjects = await this.parser.parseProjects(this.settings);
 
-    await Promise.all(this.allProjects.map(async (project) => {
+    // Cap simultaneous git scans (each spawns several `git` processes) so a
+    // large vault doesn't fork hundreds at once.
+    await mapLimit(this.allProjects, 8, async (project) => {
       const projectPath = this.resolveProjectPath(project);
       const memoryContextPath = path.join(projectPath, '.hypernovum', 'MEMORY_CONTEXT.md');
 
@@ -379,7 +382,7 @@ category: default
           project.gitActivity = gitActivity;
         }
       }
-    }));
+    });
 
     // Detect quests resolved since the last parse — celebrate after rebuild
     const resolvedPaths: string[] = [];
@@ -1286,7 +1289,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <div class="signal-row"><span>Last commit</span><strong>${git?.lastCommitDate ? this.formatRelativeTime(git.lastCommitDate) : 'n/a'}</strong></div>
         <div class="signal-row"><span>30d commits</span><strong>${git?.commitsLast30d ?? 0}</strong></div>
         <div class="signal-row"><span>Working tree</span><strong>${git?.hasUncommittedChanges ? 'Changed' : 'Clean'}</strong></div>
+        ${git && (git.ahead != null || git.behind != null) ? `<div class="signal-row"><span>Upstream</span><strong>${git.ahead ?? 0} ahead · ${git.behind ?? 0} behind</strong></div>` : ''}
       </div>
+      ${git?.recentCommits && git.recentCommits.length > 0 ? `
+      <div class="inspector-section">
+        <span class="section-label">Recent Commits</span>
+        ${git.recentCommits.map((c) => `<div class="commit-row"><code>${this.escapeHtml(c.hash)}</code><span class="commit-subject">${this.escapeHtml(c.subject)}</span><span class="commit-time">${this.escapeHtml(this.formatRelativeTime(c.ts))}</span></div>`).join('')}
+      </div>` : ''}
       ${project.questions && project.questions.length > 0 ? `
       <div class="inspector-section">
         <span class="section-label">Open Quests${project.answeredQuestions?.length ? ` · ${project.answeredQuestions.length} resolved` : ''}</span>

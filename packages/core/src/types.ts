@@ -132,6 +132,19 @@ export interface WeatherData {
   churnScore: number;
   /** Active branch name when available */
   activeBranch?: string;
+  /** Recent commits, newest first (TRI-004) */
+  recentCommits?: RecentCommit[];
+  /** Commits ahead of upstream; null when there is no upstream (TRI-004) */
+  ahead?: number | null;
+  /** Commits behind upstream; null when there is no upstream (TRI-004) */
+  behind?: number | null;
+}
+
+export interface RecentCommit {
+  hash: string;
+  /** Commit time in epoch ms */
+  ts: number;
+  subject: string;
 }
 
 /**

@@ -1097,6 +1097,33 @@
 .agent-state-complete { color: #4ade80; }
 .agent-state-stale { color: #8a8a8a; }
 
+/* --- Recent commits (TRI-004) --- */
+.commit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.commit-row code {
+  flex-shrink: 0;
+  color: rgba(120, 200, 255, 0.85);
+  font-size: 10px;
+}
+.commit-row .commit-subject {
+  flex: 1;
+  color: rgba(200, 215, 235, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-row .commit-time {
+  flex-shrink: 0;
+  color: rgba(150, 170, 200, 0.55);
+  font-size: 10px;
+}
+
 /* --- Fleet summary + conflict rows (AGT-008/009) --- */
 .fleet-summary {
   margin: 8px 0 4px;
