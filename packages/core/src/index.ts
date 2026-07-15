@@ -39,3 +39,7 @@ export { GlowManager } from './effects/GlowManager';
 // Store
 export { createProjectStore } from './stores/projectStore';
 export type { ProjectState } from './stores/projectStore';
+
+// Utils
+export { debugLog, refreshDebugFlag } from './utils/log';
+export { escapeHtml } from './utils/html';

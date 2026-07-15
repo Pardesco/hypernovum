@@ -12,6 +12,8 @@ import { BuildingFactory } from '../renderers/BuildingFactory';
 import { RooftopFactory } from '../renderers/RooftopFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
+import { debugLog } from '../utils/log';
+import { escapeHtml } from '../utils/html';
 
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
@@ -283,7 +285,7 @@ export class SceneManager {
       const outputPass = new OutputPass();
       this.composer.addPass(outputPass);
 
-      console.log('[Hypernovum] Bloom post-processing initialized');
+      debugLog('Bloom post-processing initialized');
     } catch (e) {
       console.warn('[Hypernovum] Failed to initialize bloom:', e);
       this.composer = null;
@@ -1866,9 +1868,7 @@ export class SceneManager {
   }
 
   private escapeHtml(str: string): string {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return escapeHtml(str);
   }
 
   private formatRelativeTime(epochMs: number): string {
@@ -2296,7 +2296,7 @@ export class SceneManager {
     // Also trigger the data flow
     this.triggerFlow(projectPath);
 
-    console.log('[Hypernovum] Launch effect triggered for:', projectPath);
+    debugLog('Launch effect triggered for:', projectPath);
   }
 
   /** Start continuous streaming to a project (for Claude Code activity) */
@@ -2305,14 +2305,14 @@ export class SceneManager {
 
     const building = this.buildingPathMap.get(projectPath);
     if (!building) {
-      console.log('[Hypernovum] No building found for path:', projectPath);
+      debugLog('No building found for path:', projectPath);
       return;
     }
 
     const project = building.userData.project as ProjectData;
     if (!project || !project.dimensions) return;
 
-    console.log('[Hypernovum] Starting stream to:', project.title);
+    debugLog('Starting stream to:', project.title);
 
     this.arteryManager.startStream(
       this.neuralCore,
@@ -2326,7 +2326,7 @@ export class SceneManager {
   stopStreaming(): void {
     if (!this.arteryManager) return;
 
-    console.log('[Hypernovum] Stopping stream');
+    debugLog('Stopping stream');
     this.arteryManager.stopStream();
   }
 

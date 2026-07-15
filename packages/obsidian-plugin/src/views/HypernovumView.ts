@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Plat
 import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
-import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav } from '@hypernovum/core';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml } from '@hypernovum/core';
 import type { ProjectData, BlockPosition, RaycastHit, LinkEdge } from '@hypernovum/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
@@ -1263,13 +1263,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   }
 
   private escapeHtml(value: string): string {
-    return value.replace(/[&<>"']/g, (char) => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    }[char] ?? char));
+    return escapeHtml(value);
   }
 
   private async saveLayout(positions: BlockPosition[]): Promise<void> {
