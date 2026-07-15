@@ -12,6 +12,9 @@ export { HighlightManager } from './scene/HighlightManager';
 export type { BuildingParts } from './scene/HighlightManager';
 export { resolveVisualState } from './scene/visualState';
 export type { VisualState, ResolveInput, LabelTier } from './scene/visualState';
+export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbVisual';
+export type { OrbVisual } from './scene/agentOrbVisual';
+export type { AgentOrbInput } from './scene/SceneManager';
 
 // Layout
 export { BinPacker } from './layout/BinPacker';

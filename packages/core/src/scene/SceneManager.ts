@@ -16,6 +16,7 @@ import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
 import { debugLog } from '../utils/log';
 import { escapeHtml } from '../utils/html';
+import { orbVisualForState, stateTintsHost, type OrbVisual } from './agentOrbVisual';
 import type { InteractionStore } from '../stores/interactionStore';
 
 interface SceneManagerOptions {
@@ -70,6 +71,9 @@ interface AgentOrbEntry {
   phase: number;
   hue: number;            // stable base hue for the agent id
   info: AgentOrbInput;    // latest presence data (tooltip + state visuals)
+  visual: OrbVisual;      // resolved per-state visual (AGT-005)
+  /** Clock time (s) the orb entered 'complete' — drives the 60s fade. */
+  completeSince: number | null;
 }
 
 export class SceneManager {
@@ -1110,6 +1114,8 @@ export class SceneManager {
         phase: (((hash % 628) + 628) % 628) / 100,
         hue,
         info: agent,
+        visual: orbVisualForState(agent.state ?? 'running'),
+        completeSince: null,
       };
       this.agentOrbs.set(agent.id, entry);
       this.applyOrbState(entry);
@@ -1127,15 +1133,38 @@ export class SceneManager {
   }
 
   /**
-   * Apply per-state visual treatment to one orb (AGT-005). For AGT-004 this is
-   * a hook that keeps the stable-hue emissive; AGT-005 fills in the state map.
+   * Apply per-state visual treatment to one orb (AGT-005): color by state
+   * (agent hue when working, amber/red/green/grey otherwise), emissive
+   * baseline, and opacity. animate() modulates the pulse + complete-fade
+   * around these published baselines and drives the orbit.
    */
   private applyOrbState(entry: AgentOrbEntry): void {
+    const state = entry.info.state ?? 'running';
+    const visual = orbVisualForState(state);
+    entry.visual = visual;
+
+    // Track the moment the orb entered 'complete' so animate() can fade it.
+    if (visual.fadeOut) {
+      if (entry.completeSince === null) entry.completeSince = this.clock.getElapsedTime();
+    } else {
+      entry.completeSince = null;
+      entry.orb.visible = true;
+    }
+
+    const color = visual.color === 'hue'
+      ? new THREE.Color().setHSL(entry.hue, 0.75, 0.6)
+      : new THREE.Color(visual.color);
+
     const mat = entry.orb.material as THREE.MeshStandardMaterial;
-    const color = new THREE.Color().setHSL(entry.hue, 0.75, 0.6);
     mat.color.copy(color);
     mat.emissive.copy(color);
-    mat.emissiveIntensity = 1.8;
+    mat.emissiveIntensity = visual.emissiveBase;
+    const wantTransparent = visual.opacity < 1;
+    if (mat.transparent !== wantTransparent) {
+      mat.transparent = wantTransparent;
+      mat.needsUpdate = true;
+    }
+    mat.opacity = visual.opacity;
   }
 
   /**
@@ -2037,6 +2066,13 @@ export class SceneManager {
     // State decisions (colors, glitch base, decay) live in the resolver —
     // this block only adds sin-wave motion and transient pulses.
     const streamingPath = this.arteryManager?.getStreamingPath() ?? null;
+
+    // Buildings whose host tint should glow because an agent is editing them.
+    const editingPaths = new Set<string>();
+    for (const orb of this.agentOrbs.values()) {
+      if (stateTintsHost(orb.info.state ?? '')) editingPaths.add(orb.path);
+    }
+
     for (const entry of this.parts.values()) {
       const material = entry.shaderMaterial;
       if (!material) continue;
@@ -2072,16 +2108,49 @@ export class SceneManager {
       if (streamingPath === entry.path) {
         material.uniforms.uPulse.value = 1.0;
       }
+
+      // Interior-glow tint while an agent is editing this building.
+      if (editingPaths.has(entry.path)) {
+        material.uniforms.uPulse.value = Math.max(
+          material.uniforms.uPulse.value as number,
+          0.7,
+        );
+      }
     }
 
-    // Agent orbs orbit their buildings
+    // Agent orbs: orbit + pulse + complete-fade around their AGT-005 baselines.
     for (const entry of this.agentOrbs.values()) {
-      const t = elapsed * 1.6 + entry.phase;
-      entry.orb.position.set(
-        Math.cos(t) * 0.9,
-        entry.baseY + Math.sin(elapsed * 2.3 + entry.phase) * 0.12,
-        Math.sin(t) * 0.9,
-      );
+      const v = entry.visual;
+      const mat = entry.orb.material as THREE.MeshStandardMaterial;
+
+      // Position: orbit while working; park at the top (subtle bob) otherwise.
+      if (v.orbit) {
+        const t = elapsed * 1.6 + entry.phase;
+        entry.orb.position.set(
+          Math.cos(t) * 0.9,
+          entry.baseY + Math.sin(elapsed * 2.3 + entry.phase) * 0.12,
+          Math.sin(t) * 0.9,
+        );
+      } else {
+        entry.orb.position.set(0, entry.baseY + Math.sin(elapsed * 1.5 + entry.phase) * 0.06, 0);
+      }
+
+      // Pulse: modulate emissive around the published baseline.
+      if (v.pulseSpeed > 0) {
+        mat.emissiveIntensity = v.emissiveBase + Math.sin(elapsed * v.pulseSpeed + entry.phase) * v.pulseAmplitude;
+      }
+
+      // Complete fade: ramp opacity 1→0 over 60s, then hide the orb.
+      if (v.fadeOut && entry.completeSince !== null) {
+        const f = 1 - (elapsed - entry.completeSince) / 60;
+        if (f <= 0) {
+          entry.orb.visible = false;
+        } else {
+          entry.orb.visible = true;
+          if (!mat.transparent) { mat.transparent = true; mat.needsUpdate = true; }
+          mat.opacity = f;
+        }
+      }
     }
 
     // Knowledge arcs breathe softly
