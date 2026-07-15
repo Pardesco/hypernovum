@@ -12,6 +12,8 @@ export { HighlightManager } from './scene/HighlightManager';
 export type { BuildingParts } from './scene/HighlightManager';
 export { resolveVisualState } from './scene/visualState';
 export type { VisualState, ResolveInput, LabelTier } from './scene/visualState';
+export { loftTower, loftVertexCount } from './renderers/TowerLoft';
+export type { TowerLoftParams, TowerProfile } from './renderers/TowerLoft';
 export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbVisual';
 export type { OrbVisual } from './scene/agentOrbVisual';
 export type { AgentOrbInput } from './scene/SceneManager';
