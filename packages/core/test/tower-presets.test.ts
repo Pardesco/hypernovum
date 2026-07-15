@@ -17,15 +17,23 @@ describe('presetForProject — category mapping', () => {
     expect(d.params.facetedNormals).toBe(true);
   });
 
-  it('returns null for unmapped categories (classic fallback)', () => {
-    expect(presetForProject(input({ category: 'obsidian-plugins' }))).toBeNull();
+  it('maps obsidian-plugins to a faceted hexagon (Modular Hive)', () => {
+    const hive = presetForProject(input({ category: 'obsidian-plugins' }))!;
+    expect(hive.params.profile.kind).toBe('polygon');
+    if (hive.params.profile.kind === 'polygon') expect(hive.params.profile.sides).toBe(6);
+    expect(hive.params.facetedNormals).toBe(true);
+    expect(hive.diagrid).toBe(false); // distinct from D's octagon+diagrid
+    expect(isParametricCategory('obsidian-plugins')).toBe(true);
+  });
+
+  it('returns null for genuinely unmapped categories (classic fallback)', () => {
     expect(presetForProject(input({ category: 'nonsense' }))).toBeNull();
-    expect(isParametricCategory('obsidian-plugins')).toBe(false);
+    expect(isParametricCategory('nonsense')).toBe(false);
     expect(isParametricCategory('trading')).toBe(true);
   });
 
   it('only preset D carries the diagrid hint', () => {
-    for (const c of ['web-apps', 'content', 'visualization', 'art', 'desktop-apps']) {
+    for (const c of ['web-apps', 'content', 'visualization', 'art', 'desktop-apps', 'obsidian-plugins']) {
       expect(presetForProject(input({ category: c }))?.diagrid).toBe(false);
     }
     for (const c of ['infrastructure', 'trading']) {

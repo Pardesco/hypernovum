@@ -38,7 +38,7 @@ describe('RooftopFactory safe radius fits every preset top floor (BLD-006)', () 
   }
 
   // safeR = min(width, depth) * 0.18 — greebles must stay inside the top ring.
-  for (const category of ['web-apps', 'content', 'visualization', 'infrastructure']) {
+  for (const category of ['web-apps', 'content', 'visualization', 'infrastructure', 'obsidian-plugins']) {
     it(`${category}: min top-ring radius ≥ min(w,d)·0.18`, () => {
       const width = 4, depth = 3;
       const preset = presetForProject(input({ category, width, depth }))!;

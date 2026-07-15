@@ -28,7 +28,7 @@ export interface TowerBuildResult {
   diagrid: boolean;        // → shader uDiagrid (preset D facades)
 }
 
-type Family = 'A' | 'B' | 'C' | 'D';
+type Family = 'A' | 'B' | 'C' | 'D' | 'E';
 
 const CATEGORY_FAMILY: Record<string, Family> = {
   'web-apps': 'A',
@@ -38,6 +38,7 @@ const CATEGORY_FAMILY: Record<string, Family> = {
   art: 'C',
   infrastructure: 'D',
   trading: 'D',
+  'obsidian-plugins': 'E', // hexagonal "Modular Hive" → faceted hexagon tower
 };
 
 function clamp(x: number, lo: number, hi: number): number {
@@ -105,6 +106,13 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
         profile: { kind: 'superellipse', a, b, n: 2, samples: 18 },
         floors, floorHeight, taper: 0.20, twistDeg: 10,
         lean: { dx: input.height * 0.06 * (rng() < 0.5 ? -1 : 1), dz: input.height * jitter(0.02), sCurve: true },
+      };
+      break;
+    case 'E': // Modular Hive — obsidian-plugins: clean faceted hexagonal column
+      params = {
+        profile: { kind: 'polygon', sides: 6, a, b },
+        floors, floorHeight, taper: 0.14, twistDeg: 15 + jitter(5),
+        facetedNormals: true,
       };
       break;
     case 'D': // Faceted octagon + setbacks — infrastructure, trading
