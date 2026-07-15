@@ -1494,6 +1494,36 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.wireWarningActions(this.inspectorPanel);
   }
 
+  /** Recent-activity feed (TRI-005): recent commits + just-completed sessions. */
+  private renderActivityFeed(): string {
+    const now = Date.now();
+    const WEEK = 7 * 24 * 3600 * 1000;
+    const DAY = 24 * 3600 * 1000;
+    const rows: { label: string; ts: number }[] = [];
+
+    for (const p of this.allProjects) {
+      const g = p.gitActivity;
+      if (g?.lastCommitDate && now - g.lastCommitDate <= WEEK) {
+        const subj = g.recentCommits?.[0]?.subject;
+        rows.push({ ts: g.lastCommitDate, label: `${p.title} — commit${subj ? ` "${subj}"` : ''}` });
+      }
+    }
+    for (const s of this.fleetSessions) {
+      if (s.state === 'complete' && now - s.lastPing <= DAY) {
+        const title = s.projectPath ? this.allProjects.find((p) => p.path === s.projectPath)?.title ?? '' : '';
+        rows.push({ ts: s.lastPing, label: `${title ? `${title} — ` : ''}${s.name} session complete` });
+      }
+    }
+
+    rows.sort((a, b) => b.ts - a.ts);
+    const top = rows.slice(0, 5);
+    if (top.length === 0) return '';
+    return `<div class="inspector-section">
+      <span class="section-label">Recent Activity</span>
+      ${top.map((r) => `<div class="activity-row"><span class="activity-label">${this.escapeHtml(r.label)}</span><span class="activity-time">${this.escapeHtml(this.formatRelativeTime(r.ts))}</span></div>`).join('')}
+    </div>`;
+  }
+
   /** District analytics readout shown when no building is selected */
   private renderCityOverview(): void {
     if (!this.inspectorPanel) return;
@@ -1564,6 +1594,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       </div>
       ${fleetLine}
       ${attentionSection}
+      ${this.renderActivityFeed()}
       <div class="inspector-section">
         <span class="section-label">Districts</span>
         ${districtRows}

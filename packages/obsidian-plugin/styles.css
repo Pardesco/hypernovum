@@ -1175,6 +1175,28 @@
 }
 .warning-action:hover { background: rgba(255, 255, 255, 0.16); }
 
+/* --- Recent activity feed (TRI-005) --- */
+.activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.activity-row .activity-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(200, 215, 235, 0.85);
+}
+.activity-row .activity-time {
+  flex-shrink: 0;
+  color: rgba(150, 170, 200, 0.55);
+  font-size: 10px;
+}
+
 /* --- Recent commits (TRI-004) --- */
 .commit-row {
   display: flex;
