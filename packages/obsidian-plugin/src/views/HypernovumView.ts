@@ -437,6 +437,9 @@ category: default
     const selectedPath = this.interactionStore.getState().selectedPath;
     if (selectedPath && !this.filteredProjects.some((p) => p.path === selectedPath)) {
       this.interactionStore.getState().clearSelection();
+    } else {
+      // Edges may have changed with the rebuild — refresh the connected set
+      this.updateConnectedPaths(selectedPath);
     }
 
     this.updateSummary();
@@ -1121,6 +1124,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       } else {
         this.sceneManager?.clearLinkArcs();
       }
+      this.updateConnectedPaths(this.interactionStore.getState().selectedPath);
     });
 
     container.appendChild(panel);
@@ -1141,9 +1145,27 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.storeUnsubscribe?.();
     this.storeUnsubscribe = this.interactionStore.subscribe((state, prev) => {
       if (state.selectedPath !== prev.selectedPath) {
+        this.updateConnectedPaths(state.selectedPath);
         this.updateInspector();
       }
     });
+  }
+
+  /**
+   * Backlink neighbors of the selection stay readable while the rest of the
+   * city dims. Recomputed on selection change, links toggle, and rebuild.
+   * (Typed edges extend this set in Phase 4.)
+   */
+  private updateConnectedPaths(selectedPath: string | null): void {
+    if (!this.sceneManager) return;
+    const connected = new Set<string>();
+    if (selectedPath && this.showLinks) {
+      for (const edge of this.computeLinkEdges()) {
+        if (edge.from === selectedPath) connected.add(edge.to);
+        else if (edge.to === selectedPath) connected.add(edge.from);
+      }
+    }
+    this.sceneManager.setConnectedPaths(connected);
   }
 
   private selectProject(project: ProjectData): void {

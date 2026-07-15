@@ -42,6 +42,12 @@
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
+  transition: opacity 180ms ease;
+}
+
+/* Focus mode: labels of unrelated buildings fade with their buildings */
+.hypernovum-building-label.hv-label-dimmed {
+  opacity: 0.12;
 }
 
 /* Hover tooltip */

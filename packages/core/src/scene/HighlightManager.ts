@@ -39,8 +39,8 @@ export class HighlightManager {
   private lensColors: Map<string, number> | null = null;
   private connectedPaths = new Set<string>();
   private bloom: boolean;
-  /** Dim-unrelated focus pass — enabled with the selection-visuals feature */
-  focusDimEnabled = false;
+  /** Dim-unrelated focus pass while a selection or trace overlay is active */
+  focusDimEnabled = true;
   private unsubscribe: (() => void) | null = null;
 
   constructor(

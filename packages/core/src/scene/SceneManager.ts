@@ -2330,6 +2330,14 @@ export class SceneManager {
     }
   }
 
+  /**
+   * Paths considered connected to the current selection (edge neighbors).
+   * The view recomputes this from visible edges on selection change.
+   */
+  setConnectedPaths(paths: Set<string>): void {
+    this.highlight.setConnectedPaths(paths);
+  }
+
   /** Remove weather data for a project (e.g. when project is removed) */
   clearWeather(projectPath: string): void {
     this.highlight.setWeather(projectPath, null);

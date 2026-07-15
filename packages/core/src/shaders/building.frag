@@ -6,6 +6,7 @@ uniform float uTime;          // For animations
 uniform float uGlitch;        // 0.0 = normal, 1.0 = blocked glitch
 uniform float uScope;         // File count (fallback window density)
 uniform float uTotalTasks;    // Task count (drives window grid density)
+uniform float uDimFactor;     // 1.0 = normal, <1 = dimmed (focus mode unrelated)
 
 varying vec2 vUv;
 varying vec3 vNormal;
@@ -117,5 +118,5 @@ void main() {
     }
   }
 
-  gl_FragColor = vec4(finalColor, 1.0);
+  gl_FragColor = vec4(finalColor * uDimFactor, 1.0);
 }
