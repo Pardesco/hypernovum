@@ -1451,6 +1451,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <button data-action="agent">Launch Agent</button>
         <button data-action="context">Context</button>
         <button data-action="copy-path">Copy Path</button>
+        <button data-action="quest">Add Quest</button>
         <button data-action="focus">Focus</button>
       </div>
     `;
@@ -1482,6 +1483,10 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     this.inspectorPanel.querySelector('[data-action="copy-path"]')?.addEventListener('click', () => {
       this.copyProjectPath(projectPath);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="quest"]')?.addEventListener('click', () => {
+      this.addQuestForProject(project);
     });
 
     this.inspectorPanel.querySelector('[data-action="focus"]')?.addEventListener('click', () => {
@@ -1817,6 +1822,30 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     new Notice(result.success ? `Opened terminal in ${project.title}` : `Failed to open terminal: ${result.message}`);
   }
 
+  /** Add a research question to a project's frontmatter from the city — TRI-008. */
+  private addQuestForProject(project: ProjectData): void {
+    new TextInputModal(
+      this.app,
+      { title: `Add quest — ${project.title}`, label: 'Research question', placeholder: 'What do we still need to answer?', cta: 'Add quest' },
+      async (question) => {
+        const file = this.app.vault.getAbstractFileByPath(project.path);
+        if (!(file instanceof TFile)) { new Notice('Could not find the project note'); return; }
+        try {
+          await this.app.fileManager.processFrontMatter(file, (fm) => {
+            // questions may be a single string or an array — normalize to array.
+            const existing = fm.questions;
+            const arr = Array.isArray(existing) ? existing.slice() : (existing ? [existing] : []);
+            arr.push(question);
+            fm.questions = arr;
+          });
+          new Notice(`Quest added to ${project.title}`);
+        } catch {
+          new Notice('Could not add quest');
+        }
+      },
+    ).open();
+  }
+
   /** Copy the resolved project directory to the clipboard — TRI-007. */
   private async copyProjectPath(projectPath: string): Promise<void> {
     try {
@@ -1888,6 +1917,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         .setTitle('Copy path')
         .setIcon('copy')
         .onClick(() => this.copyProjectPath(projectPath));
+    });
+
+    menu.addItem((item) => {
+      item
+        .setTitle('Add quest')
+        .setIcon('diamond')
+        .onClick(() => this.addQuestForProject(project));
     });
 
     menu.addSeparator();
@@ -2141,6 +2177,47 @@ class FolderInputModal extends Modal {
       new Notice('Folder not found: ' + trimmed);
       return;
     }
+    this.close();
+    this.onSubmit(trimmed);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** Generic single-line text prompt (used for Add Quest — TRI-008). */
+class TextInputModal extends Modal {
+  private inputValue = '';
+  constructor(
+    app: App,
+    private opts: { title: string; label: string; placeholder: string; cta: string },
+    private onSubmit: (value: string) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: this.opts.title });
+    new Setting(contentEl)
+      .setName(this.opts.label)
+      .addText((text) => {
+        text.setPlaceholder(this.opts.placeholder);
+        text.onChange((v) => { this.inputValue = v; });
+        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Enter') { e.preventDefault(); this.submit(); }
+        });
+        window.setTimeout(() => text.inputEl.focus(), 0);
+      });
+    new Setting(contentEl).addButton((btn) => {
+      btn.setButtonText(this.opts.cta).setCta().onClick(() => this.submit());
+    });
+  }
+
+  private submit(): void {
+    const trimmed = this.inputValue.trim();
+    if (!trimmed) { new Notice('Please enter some text'); return; }
     this.close();
     this.onSubmit(trimmed);
   }
