@@ -248,10 +248,18 @@ category: default
       this.sceneManager.getScene(),
       this.sceneManager.getCanvas(),
     );
-    this.raycaster.setClickHandler((hit) => {
+    // Click = focus, double-click = open, empty space = deselect
+    this.raycaster.setSelectHandler((hit) => {
       this.selectProject(hit.project);
+    });
+    this.raycaster.setOpenHandler((hit) => {
       this.app.workspace.openLinkText(hit.project.path, '', false);
     });
+    this.raycaster.setEmptyClickHandler(() => {
+      this.interactionStore.getState().clearSelection();
+    });
+    // Clicks that end a block/building drag must not change selection
+    this.raycaster.setClickGuard(() => this.sceneManager?.wasRecentlyDragging() ?? false);
 
     // Set up right-click context menu for buildings
     this.raycaster.setRightClickHandler((hit, event) => {
@@ -270,7 +278,15 @@ category: default
       onCycleStale: () => this.cycleByStatus('paused'),
       onResetCamera: () => this.sceneManager?.resetCamera(),
       onDebugFlow: () => this.triggerRandomFlow(),
+      onEscape: () => {
+        // Priority: exit move mode → clear selection
+        if (this.sceneManager?.exitMoveModeIfActive()) return;
+        this.interactionStore.getState().clearSelection();
+      },
     });
+
+    // Inspector mirrors the selection — single subscription, no manual calls
+    this.registerStoreSubscription();
 
     // Parse projects and build city
     await this.buildCity();
@@ -310,12 +326,21 @@ category: default
 
     // Add HUD title
     this.addHudTitle(container);
+
+    // One-time notice for the 0.4 interaction-model change
+    if (!this.settings.interactionHintShown) {
+      new Notice('Hypernovum: Click selects · Double-click opens · Move via right-click', 10000);
+      this.plugin.settings.interactionHintShown = true;
+      await this.plugin.saveSettings();
+    }
   }
 
   async onClose(): Promise<void> {
     this.metadataExtractor?.stopWatching();
     this.keyboardNav?.dispose();
     this.activityMonitor?.stop();
+    this.storeUnsubscribe?.();
+    this.storeUnsubscribe = null;
 
     if (this.sceneManager) {
       this.sceneManager.dispose();
@@ -859,9 +884,10 @@ category: default
     const controls = document.createElement('div');
     controls.className = 'hypernovum-controls';
     controls.innerHTML = `
-      <div class="controls-row"><kbd>Click</kbd><span>Open note</span></div>
+      <div class="controls-row"><kbd>Click</kbd><span>Select</span></div>
+      <div class="controls-row"><kbd>Dbl-click</kbd><span>Open note</span></div>
       <div class="controls-row"><kbd>Right-click</kbd><span>Actions menu</span></div>
-      <div class="controls-row"><kbd>Dbl-click</kbd><span>Move building</span></div>
+      <div class="controls-row"><kbd>Esc</kbd><span>Deselect / exit move</span></div>
       <div class="controls-row"><kbd>Right-drag</kbd><span>Pan</span></div>
       <div class="controls-row"><kbd>Scroll</kbd><span>Zoom</span></div>
       <div class="controls-row"><kbd>B / S</kbd><span>Cycle blocked / stale</span></div>
@@ -1108,9 +1134,20 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     container.appendChild(panel);
   }
 
+  private storeUnsubscribe: (() => void) | null = null;
+
+  /** INT-007: inspector state flows from the store; no manual update calls */
+  private registerStoreSubscription(): void {
+    this.storeUnsubscribe?.();
+    this.storeUnsubscribe = this.interactionStore.subscribe((state, prev) => {
+      if (state.selectedPath !== prev.selectedPath) {
+        this.updateInspector();
+      }
+    });
+  }
+
   private selectProject(project: ProjectData): void {
     this.interactionStore.getState().select(project.path);
-    this.updateInspector();
   }
 
   private updateSummary(): void {
@@ -1171,7 +1208,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     this.inspectorPanel.querySelector('.inspector-close')?.addEventListener('click', () => {
       this.interactionStore.getState().clearSelection();
-      this.updateInspector();
     });
 
     this.inspectorPanel.querySelector('[data-action="note"]')?.addEventListener('click', () => {
@@ -1437,6 +1473,15 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         .setIcon('panel-right')
         .onClick(() => {
           this.selectProject(project);
+        });
+    });
+
+    menu.addItem((item) => {
+      item
+        .setTitle('Move building')
+        .setIcon('move')
+        .onClick(() => {
+          this.sceneManager?.enterBuildingMoveModeByPath(project.path);
         });
     });
 

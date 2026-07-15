@@ -14,6 +14,7 @@ export class KeyboardNav {
   private onJumpToProject: ((index: number) => void) | null = null;
   private onResetCamera: (() => void) | null = null;
   private onDebugFlow: (() => void) | null = null;
+  private onEscape: (() => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -39,12 +40,14 @@ export class KeyboardNav {
     onJumpToProject?: (index: number) => void;
     onResetCamera?: () => void;
     onDebugFlow?: () => void;
+    onEscape?: () => void;
   }): void {
     this.onCycleBlocked = handlers.onCycleBlocked ?? null;
     this.onCycleStale = handlers.onCycleStale ?? null;
     this.onJumpToProject = handlers.onJumpToProject ?? null;
     this.onResetCamera = handlers.onResetCamera ?? null;
     this.onDebugFlow = handlers.onDebugFlow ?? null;
+    this.onEscape = handlers.onEscape ?? null;
   }
 
   private handleKeyPress(event: KeyboardEvent): void {
@@ -73,6 +76,10 @@ export class KeyboardNav {
       case 'T':
         event.preventDefault();
         this.onDebugFlow?.();
+        break;
+      case 'Escape':
+        event.preventDefault();
+        this.onEscape?.();
         break;
     }
   }

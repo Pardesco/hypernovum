@@ -95,12 +95,12 @@ export class SceneManager {
   private blockOffsets: Map<string, { offsetX: number; offsetZ: number }> = new Map();
   private onSaveLayout?: (positions: BlockPosition[]) => void;
 
-  // Building move mode
+  // Building move mode (entered via context menu — see enterBuildingMoveModeByPath)
   private movingBuilding: THREE.Mesh | null = null;
   private movingBuildingOriginalPos = new THREE.Vector3();
   private buildingDragStart = new THREE.Vector3();
-  private lastClickTime = 0;
-  private lastClickedBuilding: THREE.Mesh | null = null;
+  // Click events that end a drag must not select/deselect
+  private dragEndAt = 0;
 
   // Animation timing
   private clock = new THREE.Clock();
@@ -188,7 +188,6 @@ export class SceneManager {
     this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.container.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.container.addEventListener('mouseup', (e) => this.onMouseUp(e));
-    document.addEventListener('keydown', (e) => this.onKeyDown(e));
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(container);
 
@@ -1384,23 +1383,8 @@ export class SceneManager {
       return;
     }
 
-    // Check for double-click on buildings
-    const buildingHits = this.raycaster.intersectObjects(this.buildings, false);
-    if (buildingHits.length > 0) {
-      const hit = buildingHits[0].object as THREE.Mesh;
-      const now = Date.now();
-
-      if (this.lastClickedBuilding === hit && now - this.lastClickTime < 400) {
-        // Double-click detected - enter move mode
-        this.enterBuildingMoveMode(hit);
-        this.lastClickTime = 0;
-        this.lastClickedBuilding = null;
-        return;
-      }
-
-      this.lastClickTime = now;
-      this.lastClickedBuilding = hit;
-    }
+    // (Double-click no longer enters move mode — it opens the note.
+    //  Move mode is explicit via the context menu.)
 
     // Check for drag handle clicks (use larger hitboxes)
     const handleHits = this.raycaster.intersectObjects(this.handleHitBoxes, false);
@@ -1488,15 +1472,35 @@ export class SceneManager {
     if (existing) existing.remove();
   }
 
-  private onKeyDown(event: KeyboardEvent): void {
-    // Escape exits building move mode
-    if (event.key === 'Escape' && this.movingBuilding) {
-      this.exitBuildingMoveMode();
-    }
+  /** True briefly after a drag ends — lets the click handler swallow the drag's click */
+  wasRecentlyDragging(): boolean {
+    return performance.now() - this.dragEndAt < 300;
+  }
+
+  /** Enter move mode from the context menu (the only entry point) */
+  enterBuildingMoveModeByPath(projectPath: string): boolean {
+    const building = this.buildingPathMap.get(projectPath);
+    if (!building) return false;
+    this.enterBuildingMoveMode(building);
+    // Keyboard Escape is canvas-focus-gated — make sure the canvas has focus
+    this.renderer.domElement.focus();
+    return true;
+  }
+
+  /** Exit move mode if active (Escape / view-level clear) */
+  exitMoveModeIfActive(): boolean {
+    if (!this.movingBuilding) return false;
+    this.exitBuildingMoveMode();
+    return true;
+  }
+
+  isInMoveMode(): boolean {
+    return this.movingBuilding !== null;
   }
 
   private onMouseUp(_event: MouseEvent): void {
     if (this.isDragging) {
+      this.dragEndAt = performance.now();
       if (this.draggedBlock) {
         // Persist the internal state immediately so background rebuilds (e.g. file edits)
         // do not revert the user's manual dragging before they hit the Save Layout button.
