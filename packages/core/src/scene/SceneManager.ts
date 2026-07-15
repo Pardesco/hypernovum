@@ -1215,7 +1215,10 @@ export class SceneManager {
   }
 
   private onMouseMove(event: MouseEvent): void {
-    const rect = this.container.getBoundingClientRect();
+    // NDC from the CANVAS rect, not the container — the container (Obsidian's
+    // view-content) can carry theme padding, which offsets every hover ray
+    // while clicks (BuildingRaycaster, canvas-rect) stay exact.
+    const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
@@ -1358,7 +1361,8 @@ export class SceneManager {
   private onMouseDown(event: MouseEvent): void {
     if (event.button !== 0) return; // Only left click
 
-    const rect = this.container.getBoundingClientRect();
+    // Canvas rect, not container rect — see onMouseMove
+    const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 

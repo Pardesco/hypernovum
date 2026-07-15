@@ -56,9 +56,16 @@ open `questions:`, and backlinks between at least two projects. Reference screen
       written under `.hypernovum/`.
 - [ ] Heartbeat activity: activity indicator appears; artery streams to the building; Neural Core state
       shifts; agent orb orbits the building.
+      Orbs only render while pings are fresher than 10s — simulate one from the vault root (PowerShell,
+      replace the project name with a real building title):
+      `while($true){ node scripts\heartbeat.js --vault="$PWD" --project="Sample Project" --action="editing"; Start-Sleep 5 }`
+      Ctrl+C to stop; the orb disappears ~10s later.
 - [ ] Agent switcher panel lists installed agents; Prepare vault writes AGENTS.md.
 
 ## Vault mode
+
+Enter via command palette → "Toggle vault mode" (reloads the view), or Settings → Hypernovum →
+"Enable vault mode".
 
 - [ ] Agent UI absent; right-click background → Create New Project works; click-focus model still applies.
 

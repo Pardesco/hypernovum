@@ -42,6 +42,12 @@ export default class HypernovumPlugin extends Plugin {
       callback: () => this.generateDailyBriefing(),
     });
 
+    this.addCommand({
+      id: 'toggle-vault-mode',
+      name: 'Toggle vault mode (pure visualization, no agent features)',
+      callback: () => this.toggleVaultMode(),
+    });
+
     // Settings tab
     this.addSettingTab(new SettingsTab(this.app, this));
   }
@@ -92,6 +98,19 @@ export default class HypernovumPlugin extends Plugin {
       new Notice('Daily briefing generated');
     } catch (error: any) {
       new Notice(`Failed to generate briefing: ${error?.message ?? error}`);
+    }
+  }
+
+  /** Flip vault mode and reload any open city view so it takes effect */
+  async toggleVaultMode(): Promise<void> {
+    this.settings.vaultMode = !this.settings.vaultMode;
+    await this.saveSettings();
+    new Notice(`Hypernovum vault mode ${this.settings.vaultMode ? 'ON' : 'OFF'}`);
+
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+    if (leaves.length > 0) {
+      leaves.forEach((leaf) => leaf.detach());
+      await this.activateView();
     }
   }
 

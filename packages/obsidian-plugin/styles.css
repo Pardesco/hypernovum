@@ -6,6 +6,9 @@
   height: 100%;
   overflow: hidden;
   background-color: #0a0a14;
+  /* Obsidian's view-content carries theme padding — it insets the canvas and
+     desyncs the CSS2D overlay (labels/tooltips) from the WebGL render */
+  padding: 0;
 }
 
 .hypernovum-container canvas {
