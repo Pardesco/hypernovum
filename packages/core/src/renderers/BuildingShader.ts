@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ProjectData } from '../types';
+import { statusColor } from '../types';
 
 // Shader source will be inlined by esbuild loader
 import vertexShader from '../shaders/building.vert';
@@ -104,13 +105,8 @@ export class BuildingShader {
   }
 
   private getStatusColor(status: string): THREE.Color {
-    const colors: Record<string, number> = {
-      active: 0x00ff88,
-      blocked: 0xff4444,
-      paused: 0x4488ff,
-      complete: 0xaa88ff,
-    };
-    return new THREE.Color(colors[status] ?? 0x888888);
+    // Unified palette — single source in types.STATUS_COLORS
+    return new THREE.Color(statusColor(status));
   }
 
   private calculateDecay(lastModified: number): number {

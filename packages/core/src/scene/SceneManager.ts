@@ -6,6 +6,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, LinkEdge } from '../types';
+import { statusColor } from '../types';
+import { HighlightManager, type BuildingParts } from './HighlightManager';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
@@ -58,7 +60,8 @@ export class SceneManager {
   private animationId: number | null = null;
   private resizeObserver: ResizeObserver;
   private store: InteractionStore | null = null;
-  private hoveredMesh: THREE.Mesh | null = null;
+  private highlight!: HighlightManager;
+  private parts: Map<string, BuildingParts> = new Map();
   private tooltip: CSS2DObject | null = null;
   private tooltipLeader: THREE.Group | null = null;
   private buildings: THREE.Mesh[] = [];
@@ -72,7 +75,6 @@ export class SceneManager {
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
-  private hoveredFoundation: THREE.Mesh | null = null;
 
   // Block dragging state
   private blocks: Map<string, BlockData> = new Map();
@@ -117,15 +119,14 @@ export class SceneManager {
   private neuralCore: NeuralCore | null = null;
   private arteryManager: ArteryManager | null = null;
   private buildingPathMap: Map<string, THREE.Mesh> = new Map();
+  // uPulse gently decays each frame so streaming glow releases when streams stop
+  private static readonly PULSE_DECAY = 0.97;
 
   // Neural Core hit sphere for raycasting
   private coreHitSphere: THREE.Mesh | null = null;
 
   // Launch effect tracking
   private launchEffects: Map<THREE.Mesh, { startTime: number; duration: number }> = new Map();
-
-  // Weather-driven visual state per building
-  private weatherMap: Map<string, WeatherData> = new Map();
 
   constructor(container: HTMLElement, options?: SceneManagerOptions) {
     this.container = container;
@@ -143,6 +144,9 @@ export class SceneManager {
     }
     this.onSaveLayout = options?.onSaveLayout;
     this.store = options?.interactionStore ?? null;
+    this.highlight = new HighlightManager(this.parts, this.store, {
+      bloom: options?.settings?.enableBloom ?? false,
+    });
 
     // Load visual effect settings
     if (options?.settings) {
@@ -345,6 +349,11 @@ export class SceneManager {
     this.centerSingleBuildings();
     this.createSmartLabels(projects);
 
+    // Fresh build starts from status colors — the view re-applies lens
+    // colors/weather after every rebuild when a data layer is active.
+    this.highlight.setLensColors(null);
+    this.highlight.refreshAll();
+
     // Apply saved positions after initial layout
     this.applySavedPositions();
 
@@ -423,6 +432,7 @@ export class SceneManager {
     this.foundationHitPads = [];
     this.shaderMaterials.clear();
     this.buildingPathMap.clear();
+    this.parts.clear();
   }
 
   private addGround(projects: ProjectData[]): void {
@@ -851,6 +861,19 @@ export class SceneManager {
       this.blockedEdgeGlows.push(wireframe);
     }
 
+    // Register in the parts registry — HighlightManager's application target
+    this.parts.set(project.path, {
+      path: project.path,
+      project,
+      building: mesh,
+      shaderMaterial: isShaderMaterial ? (material as THREE.ShaderMaterial) : null,
+      edgeGlow: wireframe,
+      foundation,
+      foundationWireframe,
+      label: null,
+      state: null,
+    });
+
     // Rooftop detail kit — children of the building mesh so they move and
     // dispose with it (clearCity traverses recursively; raycaster does not).
     const roof = RooftopFactory.createRooftop(project, geometry);
@@ -1103,33 +1126,9 @@ export class SceneManager {
    * status colors, so there is no separate clear step.
    */
   applyLayerColors(colors: Map<string, number>): void {
-    const tint = new THREE.Color();
-    for (const building of this.buildings) {
-      const project = building.userData.project as ProjectData | undefined;
-      if (!project) continue;
-      const hex = colors.get(project.path);
-      if (hex === undefined) continue;
-      tint.setHex(hex);
-      const shaderMat = this.shaderMaterials.get(building);
-      if (shaderMat) {
-        (shaderMat.uniforms.uColor.value as THREE.Color).copy(tint);
-      } else {
-        const mat = building.material as THREE.MeshStandardMaterial;
-        mat.color.copy(tint);
-        mat.emissive.copy(tint);
-      }
-    }
-
-    // Edge glows are separate scene objects — retint to match
-    this.scene.traverse((obj) => {
-      if (obj instanceof THREE.LineSegments && obj.userData.isEdgeGlow) {
-        const project = obj.userData.project as ProjectData | undefined;
-        const hex = project ? colors.get(project.path) : undefined;
-        if (hex === undefined) return;
-        const mat = obj.material as THREE.LineBasicMaterial;
-        mat.color.setHex(hex).multiplyScalar(this.useBloom ? 2.5 : 1.8);
-      }
-    });
+    // Lens colors own baseColor in the resolver; buildings absent from the
+    // map keep their status color. Edge glows retint via the same pass.
+    this.highlight.setLensColors(colors);
   }
 
   private createFallbackMaterial(project: ProjectData, baseColor: THREE.Color): THREE.MeshStandardMaterial {
@@ -1176,17 +1175,15 @@ export class SceneManager {
       this.scene.add(label);
 
       this.labels.push({ project, buildingPos: buildingTop, labelPos, label });
+
+      const entry = this.parts.get(project.path);
+      if (entry) entry.label = label;
     }
   }
 
   private getStatusColor(status: string): THREE.Color {
-    const colors: Record<string, number> = {
-      active: 0x00cc66,
-      blocked: 0xdd3333,
-      paused: 0x3366dd,
-      complete: 0x9966cc,
-    };
-    return new THREE.Color(colors[status] ?? 0x666666);
+    // Unified palette (types.STATUS_COLORS) — shared with the shader path
+    return new THREE.Color(statusColor(status));
   }
 
   private fitCameraToCity(projects: ProjectData[]): void {
@@ -1311,22 +1308,6 @@ export class SceneManager {
     // Then foundation hit pads (larger invisible areas around foundations)
     const foundationHits = this.raycaster.intersectObjects(this.foundationHitPads, false);
 
-    // Reset previous building hover
-    if (this.hoveredMesh) {
-      const mat = this.hoveredMesh.material as THREE.MeshStandardMaterial;
-      const status = this.hoveredMesh.userData.project?.status;
-      mat.emissiveIntensity = status === 'blocked' ? 0.3 : status === 'active' ? 0.15 : 0.05;
-      this.hoveredMesh = null;
-    }
-
-    // Reset previous foundation hover
-    if (this.hoveredFoundation) {
-      const mat = this.hoveredFoundation.material as THREE.MeshStandardMaterial;
-      mat.color.setHex(0x2a2a3a);
-      mat.emissive.setHex(0x000000);
-      this.hoveredFoundation = null;
-    }
-
     // Clear tooltip + leader line
     if (this.tooltip) {
       this.scene.remove(this.tooltip);
@@ -1350,10 +1331,6 @@ export class SceneManager {
     if (buildingHits.length > 0) {
       const hit = buildingHits[0].object as THREE.Mesh;
       if (hit.userData.isBuilding && hit.userData.project) {
-        this.hoveredMesh = hit;
-        const mat = hit.material as THREE.MeshStandardMaterial;
-        mat.emissiveIntensity = 0.6;
-
         hoveredProject = hit.userData.project as ProjectData;
         tooltipPos = hit.position;
         tooltipHeight = hoveredProject.dimensions!.height + 0.8;
@@ -1362,12 +1339,6 @@ export class SceneManager {
       const hitPad = foundationHits[0].object as THREE.Mesh;
       if (hitPad.userData.isFoundation && hitPad.userData.project) {
         const visualFoundation = (hitPad.userData.visualFoundation ?? hitPad) as THREE.Mesh;
-        this.hoveredFoundation = visualFoundation;
-        const mat = visualFoundation.material as THREE.MeshStandardMaterial;
-        mat.color.setHex(0x3a3a5a);
-        mat.emissive.setHex(0x1a1a2a);
-        mat.emissiveIntensity = 0.5;
-
         hoveredProject = hitPad.userData.project as ProjectData;
         tooltipPos = visualFoundation.position;
         tooltipHeight = 0.8;
@@ -1458,9 +1429,9 @@ export class SceneManager {
     this.movingBuilding = building;
     this.movingBuildingOriginalPos.copy(building.position);
 
-    // Visual feedback - make building glow
-    const mat = building.material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity = 1.0;
+    // Visual feedback (bright glow) applied by HighlightManager via the store
+    const path = (building.userData.project as ProjectData | undefined)?.path;
+    if (path) this.store?.getState().enterMoveMode(path);
 
     // Highlight the parent block outline + fill
     const cat = building.userData.project?.category;
@@ -1481,10 +1452,8 @@ export class SceneManager {
   private exitBuildingMoveMode(): void {
     if (!this.movingBuilding) return;
 
-    // Reset visual
-    const mat = this.movingBuilding.material as THREE.MeshStandardMaterial;
-    const status = this.movingBuilding.userData.project?.status;
-    mat.emissiveIntensity = status === 'blocked' ? 0.3 : status === 'active' ? 0.15 : 0.05;
+    // Visual restore handled by HighlightManager when move mode clears
+    this.store?.getState().exitMoveMode();
 
     // Restore block outline + fill to default
     const cat = this.movingBuilding.userData.project?.category;
@@ -1910,48 +1879,44 @@ export class SceneManager {
       }
     }
 
-    // Update shader material uniforms (weather-aware)
-    for (const [mesh, material] of this.shaderMaterials) {
+    // Shader uniforms: time modulation around HighlightManager baselines.
+    // State decisions (colors, glitch base, decay) live in the resolver —
+    // this block only adds sin-wave motion and transient pulses.
+    const streamingPath = this.arteryManager?.getStreamingPath() ?? null;
+    for (const entry of this.parts.values()) {
+      const material = entry.shaderMaterial;
+      if (!material) continue;
       material.uniforms.uTime.value = elapsed;
 
-      const project = mesh.userData.project as ProjectData;
-      if (project) {
-        const weather = this.weatherMap.get(project.path);
-
-        // Glitch: merge conflicts (strongest) or blocked status
-        if (weather?.hasMergeConflicts) {
-          // Conflict glitch: intense, rapid
-          material.uniforms.uGlitch.value = 0.7 + Math.sin(elapsed * 6) * 0.3;
-        } else if (project.status === 'blocked') {
-          material.uniforms.uGlitch.value = 0.5 + Math.sin(elapsed * 2) * 0.3;
-        } else {
-          // Smoothly decay glitch back to 0
-          const current = material.uniforms.uGlitch.value as number;
-          if (current > 0.01) {
-            material.uniforms.uGlitch.value = current * 0.95;
-          }
+      const s = entry.state;
+      if (s && s.glitch > 0) {
+        material.uniforms.uGlitch.value = s.glitch + Math.sin(elapsed * s.glitchSpeed) * 0.3;
+      } else {
+        // Smoothly decay glitch back to 0 after a state change
+        const current = material.uniforms.uGlitch.value as number;
+        if (current > 0.01) {
+          material.uniforms.uGlitch.value = current * 0.95;
         }
+      }
 
-        // Overheat: high churn → boost emissive via pulse and warm color shift
-        if (weather && weather.churnScore > 60) {
-          const overheatIntensity = (weather.churnScore - 60) / 40; // 0-1 for scores 60-100
-          const overheatPulse = Math.sin(elapsed * 4 + mesh.position.x) * 0.15 * overheatIntensity;
-          material.uniforms.uPulse.value = Math.max(
-            material.uniforms.uPulse.value as number,
-            overheatIntensity * 0.6 + overheatPulse
-          );
-          // Shift base color toward warm orange for overheated buildings
-          const baseColor = material.uniforms.uColor.value as THREE.Color;
-          const warm = new THREE.Color(0xff6600);
-          baseColor.lerp(warm, overheatIntensity * 0.3);
-        }
+      // uPulse decays each frame so glow releases when its source stops,
+      // then overheat/streaming re-boost it below
+      material.uniforms.uPulse.value =
+        (material.uniforms.uPulse.value as number) * SceneManager.PULSE_DECAY;
 
-        // Terminal pulse: active if this building is being streamed to
-        const streamingPath = this.arteryManager?.getStreamingPath();
-        const isBeingStreamed = streamingPath === project.path;
-        if (isBeingStreamed) {
-          material.uniforms.uPulse.value = 1.0;
-        }
+      const weather = this.highlight.getWeather(entry.path);
+      if (weather && weather.churnScore > 60 && !weather.hasMergeConflicts) {
+        const overheatIntensity = (weather.churnScore - 60) / 40; // 0-1 for scores 60-100
+        const overheatPulse = Math.sin(elapsed * 4 + entry.building.position.x) * 0.15 * overheatIntensity;
+        material.uniforms.uPulse.value = Math.max(
+          material.uniforms.uPulse.value as number,
+          overheatIntensity * 0.6 + overheatPulse
+        );
+      }
+
+      // Terminal pulse: active if this building is being streamed to
+      if (streamingPath === entry.path) {
+        material.uniforms.uPulse.value = 1.0;
       }
     }
 
@@ -2007,79 +1972,17 @@ export class SceneManager {
       }
     }
 
-    // Animate standard material emissives for non-shader buildings (weather-aware)
-    for (const building of this.buildings) {
-      // Skip shader materials (handled above)
-      if (this.shaderMaterials.has(building)) continue;
-
-      const mat = building.material as THREE.MeshStandardMaterial;
-      const project = building.userData.project as ProjectData;
-
-      // Skip if in move mode (keep bright)
-      if (building === this.movingBuilding) continue;
-      // Skip if hovered (keep bright)
-      if (building === this.hoveredMesh) continue;
-
-      if (project) {
-        const weather = this.weatherMap.get(project.path);
-
-        // Base emissive from status
-        let baseIntensity: number;
-        let pulseSpeed: number;
-        let pulseAmplitude: number;
-
-        switch (project.status) {
-          case 'blocked':
-            baseIntensity = 0.25;
-            pulseSpeed = 4;
-            pulseAmplitude = 0.15;
-            break;
-          case 'active':
-            baseIntensity = 0.12;
-            pulseSpeed = 1.5;
-            pulseAmplitude = 0.08;
-            break;
-          case 'complete':
-            baseIntensity = 0.05;
-            pulseSpeed = 2;
-            pulseAmplitude = 0.03;
-            break;
-          case 'paused':
-            baseIntensity = 0.08;
-            pulseSpeed = 0.8;
-            pulseAmplitude = 0.04;
-            break;
-          default:
-            baseIntensity = 0.1;
-            pulseSpeed = 1;
-            pulseAmplitude = 0.05;
-        }
-
-        // Weather overrides
-        if (weather) {
-          // Merge conflicts → urgent red pulse
-          if (weather.hasMergeConflicts) {
-            mat.emissive.setHex(0xff2222);
-            baseIntensity = 0.4;
-            pulseSpeed = 6;
-            pulseAmplitude = 0.25;
-          }
-          // High churn → overheat warm glow
-          else if (weather.churnScore > 60) {
-            const overheat = (weather.churnScore - 60) / 40;
-            mat.emissive.lerp(new THREE.Color(0xff6600), overheat * 0.4);
-            baseIntensity += overheat * 0.15;
-            pulseSpeed += overheat * 2;
-          }
-          // Stale → dim and desaturate
-          if (weather.staleBranchCount > 5) {
-            baseIntensity *= 0.5;
-            pulseAmplitude *= 0.3;
-          }
-        }
-
-        mat.emissiveIntensity = baseIntensity + Math.sin(elapsed * pulseSpeed) * pulseAmplitude;
-      }
+    // Standard-material emissives: sin-wave around resolver baselines.
+    // Hover/move/dim states arrive with pulseAmplitude 0, so no skip lists.
+    for (const entry of this.parts.values()) {
+      if (entry.shaderMaterial) continue;
+      if (this.launchEffects.has(entry.building)) continue;
+      const s = entry.state;
+      if (!s) continue;
+      const mat = entry.building.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = s.pulseAmplitude > 0
+        ? s.emissiveBase + Math.sin(elapsed * s.pulseSpeed) * s.pulseAmplitude
+        : s.emissiveBase;
     }
 
     // Process launch effects (dramatic pulse when launching Claude)
@@ -2115,8 +2018,12 @@ export class SceneManager {
     }
 
     // Animate edge glow for blocked buildings — tracked array, NOT a
-    // full-scene traverse (that walked every object in the graph per frame)
+    // full-scene traverse (that walked every object in the graph per frame).
+    // Suppressed while the building is dimmed (resolver sets edgeGlowPulse).
     for (const glow of this.blockedEdgeGlows) {
+      const path = (glow.userData.project as ProjectData | undefined)?.path;
+      const s = path ? this.parts.get(path)?.state : undefined;
+      if (s && !s.edgeGlowPulse) continue;
       const mat = glow.material as THREE.LineBasicMaterial;
       mat.opacity = 0.4 + Math.sin(elapsed * 4) * 0.25;
     }
@@ -2167,6 +2074,7 @@ export class SceneManager {
     if (this.animationId !== null) cancelAnimationFrame(this.animationId);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.highlight.dispose();
     if (this.composer) {
       this.composer.dispose();
     }
@@ -2405,78 +2313,9 @@ export class SceneManager {
    *  - Active commits → trigger data artery flow
    */
   applyWeather(projectPath: string, weather: WeatherData): void {
-    this.weatherMap.set(projectPath, weather);
-
-    const building = this.buildingPathMap.get(projectPath);
-    if (!building) return;
-
-    // === Compute time-based decay factor (0.0 = fresh, 1.0 = abandoned) ===
-    let decayFactor = 0.0;
-    if (weather.lastCommitDate > 0) {
-      const daysSince = (Date.now() - weather.lastCommitDate) / (1000 * 60 * 60 * 24);
-      if (daysSince <= 5) {
-        decayFactor = 0.0;
-      } else if (daysSince <= 14) {
-        decayFactor = ((daysSince - 5) / 9) * 0.4;
-      } else if (daysSince <= 30) {
-        decayFactor = 0.4 + ((daysSince - 14) / 16) * 0.45;
-      } else {
-        decayFactor = Math.min(0.85 + ((daysSince - 30) / 60) * 0.15, 1.0);
-      }
-    }
-    building.userData.decayFactor = decayFactor;
-
-    const shaderMat = this.shaderMaterials.get(building);
-
-    if (shaderMat) {
-      // Shader building: drive uniforms directly
-      // Merge conflicts → glitch
-      if (weather.hasMergeConflicts) {
-        shaderMat.uniforms.uGlitch.value = 0.8;
-      } else {
-        shaderMat.uniforms.uGlitch.value = 0.0;
-      }
-
-      // Stale branches → decay  (scale: 0 branches=0, 1-2=0.3, 3-5=0.6, 6+=0.9)
-      let decayFromStale = 0.0;
-      if (weather.staleBranchCount > 0) {
-        decayFromStale = weather.staleBranchCount <= 2 ? 0.3
-          : weather.staleBranchCount <= 5 ? 0.6 : 0.9;
-      }
-      // Set uDecay to the max of time-based decay and stale-based decay
-      shaderMat.uniforms.uDecay.value = Math.max(decayFactor, decayFromStale);
-
-      // Modulate lit windows
-      const project = building.userData.project as ProjectData;
-      if (project) {
-        let baseLit = 0.5;
-        if ((project.totalTasks ?? 0) > 0) {
-          baseLit = (project.completedTasks || 0) / project.totalTasks!;
-        } else {
-          baseLit = project.recentActivity ? 0.6 : 0.1;
-        }
-        if (decayFactor > 0.3) {
-          shaderMat.uniforms.uLitPercent.value = baseLit * (1.0 - decayFactor * 0.8);
-        } else {
-          shaderMat.uniforms.uLitPercent.value = baseLit;
-        }
-      }
-    } else {
-      // Standard material: modify emissive properties
-      const mat = building.material as THREE.MeshStandardMaterial;
-
-      // Merge conflicts → red-shift emissive
-      if (weather.hasMergeConflicts) {
-        mat.emissive.setHex(0xff2222);
-        mat.emissiveIntensity = 0.6;
-      }
-
-      // Stale → desaturate toward grey
-      if (weather.staleBranchCount > 5) {
-        const grey = new THREE.Color(0x444444);
-        mat.color.lerp(grey, 0.3);
-      }
-    }
+    // Visual mapping (glitch, decay, lit windows, emissive shifts) is
+    // resolved and applied by HighlightManager
+    this.highlight.setWeather(projectPath, weather);
 
     // Active commits in last 7 days → trigger a data flow
     if (weather.commitsLast7d > 0 && weather.lastCommitDate > 0) {
@@ -2489,11 +2328,11 @@ export class SceneManager {
 
   /** Remove weather data for a project (e.g. when project is removed) */
   clearWeather(projectPath: string): void {
-    this.weatherMap.delete(projectPath);
+    this.highlight.setWeather(projectPath, null);
   }
 
   /** Clear all weather data */
   clearAllWeather(): void {
-    this.weatherMap.clear();
+    this.highlight.clearAllWeather();
   }
 }

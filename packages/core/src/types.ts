@@ -134,6 +134,24 @@ export interface WeatherData {
   activeBranch?: string;
 }
 
+/**
+ * Single source of truth for status colors (the former shader palette).
+ * SceneManager, BuildingShader, and HighlightManager must all read from here —
+ * the classic fallback materials previously used a dimmer divergent palette.
+ */
+export const STATUS_COLORS: Record<string, number> = {
+  active: 0x00ff88,
+  blocked: 0xff4444,
+  paused: 0x4488ff,
+  complete: 0xaa88ff,
+};
+
+export const STATUS_COLOR_DEFAULT = 0x888888;
+
+export function statusColor(status: string): number {
+  return STATUS_COLORS[status] ?? STATUS_COLOR_DEFAULT;
+}
+
 /** Default settings values */
 export const DEFAULT_SETTINGS: HypernovumSettings = {
   projectTag: 'project',

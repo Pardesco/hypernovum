@@ -4,10 +4,14 @@ export const CORE_BUILD_VERSION = 'dev';
 
 // Types
 export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, LinkEdge } from './types';
-export { DEFAULT_SETTINGS } from './types';
+export { DEFAULT_SETTINGS, STATUS_COLORS, STATUS_COLOR_DEFAULT, statusColor } from './types';
 
 // Scene engine
 export { SceneManager } from './scene/SceneManager';
+export { HighlightManager } from './scene/HighlightManager';
+export type { BuildingParts } from './scene/HighlightManager';
+export { resolveVisualState } from './scene/visualState';
+export type { VisualState, ResolveInput, LabelTier } from './scene/visualState';
 
 // Layout
 export { BinPacker } from './layout/BinPacker';
