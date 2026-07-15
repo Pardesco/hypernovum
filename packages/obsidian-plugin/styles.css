@@ -121,6 +121,36 @@
 .hypernovum-tooltip .status-paused { color: #3366cc; }
 .hypernovum-tooltip .status-complete { color: #9966cc; }
 
+/* Agent-orb identity tooltip (AGT-004) — distinct from the building tooltip */
+.hypernovum-agent-tooltip {
+  border-color: rgba(120, 200, 255, 0.45);
+}
+.hypernovum-tooltip .tooltip-agent-kicker {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: rgba(120, 200, 255, 0.9);
+  margin-bottom: 3px;
+}
+/* Agent state chips (base neutral; per-state colors from AGT-005) */
+.hypernovum-tooltip .agent-state {
+  text-transform: capitalize;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+.hypernovum-tooltip .agent-state-editing,
+.hypernovum-tooltip .agent-state-running,
+.hypernovum-tooltip .agent-state-reading,
+.hypernovum-tooltip .agent-state-testing,
+.hypernovum-tooltip .agent-state-reviewing,
+.hypernovum-tooltip .agent-state-planning,
+.hypernovum-tooltip .agent-state-starting { color: #6cd0ff; }
+.hypernovum-tooltip .agent-state-waiting { color: #ffbb44; }
+.hypernovum-tooltip .agent-state-blocked,
+.hypernovum-tooltip .agent-state-failed { color: #ff5555; }
+.hypernovum-tooltip .agent-state-complete { color: #4ade80; }
+.hypernovum-tooltip .agent-state-stale { color: #8a8a8a; }
+
 .hypernovum-tooltip .tooltip-enriched-section {
   margin-top: 8px;
   padding-top: 6px;

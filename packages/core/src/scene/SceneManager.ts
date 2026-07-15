@@ -50,6 +50,28 @@ interface BlockData {
   projects: ProjectData[];
 }
 
+/** Display data for one agent orb (fleet presence). */
+export interface AgentOrbInput {
+  id: string;
+  projectPath: string | null;
+  name?: string;
+  agentType?: string;
+  state?: string;         // §10 state — drives orb visuals (AGT-005)
+  action?: string | null;
+  tool?: string | null;
+  file?: string | null;
+  lastPing?: number;
+}
+
+interface AgentOrbEntry {
+  orb: THREE.Mesh;
+  path: string;
+  baseY: number;
+  phase: number;
+  hue: number;            // stable base hue for the agent id
+  info: AgentOrbInput;    // latest presence data (tooltip + state visuals)
+}
+
 export class SceneManager {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -71,7 +93,7 @@ export class SceneManager {
   private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
   private linkArcs: THREE.Mesh[] = []; // backlink knowledge arcs between buildings
   private questBursts: { mesh: THREE.Mesh; start: number }[] = []; // quest-resolved shockwaves
-  private agentOrbs = new Map<string, { orb: THREE.Mesh; path: string; baseY: number; phase: number }>(); // fleet presence
+  private agentOrbs = new Map<string, AgentOrbEntry>(); // fleet presence
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -1036,7 +1058,7 @@ export class SceneManager {
    * children of the building mesh (they move and dispose with it); the
    * activity monitor re-sends presence every poll, so rebuilds self-heal.
    */
-  updateAgentPresence(agents: { id: string; projectPath: string | null }[]): void {
+  updateAgentPresence(agents: AgentOrbInput[]): void {
     const seen = new Set<string>();
 
     for (const agent of agents) {
@@ -1046,9 +1068,15 @@ export class SceneManager {
       seen.add(agent.id);
 
       const existing = this.agentOrbs.get(agent.id);
-      if (existing && existing.path === agent.projectPath) continue;
 
-      // Reparent or create
+      // Same agent, same building → keep the orb, just refresh its display data.
+      if (existing && existing.path === agent.projectPath) {
+        existing.info = agent;
+        this.applyOrbState(existing);
+        continue;
+      }
+
+      // Reparent (project changed) or create fresh.
       if (existing) {
         existing.orb.parent?.remove(existing.orb);
         existing.orb.geometry.dispose();
@@ -1063,33 +1091,51 @@ export class SceneManager {
       // Stable hue per agent id
       let hash = 0;
       for (let i = 0; i < agent.id.length; i++) hash = (hash * 31 + agent.id.charCodeAt(i)) | 0;
-      const color = new THREE.Color().setHSL((((hash % 360) + 360) % 360) / 360, 0.75, 0.6);
+      const hue = (((hash % 360) + 360) % 360) / 360;
+      const color = new THREE.Color().setHSL(hue, 0.75, 0.6);
 
       const orb = new THREE.Mesh(
         new THREE.SphereGeometry(0.26, 12, 12),
         new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.8 }),
       );
       orb.position.set(0, baseY, 0);
-      orb.userData = { isBuilding: true, isAgentOrb: true, project: building.userData.project };
+      // isAgentOrb only (not isBuilding) so orb raycasts route to the agent
+      // tooltip, not the building tooltip; carries its own session id.
+      orb.userData = { isAgentOrb: true, agentId: agent.id, project: building.userData.project };
       building.add(orb);
-      this.agentOrbs.set(agent.id, {
+      const entry: AgentOrbEntry = {
         orb,
         path: agent.projectPath,
         baseY,
         phase: (((hash % 628) + 628) % 628) / 100,
-      });
+        hue,
+        info: agent,
+      };
+      this.agentOrbs.set(agent.id, entry);
+      this.applyOrbState(entry);
     }
 
-    // Remove orbs for agents that went idle or vanished
+    // Remove orbs for agents that vanished — the monitor re-sends the full
+    // session list every poll, so absence = gone.
     for (const [id, entry] of this.agentOrbs) {
       if (seen.has(id)) continue;
-      // Keep entries whose agent was simply unresolvable this tick? No — the
-      // monitor re-sends the full fresh list every poll, so absence = gone.
       entry.orb.parent?.remove(entry.orb);
       entry.orb.geometry.dispose();
       (entry.orb.material as THREE.Material).dispose();
       this.agentOrbs.delete(id);
     }
+  }
+
+  /**
+   * Apply per-state visual treatment to one orb (AGT-005). For AGT-004 this is
+   * a hook that keeps the stable-hue emissive; AGT-005 fills in the state map.
+   */
+  private applyOrbState(entry: AgentOrbEntry): void {
+    const mat = entry.orb.material as THREE.MeshStandardMaterial;
+    const color = new THREE.Color().setHSL(entry.hue, 0.75, 0.6);
+    mat.color.copy(color);
+    mat.emissive.copy(color);
+    mat.emissiveIntensity = 1.8;
   }
 
   /**
@@ -1324,6 +1370,34 @@ export class SceneManager {
       this.scene.remove(this.tooltipLeader);
       this.tooltipLeader = null;
     }
+
+    // Agent orbs take hover priority over buildings — they are the point of the
+    // scene, and are children of buildings so they need an explicit target list
+    // (the non-recursive scene raycast never reaches them). See §2 note 6.
+    if (this.agentOrbs.size > 0) {
+      const orbTargets: THREE.Mesh[] = [];
+      for (const e of this.agentOrbs.values()) orbTargets.push(e.orb);
+      const orbHits = this.raycaster.intersectObjects(orbTargets, false);
+      if (orbHits.length > 0) {
+        const agentId = orbHits[0].object.userData.agentId as string;
+        const entry = this.agentOrbs.get(agentId);
+        if (entry) {
+          this.showAgentTooltip(entry);
+          this.container.style.cursor = 'pointer';
+          if (this.store) {
+            const st = this.store.getState();
+            if (st.hoveredAgentId !== agentId) st.hoverAgent(agentId);
+            if (st.hoveredPath !== null) st.hover(null);
+          }
+          return;
+        }
+      }
+    }
+    // No orb hovered — release any agent-hover state + cursor.
+    if (this.store && this.store.getState().hoveredAgentId !== null) {
+      this.store.getState().hoverAgent(null);
+    }
+    this.container.style.cursor = 'default';
 
     // Determine which project is hovered (building takes priority, then foundation)
     let hoveredProject: ProjectData | null = null;
@@ -1751,6 +1825,53 @@ export class SceneManager {
       block.bounds.minZ += deltaZ;
       block.bounds.maxZ += deltaZ;
     }
+  }
+
+  /**
+   * Agent-orb identity tooltip (AGT-004). Visually distinct from the building
+   * tooltip via the "AGENT" kicker; shows name/type/state/project/action/tool/
+   * file/age. Placed beside the orb's world position (no leader line).
+   */
+  private showAgentTooltip(entry: AgentOrbEntry): void {
+    const info = entry.info;
+    const project = this.buildingPathMap.get(entry.path)?.userData.project as ProjectData | undefined;
+    const state = info.state ?? 'working';
+    const fileBase = info.file ? info.file.split(/[\\/]/).pop() : null;
+    const age = info.lastPing ? this.formatRelativeTime(info.lastPing) : null;
+
+    const rows: string[] = [];
+    rows.push(`<div class="tooltip-row"><span>State:</span> <span class="agent-state agent-state-${this.escapeHtml(state)}">${this.escapeHtml(state)}</span></div>`);
+    if (project) rows.push(`<div class="tooltip-row"><span>Project:</span> ${this.escapeHtml(project.title)}</div>`);
+    if (info.action) rows.push(`<div class="tooltip-row"><span>Action:</span> ${this.escapeHtml(info.action)}</div>`);
+    if (info.tool) rows.push(`<div class="tooltip-row"><span>Tool:</span> ${this.escapeHtml(info.tool)}</div>`);
+    if (fileBase) rows.push(`<div class="tooltip-row"><span>File:</span> ${this.escapeHtml(fileBase)}</div>`);
+    if (age) rows.push(`<div class="tooltip-row"><span>Ping:</span> ${this.escapeHtml(age)}</div>`);
+
+    const typeLabel = info.agentType ? ` · ${this.escapeHtml(info.agentType.toUpperCase())}` : '';
+    const html = `
+      <div class="tooltip-agent-kicker">AGENT${typeLabel}</div>
+      <strong>${this.escapeHtml(info.name ?? 'Agent')}</strong>
+      ${rows.join('')}
+    `;
+
+    // Anchor beside the orb's current world position.
+    const world = entry.orb.getWorldPosition(new THREE.Vector3());
+    const screenPos = world.clone().project(this.camera);
+    const onLeft = screenPos.x < 0;
+    const sideDir = onLeft ? 1 : -1;
+
+    const anchor = document.createElement('div');
+    anchor.className = 'hypernovum-tooltip-anchor';
+    const div = document.createElement('div');
+    div.className = 'hypernovum-tooltip hypernovum-agent-tooltip';
+    div.innerHTML = html;
+    if (onLeft) div.style.left = '10px';
+    else div.style.right = '10px';
+    anchor.appendChild(div);
+
+    this.tooltip = new CSS2DObject(anchor);
+    this.tooltip.position.set(world.x + sideDir * 2.5, world.y + 1.5, world.z);
+    this.scene.add(this.tooltip);
   }
 
   private showTooltip(

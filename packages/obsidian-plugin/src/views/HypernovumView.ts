@@ -1405,12 +1405,23 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const sessions = this.agentRegistry.update(agents, Date.now());
     this.fleetSessions = sessions;
 
-    // Orbs render for every session resolved to a visible building. Lifecycle
-    // states (stale grey / complete fade) are applied by AGT-005.
+    // Orbs render for every session resolved to a visible building, carrying
+    // full identity for the hover tooltip. Lifecycle-state visuals (stale grey
+    // / complete fade) are applied by AGT-005.
     this.sceneManager.updateAgentPresence(
       sessions
         .filter((s) => s.projectPath)
-        .map((s) => ({ id: s.sessionId, projectPath: s.projectPath })),
+        .map((s) => ({
+          id: s.sessionId,
+          projectPath: s.projectPath,
+          name: s.name,
+          agentType: s.agentType,
+          state: s.state,
+          action: s.action,
+          tool: s.tool,
+          file: s.file,
+          lastPing: s.lastPing,
+        })),
     );
 
     // Keep the inspector's Agents section in sync when a project is selected.
