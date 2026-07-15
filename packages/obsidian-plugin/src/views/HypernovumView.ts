@@ -17,6 +17,14 @@ import {
   type WarningItem,
   type WarningSeverity,
 } from '../monitors/WarningAggregator';
+import {
+  BUILT_IN_LENSES,
+  stateToPreset,
+  presetToState,
+  nextPresetId,
+  type LensState,
+} from '../utils/lensPresets';
+import type { LensPreset } from '../settings/SettingsTab';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { mapLimit } from '../utils/concurrency';
@@ -120,6 +128,8 @@ export class HypernovumView extends ItemView {
   private warnings: WarningItem[] = [];
   private degradedCount = 0;
   private attentionBadge: HTMLElement | null = null;
+  private presetSelect: HTMLSelectElement | null = null;
+  private presetDeleteBtn: HTMLButtonElement | null = null;
   private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
@@ -1144,6 +1154,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
           <option value="stack">Tech Stack</option>
         </select>
       </div>
+      <div class="command-row">
+        <label>Preset</label>
+        <div class="preset-controls">
+          <select class="preset-select"></select>
+          <button class="preset-save" title="Save the current view as a preset">Save view</button>
+          <button class="preset-delete" title="Delete the selected preset" hidden>Delete</button>
+        </div>
+      </div>
       <div class="command-filters">
         <select class="status-select"><option value="all">All status</option></select>
         <select class="priority-select"><option value="all">All priority</option></select>
@@ -1168,6 +1186,15 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       if (this.layerSelect) this.layerSelect.value = 'attention';
       this.applyFiltersAndRebuild();
     });
+
+    // Lens presets (LENS-001)
+    this.presetSelect = panel.querySelector('.preset-select') as HTMLSelectElement;
+    this.presetDeleteBtn = panel.querySelector('.preset-delete') as HTMLButtonElement;
+    const presetSave = panel.querySelector('.preset-save') as HTMLButtonElement;
+    this.renderPresetOptions();
+    this.presetSelect.addEventListener('change', () => this.onPresetSelected());
+    presetSave.addEventListener('click', () => this.saveCurrentLens());
+    this.presetDeleteBtn.addEventListener('click', () => this.deleteSelectedPreset());
 
     // Debounce so a rebuild fires once per typing pause, not per keystroke (PERF-001).
     const debouncedSearch = debounce(() => this.applyFiltersAndRebuild(), 200, false);
@@ -1326,6 +1353,100 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         if (project) this.openTerminalForProject(project, this.resolveProjectPath(project));
         break;
     }
+  }
+
+  // --- Lens presets (LENS-001) ---
+
+  private allPresets(): LensPreset[] {
+    return [...BUILT_IN_LENSES, ...this.settings.savedLenses];
+  }
+
+  private renderPresetOptions(): void {
+    if (!this.presetSelect) return;
+    const opts = ['<option value="">Presets…</option>'];
+    opts.push('<optgroup label="Defaults">');
+    for (const p of BUILT_IN_LENSES) opts.push(`<option value="${this.escapeHtml(p.id)}">${this.escapeHtml(p.name)}</option>`);
+    opts.push('</optgroup>');
+    if (this.settings.savedLenses.length > 0) {
+      opts.push('<optgroup label="Saved">');
+      for (const p of this.settings.savedLenses) opts.push(`<option value="${this.escapeHtml(p.id)}">${this.escapeHtml(p.name)}</option>`);
+      opts.push('</optgroup>');
+    }
+    this.presetSelect.innerHTML = opts.join('');
+    this.presetSelect.value = '';
+    if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = true;
+  }
+
+  private currentLensState(): LensState {
+    return {
+      layer: this.visualLayer,
+      statusFilter: this.statusFilter,
+      priorityFilter: this.priorityFilter,
+      categoryFilter: this.categoryFilter,
+      searchQuery: this.searchQuery,
+      edgeTypes: this.showLinks ? ['backlink'] : [],
+    };
+  }
+
+  private onPresetSelected(): void {
+    const id = this.presetSelect?.value ?? '';
+    if (!id) { if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = true; return; }
+    const preset = this.allPresets().find((p) => p.id === id);
+    if (!preset) return;
+    this.applyLensPreset(preset);
+    // Only custom (non-builtin) presets are deletable.
+    if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = !!preset.builtIn;
+  }
+
+  private applyLensPreset(preset: LensPreset): void {
+    const s = presetToState(preset);
+    this.visualLayer = s.layer as VisualLayer;
+    // A category that no longer exists falls back to 'all' silently.
+    const catExists = this.categorySelect?.querySelector(`option[value="${CSS.escape(s.categoryFilter)}"]`) != null;
+    this.statusFilter = s.statusFilter;
+    this.priorityFilter = s.priorityFilter;
+    this.categoryFilter = catExists || s.categoryFilter === 'all' ? s.categoryFilter : 'all';
+    this.searchQuery = s.searchQuery;
+    this.showLinks = s.edgeTypes.includes('backlink');
+
+    // Sync UI controls to the applied state.
+    if (this.layerSelect) this.layerSelect.value = this.visualLayer;
+    if (this.statusSelect) this.statusSelect.value = this.statusFilter;
+    if (this.prioritySelect) this.prioritySelect.value = this.priorityFilter;
+    if (this.categorySelect) this.categorySelect.value = this.categoryFilter;
+    if (this.searchInput) this.searchInput.value = this.searchQuery;
+
+    this.applyFiltersAndRebuild();
+    if (this.sceneManager) {
+      if (this.showLinks) this.sceneManager.showLinkArcs(this.computeLinkEdges());
+      else this.sceneManager.clearLinkArcs();
+    }
+  }
+
+  private saveCurrentLens(): void {
+    new TextInputModal(
+      this.app,
+      { title: 'Save lens preset', label: 'Preset name', placeholder: 'e.g. Blocked work', cta: 'Save' },
+      async (name) => {
+        const id = nextPresetId(this.settings.savedLenses);
+        this.plugin.settings.savedLenses.push(stateToPreset(id, name, this.currentLensState()));
+        await this.plugin.saveSettings();
+        this.renderPresetOptions();
+        if (this.presetSelect) this.presetSelect.value = id;
+        if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = false;
+        new Notice(`Saved lens "${name}"`);
+      },
+    ).open();
+  }
+
+  private async deleteSelectedPreset(): Promise<void> {
+    const id = this.presetSelect?.value ?? '';
+    const idx = this.settings.savedLenses.findIndex((p) => p.id === id);
+    if (idx < 0) return;
+    const [removed] = this.plugin.settings.savedLenses.splice(idx, 1);
+    await this.plugin.saveSettings();
+    this.renderPresetOptions();
+    new Notice(`Deleted lens "${removed.name}"`);
   }
 
   /** Per-project severity color map for the Needs-Attention lens (visible projects only). */
