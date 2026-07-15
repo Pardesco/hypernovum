@@ -11,11 +11,29 @@ const KNOWN_AGENTS = [
   { name: 'Custom...', command: '' },
 ];
 
+/** A saved lens preset: one-click layer + filter combination (consumed in Phase 3) */
+export interface LensPreset {
+  id: string;
+  name: string;
+  builtIn?: boolean;
+  layer: string;
+  statusFilter: string;
+  priorityFilter: string;
+  categoryFilter: string;
+  searchQuery?: string;
+  /** Edge types visible under this preset (typed edges arrive in Phase 4) */
+  edgeTypes: string[];
+}
+
 /** Plugin-level settings extend core settings with agent configuration */
 export interface HypernovumSettings extends CoreSettings {
   vaultMode: boolean;
   agentName: string;
   agentCommand: string;
+  /** One-time "click selects / double-click opens" notice already shown */
+  interactionHintShown: boolean;
+  /** User-saved lens presets (per vault) */
+  savedLenses: LensPreset[];
 }
 
 export const DEFAULT_SETTINGS: HypernovumSettings = {
@@ -23,6 +41,8 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   agentName: 'Claude Code',
   agentCommand: 'claude',
   vaultMode: false,
+  interactionHintShown: false,
+  savedLenses: [],
 };
 
 export type { BlockPosition };

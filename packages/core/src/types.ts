@@ -104,6 +104,8 @@ export interface HypernovumSettings {
   enableAtmosphere: boolean;
   /** Enable read-only local Git activity overlay */
   enableGitActivity: boolean;
+  /** Building silhouette system: 'classic' (current) or 'parametric' (TowerLoft, opt-in) */
+  buildingStyle: 'classic' | 'parametric';
 }
 
 /**
@@ -144,4 +146,5 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   bloomIntensity: 0.8,
   enableAtmosphere: false,
   enableGitActivity: true,
+  buildingStyle: 'classic',
 };
