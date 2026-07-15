@@ -1202,6 +1202,59 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory${questPart}`;
   }
 
+  /** State chip markup reusing the agent-state CSS classes. */
+  private agentStateChip(state: string): string {
+    return `<span class="agent-state agent-state-${this.escapeHtml(state)}">${this.escapeHtml(state)}</span>`;
+  }
+
+  /** Inspector "Agents" section for one project (AGT-009). */
+  private renderAgentsSection(projectPath: string): string {
+    const sessions = this.agentRegistry.sessionsForProject(projectPath);
+    if (sessions.length === 0) {
+      return `<div class="inspector-section">
+        <span class="section-label">Agents</span>
+        <div class="inspector-empty-inline">No agent activity</div>
+      </div>`;
+    }
+
+    const active = sessions.filter((s) => s.state !== 'complete');
+    const completed = sessions.filter((s) => s.state === 'complete');
+
+    const rows = active.map((s) => {
+      const file = s.file ? (s.file.split(/[\\/]/).pop() ?? '') : '';
+      const ago = this.formatRelativeTime(s.sessionStart);
+      const sub = [s.action ?? '', file].filter(Boolean).map((t) => this.escapeHtml(t)).join(' · ');
+      return `<div class="agent-row">
+        <div class="agent-row-head"><strong>${this.escapeHtml(s.name)}</strong>${this.agentStateChip(s.state)}</div>
+        ${sub ? `<div class="agent-row-sub">${sub}</div>` : ''}
+        <div class="agent-row-meta">started ${this.escapeHtml(ago)}</div>
+      </div>`;
+    }).join('');
+
+    const completedLine = completed.length
+      ? `<div class="agent-completed">${completed.length} completed session${completed.length > 1 ? 's' : ''} · last 24h</div>`
+      : '';
+
+    return `<div class="inspector-section">
+      <span class="section-label">Agents</span>
+      ${rows || '<div class="inspector-empty-inline">No active agents</div>'}
+      ${completedLine}
+    </div>`;
+  }
+
+  /** Conflict rows for one project (informational; §7.6 messages). */
+  private renderProjectConflicts(projectPath: string): string {
+    const relevant = this.conflicts.filter((c) => c.projectPaths.includes(projectPath));
+    if (relevant.length === 0) return '';
+    const rows = relevant.map((c) =>
+      `<div class="conflict-row conflict-${c.severity}"><span class="conflict-dot"></span>${this.escapeHtml(c.message)}</div>`
+    ).join('');
+    return `<div class="inspector-section">
+      <span class="section-label">Conflicts</span>
+      ${rows}
+    </div>`;
+  }
+
   private updateInspector(): void {
     if (!this.inspectorPanel) return;
 
@@ -1239,6 +1292,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <span class="section-label">Open Quests${project.answeredQuestions?.length ? ` · ${project.answeredQuestions.length} resolved` : ''}</span>
         ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
       </div>` : ''}
+      ${this.renderProjectConflicts(project.path)}
+      ${this.renderAgentsSection(project.path)}
       <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
       <div class="inspector-actions">
         <button data-action="note">Open Note</button>
@@ -1293,6 +1348,28 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const quests = projects.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
     const commits30d = projects.reduce((sum, p) => sum + (p.gitActivity?.commitsLast30d ?? 0), 0);
 
+    // Fleet summary (AGT-009)
+    const sessions = this.fleetSessions;
+    const waitingAgents = sessions.filter((s) => s.state === 'waiting').length;
+    const activeAgents = sessions.filter(
+      (s) => !['complete', 'stale', 'disconnected', 'waiting'].includes(s.state),
+    ).length;
+    const conflictList = this.conflicts.filter((c) => c.severity !== 'info');
+    const fleetLine = sessions.length > 0
+      ? `<div class="fleet-summary">${activeAgents} active · ${waitingAgents} waiting · ${conflictList.length} conflict${conflictList.length === 1 ? '' : 's'}</div>`
+      : '';
+    const conflictSection = conflictList.length > 0
+      ? `<div class="inspector-section">
+          <span class="section-label">Conflicts</span>
+          ${conflictList.slice(0, 6).map((c) => `
+            <div class="conflict-row conflict-${c.severity}">
+              <span class="conflict-dot"></span>
+              <span class="conflict-msg">${this.escapeHtml(c.message)}</span>
+              <button class="conflict-focus" data-focus-path="${this.escapeHtml(c.projectPaths[0])}">Focus</button>
+            </div>`).join('')}
+        </div>`
+      : '';
+
     const districts = new Map<string, ProjectData[]>();
     for (const p of projects) {
       const list = districts.get(p.category) ?? [];
@@ -1320,12 +1397,28 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <div><span>Open quests</span><strong>${quests}</strong></div>
         <div><span>30d commits</span><strong>${commits30d}</strong></div>
       </div>
+      ${fleetLine}
+      ${conflictSection}
       <div class="inspector-section">
         <span class="section-label">Districts</span>
         ${districtRows}
       </div>
       <div class="inspector-empty">Select a building for details</div>
     `;
+
+    // Conflict "Focus" buttons select + focus the involved project.
+    this.inspectorPanel.querySelectorAll<HTMLElement>('.conflict-focus').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const targetPath = btn.dataset.focusPath;
+        const project = targetPath ? this.allProjects.find((p) => p.path === targetPath) : null;
+        if (!project) return;
+        this.interactionStore.getState().select(project.path);
+        if (project.position && this.sceneManager) {
+          this.sceneManager.focusOnPosition(project.position);
+          this.sceneManager.setFocusedProject(project);
+        }
+      });
+    });
   }
 
   private copyAgentContext(project: ProjectData, projectPath: string): void {

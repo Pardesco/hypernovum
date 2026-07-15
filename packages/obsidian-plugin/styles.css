@@ -1036,6 +1036,123 @@
   font-weight: 600;
 }
 
+/* --- Agents section (AGT-009) --- */
+.inspector-empty-inline {
+  font-size: 11px;
+  color: rgba(180, 200, 230, 0.5);
+  padding: 4px 0;
+}
+
+.agent-row {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid rgba(120, 200, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(20, 40, 60, 0.35);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.agent-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-row-head strong {
+  color: rgba(210, 230, 255, 0.95);
+}
+
+.agent-row-sub {
+  margin-top: 3px;
+  color: rgba(180, 200, 230, 0.7);
+}
+
+.agent-row-meta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: rgba(150, 170, 200, 0.55);
+}
+
+.agent-completed {
+  margin-top: 6px;
+  font-size: 10px;
+  color: rgba(120, 200, 160, 0.7);
+}
+
+/* Inspector state chips reuse the tooltip agent-state colors */
+.agent-state {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: capitalize;
+  color: rgba(255, 255, 255, 0.85);
+}
+.agent-state-editing, .agent-state-running, .agent-state-reading,
+.agent-state-testing, .agent-state-reviewing, .agent-state-planning,
+.agent-state-starting { color: #6cd0ff; }
+.agent-state-waiting { color: #ffbb44; }
+.agent-state-blocked, .agent-state-failed { color: #ff5555; }
+.agent-state-complete { color: #4ade80; }
+.agent-state-stale { color: #8a8a8a; }
+
+/* --- Fleet summary + conflict rows (AGT-008/009) --- */
+.fleet-summary {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  color: rgba(200, 220, 245, 0.8);
+  letter-spacing: 0.02em;
+}
+
+.conflict-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.conflict-row .conflict-msg { flex: 1; }
+.conflict-high {
+  border: 1px solid rgba(255, 80, 80, 0.35);
+  background: rgba(60, 20, 20, 0.4);
+  color: rgba(255, 200, 200, 0.92);
+}
+.conflict-medium {
+  border: 1px solid rgba(255, 180, 60, 0.32);
+  background: rgba(60, 45, 15, 0.35);
+  color: rgba(255, 225, 175, 0.9);
+}
+.conflict-info {
+  border: 1px solid rgba(120, 160, 200, 0.25);
+  background: rgba(20, 35, 55, 0.3);
+  color: rgba(190, 210, 235, 0.85);
+}
+.conflict-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+.conflict-focus {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  cursor: pointer;
+}
+.conflict-focus:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .inspector-path {
   margin-bottom: 12px;
   padding: 8px;
