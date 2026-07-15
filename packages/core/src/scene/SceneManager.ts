@@ -739,12 +739,13 @@ export class SceneManager {
       this.dragHandles.push(handle);
       blockObjects.push(handle);
 
-      // Invisible larger hitbox for easier click/hover detection (flat slab)
-      // Expanded vertically and horizontally to catch clicks from sharp camera angles
-      const hitBoxGeo = new THREE.BoxGeometry(10.0, 8.0, 10.0);
+      // Invisible grab hitbox for the handle. Kept modest so it doesn't sprawl
+      // over neighbouring buildings; building hover still wins by depth (see
+      // onMouseMove) so this only needs to catch the corner itself.
+      const hitBoxGeo = new THREE.BoxGeometry(4.0, 5.0, 4.0);
       const hitBoxMat = new THREE.MeshBasicMaterial({ visible: false });
       const hitBox = new THREE.Mesh(hitBoxGeo, hitBoxMat);
-      hitBox.position.set(handleX, 4.0, handleZ);
+      hitBox.position.set(handleX, 2.5, handleZ);
       hitBox.userData = { isDragHandle: true, category, visualHandle: handle };
       this.scene.add(hitBox);
       this.handleHitBoxes.push(hitBox);
@@ -1509,38 +1510,18 @@ export class SceneManager {
       return;
     }
 
-    // Check drag handle hitboxes (larger invisible areas)
+    // Candidate hits up front, so hover priority can be resolved by depth
+    // (a building in front of a handle hitbox keeps its own tooltip).
     const handleHits = this.raycaster.intersectObjects(this.handleHitBoxes, false);
+    const buildingHits = this.raycaster.intersectObjects(this.buildings, false);
+    const foundationHits = this.raycaster.intersectObjects(this.foundationHitPads, false);
 
-    // Reset previous handle hover
+    // Reset previous handle-hover glow (re-applied below if still frontmost).
     if (this.hoveredHandle) {
       const mat = this.hoveredHandle.material as THREE.MeshStandardMaterial;
-      if (mat.emissiveIntensity !== undefined) {
-        mat.emissiveIntensity = 0.3;
-      }
+      if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = 0.3;
       this.hoveredHandle = null;
-      this.container.style.cursor = 'default';
     }
-
-    // Handle hover on drag handle
-    if (handleHits.length > 0) {
-      const hitBox = handleHits[0].object as THREE.Mesh;
-      if (hitBox.userData.isDragHandle) {
-        const visualHandle = (hitBox.userData.visualHandle ?? hitBox) as THREE.Mesh;
-        this.hoveredHandle = visualHandle;
-        const mat = visualHandle.material as THREE.MeshStandardMaterial;
-        if (mat.emissiveIntensity !== undefined) {
-          mat.emissiveIntensity = 0.8;
-        }
-        this.container.style.cursor = 'grab';
-        return; // Don't show other tooltips when hovering handle
-      }
-    }
-
-    // Check buildings
-    const buildingHits = this.raycaster.intersectObjects(this.buildings, false);
-    // Then foundation hit pads (larger invisible areas around foundations)
-    const foundationHits = this.raycaster.intersectObjects(this.foundationHitPads, false);
 
     // Clear tooltip + leader line
     if (this.tooltip) {
@@ -1585,6 +1566,25 @@ export class SceneManager {
       this.store.getState().hoverAgent(null);
     }
     this.container.style.cursor = 'default';
+
+    // District drag handle: hover it ONLY when it is the frontmost object. A
+    // building or its foundation in front of the (invisible) hitbox keeps its
+    // tooltip — the handle no longer overrides hover for buildings behind it.
+    const nearestContent = Math.min(
+      buildingHits.length ? buildingHits[0].distance : Infinity,
+      foundationHits.length ? foundationHits[0].distance : Infinity,
+    );
+    if (handleHits.length > 0 && handleHits[0].distance < nearestContent) {
+      const hitBox = handleHits[0].object as THREE.Mesh;
+      if (hitBox.userData.isDragHandle) {
+        const visualHandle = (hitBox.userData.visualHandle ?? hitBox) as THREE.Mesh;
+        this.hoveredHandle = visualHandle;
+        const mat = visualHandle.material as THREE.MeshStandardMaterial;
+        if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = 0.8;
+        this.container.style.cursor = 'grab';
+        return;
+      }
+    }
 
     // Determine which project is hovered (building takes priority, then foundation)
     let hoveredProject: ProjectData | null = null;
@@ -1927,7 +1927,7 @@ export class SceneManager {
       block.handle.position.set(handleX, 0.07, handleZ);
     }
     if (block.hitBox) {
-      block.hitBox.position.set(handleX, 4.0, handleZ);
+      block.hitBox.position.set(handleX, 2.5, handleZ);
     }
     // Update L-bracket vertices
     if (block.handleBracket) {
