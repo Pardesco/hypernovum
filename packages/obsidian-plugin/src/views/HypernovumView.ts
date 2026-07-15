@@ -9,6 +9,14 @@ import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
 import { AgentRegistry, type AgentSession } from '../monitors/AgentRegistry';
 import { detectConflicts, type ConflictRecord } from '../monitors/ConflictDetector';
+import {
+  computeWarnings,
+  topWarningPerProject,
+  warningBadgeCount,
+  topSeverityByProject,
+  type WarningItem,
+  type WarningSeverity,
+} from '../monitors/WarningAggregator';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { mapLimit } from '../utils/concurrency';
@@ -19,7 +27,7 @@ import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
 
-type VisualLayer = 'status' | 'git' | 'memory' | 'tasks' | 'recency' | 'stack';
+type VisualLayer = 'status' | 'git' | 'memory' | 'tasks' | 'recency' | 'stack' | 'attention';
 
 /** Dim slate for buildings with no data in the active scan mode */
 const NO_DATA_COLOR = 0x39415c;
@@ -108,6 +116,10 @@ export class HypernovumView extends ItemView {
   /** Latest deterministic conflicts (recomputed, throttled) */
   private conflicts: ConflictRecord[] = [];
   private lastConflictRun = 0;
+  /** Latest §11 warnings + the count of unreadable data files this poll */
+  private warnings: WarningItem[] = [];
+  private degradedCount = 0;
+  private attentionBadge: HTMLElement | null = null;
   private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
@@ -329,6 +341,7 @@ category: default
         onProjectChange: (newProject, oldProject) => {
         },
         onFleetUpdate: (agents) => this.onFleetUpdate(agents),
+        onDegradedData: (n) => { this.degradedCount = n; },
       });
       this.activityMonitor.start();
 
@@ -449,6 +462,11 @@ category: default
       this.sceneManager.clearAllWeather();
       this.sceneManager.buildCity(this.filteredProjects, districts);
 
+      // Warnings drive the attention lens + badge; recompute before applying.
+      this.recomputeWarnings();
+      // Clear any prior attention lens unless we're re-applying it below.
+      if (this.visualLayer !== 'attention') this.sceneManager.setAttentionLens(null);
+
       if (this.visualLayer === 'git') {
         this.filteredProjects.forEach((project) => {
           if (!project.gitActivity) return;
@@ -459,6 +477,8 @@ category: default
         });
       } else if (this.visualLayer === 'tasks' || this.visualLayer === 'recency' || this.visualLayer === 'stack') {
         this.sceneManager.applyLayerColors(this.computeLayerColors(this.visualLayer));
+      } else if (this.visualLayer === 'attention') {
+        this.sceneManager.setAttentionLens(this.attentionLensColors());
       }
 
       if (this.showLinks) {
@@ -804,6 +824,7 @@ category: default
 
     const modeNames: Record<VisualLayer, string> = {
       status: 'STATUS',
+      attention: 'NEEDS ATTENTION',
       git: 'GIT ACTIVITY',
       memory: 'MEMORY',
       tasks: 'TASK PROGRESS',
@@ -816,6 +837,22 @@ category: default
       `<span class="legend-chip" style="background:${color};box-shadow:0 0 6px ${color}88"></span>`;
 
     switch (this.visualLayer) {
+      case 'attention': {
+        const count = warningBadgeCount(this.warnings);
+        body.innerHTML = `
+          <div class="legend-section">
+            <div class="legend-label">Severity &middot; Color</div>
+            <div class="legend-list">
+              <div class="legend-item">${chip('#ff4444')}High &mdash; conflict / blocked / failed</div>
+              <div class="legend-item">${chip('#ffaa33')}Medium &mdash; dirty / behind / waiting</div>
+              <div class="legend-item">${chip('#5a6b82')}Low &mdash; stale</div>
+            </div>
+            <div class="legend-note">${count > 0 ? `${count} item${count === 1 ? '' : 's'} need attention` : 'City is healthy — nothing needs you'}</div>
+          </div>
+        `;
+        break;
+      }
+
       case 'git':
         body.innerHTML = `
           <div class="legend-section">
@@ -1091,6 +1128,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     panel.innerHTML = `
       <div class="command-panel-header">
         <span class="command-panel-title">PROJECTS</span>
+        <button class="attention-badge" title="Needs attention — click for the triage lens" hidden>⚠ 0</button>
         <span class="command-panel-summary">Loading...</span>
       </div>
       <input class="command-search" type="search" placeholder="Search projects" />
@@ -1098,6 +1136,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <label>Layer</label>
         <select class="layer-select">
           <option value="status">Status</option>
+          <option value="attention">Needs Attention</option>
           <option value="git">Git Activity</option>
           <option value="memory">Memory Ready</option>
           <option value="tasks">Task Progress</option>
@@ -1122,6 +1161,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.prioritySelect = panel.querySelector('.priority-select') as HTMLSelectElement;
     this.categorySelect = panel.querySelector('.category-select') as HTMLSelectElement;
     this.summaryEl = panel.querySelector('.command-panel-summary') as HTMLElement;
+    this.attentionBadge = panel.querySelector('.attention-badge') as HTMLElement;
+
+    this.attentionBadge.addEventListener('click', () => {
+      this.visualLayer = 'attention';
+      if (this.layerSelect) this.layerSelect.value = 'attention';
+      this.applyFiltersAndRebuild();
+    });
 
     // Debounce so a rebuild fires once per typing pause, not per keystroke (PERF-001).
     const debouncedSearch = debounce(() => this.applyFiltersAndRebuild(), 200, false);
@@ -1216,6 +1262,83 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.interactionStore.getState().select(project.path);
   }
 
+  // Attention-lens severity colors: red / amber / slate.
+  private static readonly ATTENTION_COLORS: Record<WarningSeverity, number> = {
+    high: 0xff4444,
+    medium: 0xffaa33,
+    low: 0x5a6b82,
+  };
+
+  /** Recompute §11 warnings from the current projects/sessions/conflicts + badge. */
+  private recomputeWarnings(): void {
+    this.warnings = computeWarnings(this.allProjects, this.fleetSessions, this.conflicts, this.degradedCount);
+    this.updateAttentionBadge();
+  }
+
+  private updateAttentionBadge(): void {
+    if (!this.attentionBadge) return;
+    const count = warningBadgeCount(this.warnings);
+    this.attentionBadge.hidden = count === 0;
+    this.attentionBadge.textContent = `⚠ ${count}`;
+    this.attentionBadge.classList.toggle('attention-high', this.warnings.some((w) => w.severity === 'high'));
+  }
+
+  /** Render actionable warning rows (TRI-003). `showProject` prefixes the project title. */
+  private renderWarningRows(items: WarningItem[], showProject: boolean): string {
+    return items.map((w) => {
+      const proj = w.projectPath ? this.allProjects.find((p) => p.path === w.projectPath)?.title ?? '' : '';
+      const prefix = showProject && proj ? `<span class="warning-proj">${this.escapeHtml(proj)}</span>` : '';
+      return `<div class="warning-row warning-${w.severity}">
+        <span class="warning-dot"></span>
+        <div class="warning-body">${prefix}<span class="warning-msg">${this.escapeHtml(w.message)}</span></div>
+        <button class="warning-action" data-w-kind="${w.action.kind}" data-w-path="${this.escapeHtml(w.projectPath ?? '')}">${this.escapeHtml(w.action.label)}</button>
+      </div>`;
+    }).join('');
+  }
+
+  /** Attach click handlers to warning-action buttons within a container. */
+  private wireWarningActions(root: HTMLElement): void {
+    root.querySelectorAll<HTMLButtonElement>('.warning-action').forEach((btn) => {
+      btn.addEventListener('click', () => this.runWarningAction(btn.dataset.wKind ?? '', btn.dataset.wPath || null));
+    });
+  }
+
+  private runWarningAction(kind: string, path: string | null): void {
+    const project = path ? this.allProjects.find((p) => p.path === path) : null;
+    switch (kind) {
+      case 'focus':
+      case 'show-conflict':
+        if (project) {
+          this.interactionStore.getState().select(project.path);
+          if (project.position && this.sceneManager) {
+            this.sceneManager.focusOnPosition(project.position);
+            this.sceneManager.setFocusedProject(project);
+          }
+        }
+        break;
+      case 'open-note':
+        if (project) this.app.workspace.openLinkText(project.path, '', false);
+        break;
+      case 'launch-agent':
+        if (project) this.launchAgentForProject(project, this.resolveProjectPath(project));
+        break;
+      case 'open-terminal':
+        if (project) this.openTerminalForProject(project, this.resolveProjectPath(project));
+        break;
+    }
+  }
+
+  /** Per-project severity color map for the Needs-Attention lens (visible projects only). */
+  private attentionLensColors(): Map<string, number> {
+    const severity = topSeverityByProject(this.warnings);
+    const colors = new Map<string, number>();
+    for (const p of this.filteredProjects) {
+      const sev = severity.get(p.path);
+      if (sev) colors.set(p.path, HypernovumView.ATTENTION_COLORS[sev]);
+    }
+    return colors;
+  }
+
   private updateSummary(): void {
     if (!this.summaryEl) return;
     const gitCount = this.allProjects.filter((p) => p.gitActivity).length;
@@ -1265,16 +1388,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     </div>`;
   }
 
-  /** Conflict rows for one project (informational; §7.6 messages). */
-  private renderProjectConflicts(projectPath: string): string {
-    const relevant = this.conflicts.filter((c) => c.projectPaths.includes(projectPath));
+  /** A project's full warning list (TRI-003), actionable, severity-ordered. */
+  private renderProjectWarnings(projectPath: string): string {
+    const relevant = this.warnings.filter((w) => w.projectPath === projectPath);
     if (relevant.length === 0) return '';
-    const rows = relevant.map((c) =>
-      `<div class="conflict-row conflict-${c.severity}"><span class="conflict-dot"></span>${this.escapeHtml(c.message)}</div>`
-    ).join('');
     return `<div class="inspector-section">
-      <span class="section-label">Conflicts</span>
-      ${rows}
+      <span class="section-label">Attention</span>
+      ${this.renderWarningRows(relevant, false)}
     </div>`;
   }
 
@@ -1321,7 +1441,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <span class="section-label">Open Quests${project.answeredQuestions?.length ? ` · ${project.answeredQuestions.length} resolved` : ''}</span>
         ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
       </div>` : ''}
-      ${this.renderProjectConflicts(project.path)}
+      ${this.renderProjectWarnings(project.path)}
       ${this.renderAgentsSection(project.path)}
       <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
       <div class="inspector-actions">
@@ -1370,6 +1490,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         this.sceneManager.setFocusedProject(project);
       }
     });
+
+    this.wireWarningActions(this.inspectorPanel);
   }
 
   /** District analytics readout shown when no building is selected */
@@ -1393,21 +1515,25 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const activeAgents = sessions.filter(
       (s) => !['complete', 'stale', 'disconnected', 'waiting'].includes(s.state),
     ).length;
-    const conflictList = this.conflicts.filter((c) => c.severity !== 'info');
+    const conflictCount = this.conflicts.filter((c) => c.severity !== 'info').length;
     const fleetLine = sessions.length > 0
-      ? `<div class="fleet-summary">${activeAgents} active · ${waitingAgents} waiting · ${conflictList.length} conflict${conflictList.length === 1 ? '' : 's'}</div>`
+      ? `<div class="fleet-summary">${activeAgents} active · ${waitingAgents} waiting · ${conflictCount} conflict${conflictCount === 1 ? '' : 's'}</div>`
       : '';
-    const conflictSection = conflictList.length > 0
+
+    // Attention section (TRI-003): one row per project (highest severity), top 8.
+    const topWarnings = topWarningPerProject(this.warnings);
+    const shown = topWarnings.slice(0, 8);
+    const moreCount = topWarnings.length - shown.length;
+    const attentionSection = topWarnings.length > 0
       ? `<div class="inspector-section">
-          <span class="section-label">Conflicts</span>
-          ${conflictList.slice(0, 6).map((c) => `
-            <div class="conflict-row conflict-${c.severity}">
-              <span class="conflict-dot"></span>
-              <span class="conflict-msg">${this.escapeHtml(c.message)}</span>
-              <button class="conflict-focus" data-focus-path="${this.escapeHtml(c.projectPaths[0])}">Focus</button>
-            </div>`).join('')}
+          <span class="section-label">Attention</span>
+          ${this.renderWarningRows(shown, true)}
+          ${moreCount > 0 ? `<div class="inspector-empty-inline">+${moreCount} more</div>` : ''}
         </div>`
-      : '';
+      : `<div class="inspector-section">
+          <span class="section-label">Attention</span>
+          <div class="inspector-empty-inline">City is healthy — nothing needs you</div>
+        </div>`;
 
     const districts = new Map<string, ProjectData[]>();
     for (const p of projects) {
@@ -1437,7 +1563,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <div><span>30d commits</span><strong>${commits30d}</strong></div>
       </div>
       ${fleetLine}
-      ${conflictSection}
+      ${attentionSection}
       <div class="inspector-section">
         <span class="section-label">Districts</span>
         ${districtRows}
@@ -1445,19 +1571,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       <div class="inspector-empty">Select a building for details</div>
     `;
 
-    // Conflict "Focus" buttons select + focus the involved project.
-    this.inspectorPanel.querySelectorAll<HTMLElement>('.conflict-focus').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const targetPath = btn.dataset.focusPath;
-        const project = targetPath ? this.allProjects.find((p) => p.path === targetPath) : null;
-        if (!project) return;
-        this.interactionStore.getState().select(project.path);
-        if (project.position && this.sceneManager) {
-          this.sceneManager.focusOnPosition(project.position);
-          this.sceneManager.setFocusedProject(project);
-        }
-      });
-    });
+    this.wireWarningActions(this.inspectorPanel);
   }
 
   private copyAgentContext(project: ProjectData, projectPath: string): void {
@@ -1577,6 +1691,12 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         }
       }
       this.sceneManager.setConflicts([...levels].map(([path, severity]) => ({ path, severity })));
+    }
+
+    // Agents/conflicts change the warning set — recompute badge + attention lens.
+    this.recomputeWarnings();
+    if (this.visualLayer === 'attention') {
+      this.sceneManager.setAttentionLens(this.attentionLensColors());
     }
 
     // Keep the inspector's Agents section in sync when a project is selected.

@@ -37,6 +37,8 @@ export class HighlightManager {
   private store: InteractionStore | null;
   private weather = new Map<string, WeatherData>();
   private lensColors: Map<string, number> | null = null;
+  /** Needs-Attention lens: warned path → severity color; unwarned dim (TRI-002) */
+  private attentionColors: Map<string, number> | null = null;
   private connectedPaths = new Set<string>();
   private hoverNeighbors = new Set<string>();
   private conflictLevels = new Map<string, 'high' | 'medium'>();
@@ -88,6 +90,15 @@ export class HighlightManager {
     this.refreshAll();
   }
 
+  /**
+   * Needs-Attention lens (TRI-002): warned buildings take their severity color;
+   * every other building dims (context preserved, not hidden). Null clears it.
+   */
+  setAttentionLens(colors: Map<string, number> | null): void {
+    this.attentionColors = colors;
+    this.refreshAll();
+  }
+
   /** Paths considered connected to the current selection (edge neighbors) */
   setConnectedPaths(paths: Set<string>): void {
     this.connectedPaths = paths;
@@ -136,12 +147,23 @@ export class HighlightManager {
     const moveMode = s?.moveModePath === entry.path;
     const connected = this.connectedPaths.has(entry.path) || this.hoverNeighbors.has(entry.path);
     const focusActive = this.focusDimEnabled && !!(s?.selectedPath || s?.traceImpact);
-    const dimmed = focusActive && !selected && !hovered && !connected && !moveMode;
+
+    // Needs-Attention lens: warned buildings colored by severity; unwarned dim.
+    let lensColor = this.lensColors?.get(entry.path) ?? null;
+    let attentionDim = false;
+    if (this.attentionColors) {
+      const c = this.attentionColors.get(entry.path);
+      if (c !== undefined) lensColor = c;
+      else attentionDim = true;
+    }
+
+    const focusDim = focusActive && !selected && !hovered && !connected && !moveMode;
+    const dimmed = focusDim || (attentionDim && !selected && !hovered && !moveMode);
 
     const weather = this.weather.get(entry.path) ?? null;
     return resolveVisualState({
       status: entry.project.status,
-      lensColor: this.lensColors?.get(entry.path) ?? null,
+      lensColor,
       weather,
       decayFactor: weather
         ? HighlightManager.timeDecay(weather.lastCommitDate)
@@ -244,5 +266,6 @@ export class HighlightManager {
     this.hoverNeighbors.clear();
     this.conflictLevels.clear();
     this.lensColors = null;
+    this.attentionColors = null;
   }
 }

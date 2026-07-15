@@ -1306,6 +1306,14 @@ export class SceneManager {
     this.highlight.setLensColors(colors);
   }
 
+  /**
+   * Needs-Attention lens (TRI-002): warned buildings take a severity color,
+   * every other building dims. Pass null to clear it.
+   */
+  setAttentionLens(colors: Map<string, number> | null): void {
+    this.highlight.setAttentionLens(colors);
+  }
+
   private createFallbackMaterial(project: ProjectData, baseColor: THREE.Color): THREE.MeshStandardMaterial {
     const emissiveIntensity = project.status === 'blocked' ? 0.3 :
       project.status === 'active' ? 0.2 : 0.1;

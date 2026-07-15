@@ -94,7 +94,8 @@ export class ActivityMonitor {
       const legacy = legacyRaw ? legacyToPresence(legacyRaw) : null;
 
       const agents = mergeFleet(v2, legacy);
-      if (skipped > 0) this.callbacks.onDegradedData?.(skipped);
+      // Emit every poll (incl. 0) so consumers can clear a prior degraded state.
+      this.callbacks.onDegradedData?.(skipped);
 
       // Full fleet (incl. stale/complete) drives the registry (AGT-003).
       this.callbacks.onFleetUpdate?.(agents);
