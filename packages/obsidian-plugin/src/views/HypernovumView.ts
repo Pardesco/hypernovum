@@ -7,6 +7,7 @@ import type { ProjectData, BlockPosition, RaycastHit, LinkEdge } from '@hypernov
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
+import { AgentRegistry, type AgentSession } from '../monitors/AgentRegistry';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { generateAgentContext } from '../utils/AgentContext';
@@ -96,6 +97,12 @@ export class HypernovumView extends ItemView {
   private keyboardNav: KeyboardNav | null = null;
   private activityMonitor: ActivityMonitor | null = null;
   private activityIndicator: HTMLElement | null = null;
+  /** Live agent session registry (§10 lifecycle), fed by the fleet monitor */
+  private agentRegistry = new AgentRegistry((p) =>
+    p.project ? this.sceneManager?.findProjectByName(p.project)?.path ?? null : null,
+  );
+  /** Latest registry snapshot — drives orbs, inspector Agents section, conflicts */
+  private fleetSessions: AgentSession[] = [];
   private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
@@ -339,6 +346,7 @@ category: default
     this.metadataExtractor?.stopWatching();
     this.keyboardNav?.dispose();
     this.activityMonitor?.stop();
+    this.agentRegistry.clear();
     this.storeUnsubscribe?.();
     this.storeUnsubscribe = null;
 
@@ -1391,21 +1399,22 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.activityIndicator = indicator;
   }
 
-  /** Render one orbiting orb per active agent (fleet presence) */
+  /** Feed the fleet into the session registry and render one orb per session. */
   private onFleetUpdate(agents: AgentPresence[]): void {
     if (!this.sceneManager) return;
-    // The monitor now emits the full fleet (incl. stale/complete); render orbs
-    // only for fresh, active sessions here (registry-driven visuals land in AGT-003+).
-    const now = Date.now();
-    const fresh = agents.filter((a) => a.active && now - a.lastPing <= 10000);
+    const sessions = this.agentRegistry.update(agents, Date.now());
+    this.fleetSessions = sessions;
+
+    // Orbs render for every session resolved to a visible building. Lifecycle
+    // states (stale grey / complete fade) are applied by AGT-005.
     this.sceneManager.updateAgentPresence(
-      fresh.map((a) => ({
-        id: a.id,
-        projectPath: a.project
-          ? this.sceneManager?.findProjectByName(a.project)?.path ?? null
-          : null,
-      })),
+      sessions
+        .filter((s) => s.projectPath)
+        .map((s) => ({ id: s.sessionId, projectPath: s.projectPath })),
     );
+
+    // Keep the inspector's Agents section in sync when a project is selected.
+    if (this.selectedProject) this.updateInspector();
   }
 
   /** Handle Claude Code activity start */
