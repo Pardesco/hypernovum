@@ -112,12 +112,18 @@ export default class HypernovumPlugin extends Plugin {
     this.settings.vaultMode = value;
     await this.saveSettings();
     new Notice(`Hypernovum vault mode ${value ? 'ON' : 'OFF'}`);
+    await this.reloadOpenViews();
+  }
 
+  /**
+   * Reload any open city view so a setting applied at view-open (building style,
+   * vault mode, shaders…) takes effect immediately instead of on next open.
+   */
+  async reloadOpenViews(): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-    if (leaves.length > 0) {
-      leaves.forEach((leaf) => leaf.detach());
-      await this.activateView();
-    }
+    if (leaves.length === 0) return;
+    leaves.forEach((leaf) => leaf.detach());
+    await this.activateView();
   }
 
   async loadSettings(): Promise<void> {

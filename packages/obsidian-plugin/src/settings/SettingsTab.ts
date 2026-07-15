@@ -190,7 +190,7 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Building style')
-      .setDesc('Classic silhouettes, or Parametric (beta) data-true towers whose window rows equal their floor count. Reload view after changing.')
+      .setDesc('Classic silhouettes, or Parametric (beta) data-true towers whose window rows equal their floor count. Applies immediately to open city views.')
       .addDropdown((dropdown) => {
         dropdown
           .addOption('classic', 'Classic')
@@ -199,6 +199,7 @@ export class SettingsTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.buildingStyle = value as 'classic' | 'parametric';
             await this.plugin.saveSettings();
+            await this.plugin.reloadOpenViews(); // apply immediately
           });
       });
 
