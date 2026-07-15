@@ -1327,8 +1327,10 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       <div class="inspector-actions">
         <button data-action="note">Open Note</button>
         <button data-action="folder">Folder</button>
+        <button data-action="terminal">Terminal</button>
         <button data-action="agent">Launch Agent</button>
         <button data-action="context">Context</button>
+        <button data-action="copy-path">Copy Path</button>
         <button data-action="focus">Focus</button>
       </div>
     `;
@@ -1352,6 +1354,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     this.inspectorPanel.querySelector('[data-action="context"]')?.addEventListener('click', () => {
       this.copyAgentContext(project, projectPath);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="terminal"]')?.addEventListener('click', () => {
+      this.openTerminalForProject(project, projectPath);
+    });
+
+    this.inspectorPanel.querySelector('[data-action="copy-path"]')?.addEventListener('click', () => {
+      this.copyProjectPath(projectPath);
     });
 
     this.inspectorPanel.querySelector('[data-action="focus"]')?.addEventListener('click', () => {
@@ -1650,6 +1660,22 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   }
 
   /** Show context menu for right-clicked building */
+  /** Open a plain shell in the project dir (no agent) — TRI-006. */
+  private async openTerminalForProject(project: ProjectData, projectPath: string): Promise<void> {
+    const result = await TerminalLauncher.openShell(projectPath);
+    new Notice(result.success ? `Opened terminal in ${project.title}` : `Failed to open terminal: ${result.message}`);
+  }
+
+  /** Copy the resolved project directory to the clipboard — TRI-007. */
+  private async copyProjectPath(projectPath: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(projectPath);
+      new Notice('Path copied to clipboard');
+    } catch {
+      new Notice('Could not copy path');
+    }
+  }
+
   private showBuildingContextMenu(hit: RaycastHit, event: MouseEvent): void {
     const menu = new Menu();
     const project = hit.project;
@@ -1697,6 +1723,20 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
             new Notice(`Failed to open folder: ${result.message}`);
           }
         });
+    });
+
+    menu.addItem((item) => {
+      item
+        .setTitle('Open terminal')
+        .setIcon('square-terminal')
+        .onClick(() => this.openTerminalForProject(project, projectPath));
+    });
+
+    menu.addItem((item) => {
+      item
+        .setTitle('Copy path')
+        .setIcon('copy')
+        .onClick(() => this.copyProjectPath(projectPath));
     });
 
     menu.addSeparator();

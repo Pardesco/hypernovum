@@ -1,6 +1,9 @@
 import { spawn } from 'child_process';
 import { Platform } from 'obsidian';
 import * as path from 'path';
+import { buildShellInvocations } from './shellInvocations';
+
+export { buildShellInvocations, type ShellInvocation } from './shellInvocations';
 
 export interface LaunchResult {
   success: boolean;
@@ -13,6 +16,7 @@ export interface LaunchOptions {
   command?: string;  // Default: 'claude'
   projectName?: string;
 }
+
 
 /**
  * Escape for the AppleScript double-quoted string layer: \ and " would
@@ -259,6 +263,47 @@ export class TerminalLauncher {
       message: 'No supported terminal emulator found',
       platform: 'linux',
     };
+  }
+
+  /**
+   * Open a plain interactive shell in the project directory — no agent (TRI-006).
+   */
+  static async openShell(projectPath: string): Promise<LaunchResult> {
+    const platform = this.getPlatform();
+
+    if (platform === 'macos') {
+      const cd = escapeAppleScriptString(`cd ${shellQuote(projectPath)}`);
+      const iTermScript = `
+        if application "iTerm" is running then
+          tell application "iTerm"
+            activate
+            set newWindow to (create window with default profile)
+            tell current session of newWindow to write text "${cd}"
+          end tell
+          return "ok"
+        else
+          return "not running"
+        end if
+      `;
+      try {
+        if (await this.runOsascript(iTermScript) === 'ok') {
+          return { success: true, message: `Opened shell in ${projectPath}`, platform };
+        }
+      } catch { /* fall through to Terminal.app */ }
+      const ok = await spawnDetached('osascript', ['-e', `tell application "Terminal"\nactivate\ndo script "${cd}"\nend tell`]);
+      return { success: ok, message: ok ? `Opened shell in ${projectPath}` : 'Could not open a terminal', platform };
+    }
+
+    if (platform === 'windows' || platform === 'linux') {
+      for (const inv of buildShellInvocations(platform, projectPath)) {
+        if (await spawnDetached(inv.cmd, inv.args, { cwd: inv.cwd })) {
+          return { success: true, message: `Opened shell in ${projectPath}`, platform };
+        }
+      }
+      return { success: false, message: 'Could not open a terminal', platform };
+    }
+
+    return { success: false, message: `Unsupported platform: ${platform}`, platform };
   }
 
   /**
