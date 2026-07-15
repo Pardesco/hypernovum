@@ -210,6 +210,29 @@ export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
   return geometry;
 }
 
+// --- Geometry cache (BLD-006) ---
+// Keyed by the full param set (deterministic → stable across rebuilds). Sharing
+// attribute buffers across meshes is fragile in three, so we cache the built
+// geometry and return a .clone() per building. Callers may mutate their clone.
+const geometryCache = new Map<string, THREE.BufferGeometry>();
+const CACHE_LIMIT = 512;
+
+export function loftTowerCached(params: TowerLoftParams): THREE.BufferGeometry {
+  const key = JSON.stringify(params);
+  let geo = geometryCache.get(key);
+  if (!geo) {
+    if (geometryCache.size >= CACHE_LIMIT) clearLoftCache();
+    geo = loftTower(params);
+    geometryCache.set(key, geo);
+  }
+  return geo.clone();
+}
+
+export function clearLoftCache(): void {
+  for (const g of geometryCache.values()) g.dispose();
+  geometryCache.clear();
+}
+
 /** Vertex count of the INDEXED grid (before any toNonIndexed) — for tests. */
 export function loftVertexCount(params: TowerLoftParams): number {
   const floors = Math.round(clamp(params.floors, CLAMP.floors[0], CLAMP.floors[1]));

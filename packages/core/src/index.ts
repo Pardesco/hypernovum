@@ -12,7 +12,7 @@ export { HighlightManager } from './scene/HighlightManager';
 export type { BuildingParts } from './scene/HighlightManager';
 export { resolveVisualState } from './scene/visualState';
 export type { VisualState, ResolveInput, LabelTier } from './scene/visualState';
-export { loftTower, loftVertexCount } from './renderers/TowerLoft';
+export { loftTower, loftTowerCached, clearLoftCache, loftVertexCount } from './renderers/TowerLoft';
 export type { TowerLoftParams, TowerProfile } from './renderers/TowerLoft';
 export { presetForProject, isParametricCategory } from './renderers/TowerPresets';
 export type { TowerBuildInput, TowerBuildResult } from './renderers/TowerPresets';

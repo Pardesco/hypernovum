@@ -12,7 +12,7 @@ import { labelVisible, type LabelTier } from './visualState';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
-import { loftTower } from '../renderers/TowerLoft';
+import { loftTowerCached } from '../renderers/TowerLoft';
 import { presetForProject } from '../renderers/TowerPresets';
 import { RooftopFactory } from '../renderers/RooftopFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
@@ -991,7 +991,7 @@ export class SceneManager {
       const preset = presetForProject({ path: project.path, category: project.category, width, height, depth });
       if (preset) {
         try {
-          const geometry = loftTower(preset.params);
+          const geometry = loftTowerCached(preset.params);
           // loftTower is bottom-anchored already; normalize defensively.
           geometry.computeBoundingBox();
           geometry.translate(0, -geometry.boundingBox!.min.y, 0);
