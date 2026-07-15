@@ -36,6 +36,8 @@ export interface ResolveInput {
   dimmed?: boolean;
   moveMode?: boolean;
   bloom?: boolean;
+  /** Agent conflict on this building (§8 row 4) — pierces dimming */
+  conflict?: 'high' | 'medium' | null;
 }
 
 export type LabelTier = 'always' | 'normal' | 'hidden';
@@ -165,6 +167,23 @@ export function resolveVisualState(i: ResolveInput): VisualState {
     dimFactor = 1;
     emissiveBase = Math.max(emissiveBase, anim.base + 0.05);
     edgeGlowPulse = status === 'blocked';
+    labelTier = 'always';
+  }
+
+  // 4 — agent conflict (pierces dimming; below hover/selected/move)
+  if (i.conflict) {
+    const high = i.conflict === 'high';
+    opacity = 1;
+    dimFactor = 1;
+    emissiveColor = high ? 0xff3333 : 0xffaa33;
+    emissiveBase = Math.max(emissiveBase, high ? 0.5 : 0.35);
+    glitch = Math.max(glitch, high ? 0.4 : 0.2);
+    glitchSpeed = 6;
+    pulseSpeed = high ? 6 : 3;
+    pulseAmplitude = Math.max(pulseAmplitude, 0.25);
+    edgeGlowOpacity = Math.max(edgeGlowOpacity, 0.9);
+    edgeGlowColorScale = Math.max(edgeGlowColorScale, 3.0);
+    edgeGlowPulse = true;
     labelTier = 'always';
   }
 

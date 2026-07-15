@@ -8,6 +8,7 @@ import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
 import { AgentRegistry, type AgentSession } from '../monitors/AgentRegistry';
+import { detectConflicts, type ConflictRecord } from '../monitors/ConflictDetector';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { generateAgentContext } from '../utils/AgentContext';
@@ -103,6 +104,9 @@ export class HypernovumView extends ItemView {
   );
   /** Latest registry snapshot — drives orbs, inspector Agents section, conflicts */
   private fleetSessions: AgentSession[] = [];
+  /** Latest deterministic conflicts (recomputed, throttled) */
+  private conflicts: ConflictRecord[] = [];
+  private lastConflictRun = 0;
   private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
@@ -1423,6 +1427,25 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
           lastPing: s.lastPing,
         })),
     );
+
+    // Recompute conflicts (throttled ~2s) and present them in-scene.
+    const now = Date.now();
+    if (now - this.lastConflictRun >= 2000) {
+      this.lastConflictRun = now;
+      this.conflicts = detectConflicts(sessions, this.allProjects);
+
+      // Only high/medium conflicts get a ring + material channel (info is
+      // inspector-only). Collapse to top severity per building.
+      const levels = new Map<string, 'high' | 'medium'>();
+      for (const c of this.conflicts) {
+        if (c.severity === 'info') continue;
+        for (const path of c.projectPaths) {
+          const prev = levels.get(path);
+          if (!prev || (prev === 'medium' && c.severity === 'high')) levels.set(path, c.severity);
+        }
+      }
+      this.sceneManager.setConflicts([...levels].map(([path, severity]) => ({ path, severity })));
+    }
 
     // Keep the inspector's Agents section in sync when a project is selected.
     if (this.selectedProject) this.updateInspector();

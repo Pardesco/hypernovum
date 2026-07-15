@@ -109,4 +109,33 @@ describe('resolveVisualState precedence (§8)', () => {
     expect(bloom.edgeGlowOpacity).toBeGreaterThan(dim.edgeGlowOpacity);
     expect(bloom.edgeGlowOpacity).toBeLessThanOrEqual(1);
   });
+
+  it('high conflict adds red glitch/pulse channel and forces label', () => {
+    const s = resolveVisualState({ status: 'active', conflict: 'high' });
+    expect(s.emissiveColor).toBe(0xff3333);
+    expect(s.glitch).toBeGreaterThanOrEqual(0.4);
+    expect(s.pulseSpeed).toBe(6);
+    expect(s.labelTier).toBe('always');
+  });
+
+  it('conflict pierces focus dimming (opacity + dimFactor restored)', () => {
+    const dimmedOnly = resolveVisualState({ status: 'active', dimmed: true });
+    expect(dimmedOnly.opacity).toBeCloseTo(0.35);
+    const dimmedConflict = resolveVisualState({ status: 'active', dimmed: true, conflict: 'high' });
+    expect(dimmedConflict.opacity).toBe(1);
+    expect(dimmedConflict.dimFactor).toBe(1);
+  });
+
+  it('medium conflict is amber and softer than high', () => {
+    const med = resolveVisualState({ status: 'active', conflict: 'medium' });
+    const high = resolveVisualState({ status: 'active', conflict: 'high' });
+    expect(med.emissiveColor).toBe(0xffaa33);
+    expect(med.pulseSpeed).toBeLessThan(high.pulseSpeed);
+  });
+
+  it('selected still wins over conflict for scale/label', () => {
+    const s = resolveVisualState({ status: 'active', conflict: 'high', selected: true });
+    expect(s.scale).toBe(1.04);
+    expect(s.labelTier).toBe('always');
+  });
 });

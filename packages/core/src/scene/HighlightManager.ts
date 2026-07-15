@@ -38,6 +38,7 @@ export class HighlightManager {
   private weather = new Map<string, WeatherData>();
   private lensColors: Map<string, number> | null = null;
   private connectedPaths = new Set<string>();
+  private conflictLevels = new Map<string, 'high' | 'medium'>();
   private bloom: boolean;
   /** Dim-unrelated focus pass while a selection or trace overlay is active */
   focusDimEnabled = true;
@@ -92,6 +93,15 @@ export class HighlightManager {
     this.refreshAll();
   }
 
+  /**
+   * Buildings currently in agent conflict, by top severity (AGT-008). Drives
+   * the §8 conflict channel (red glitch/pulse) that pierces focus dimming.
+   */
+  setConflictLevels(levels: Map<string, 'high' | 'medium'>): void {
+    this.conflictLevels = levels;
+    this.refreshAll();
+  }
+
   refresh(path: string | null | undefined): void {
     if (!path) return;
     const entry = this.parts.get(path);
@@ -129,6 +139,7 @@ export class HighlightManager {
       dimmed,
       moveMode,
       bloom: this.bloom,
+      conflict: this.conflictLevels.get(entry.path) ?? null,
     });
   }
 
@@ -216,6 +227,7 @@ export class HighlightManager {
     this.unsubscribe = null;
     this.weather.clear();
     this.connectedPaths.clear();
+    this.conflictLevels.clear();
     this.lensColors = null;
   }
 }

@@ -98,6 +98,7 @@ export class SceneManager {
   private linkArcs: THREE.Mesh[] = []; // backlink knowledge arcs between buildings
   private questBursts: { mesh: THREE.Mesh; start: number }[] = []; // quest-resolved shockwaves
   private agentOrbs = new Map<string, AgentOrbEntry>(); // fleet presence
+  private conflictRings = new Map<string, { mesh: THREE.Mesh; severity: 'high' | 'medium' }>(); // AGT-008
   private labels: LabelInfo[] = [];
   private raycaster = new THREE.Raycaster();
   private mouse = new THREE.Vector2();
@@ -450,6 +451,7 @@ export class SceneManager {
     this.clearLinkArcs();
     this.questBursts = [];
     this.agentOrbs.clear(); // orbs are building children — disposed with the city above
+    this.clearConflictRings();
     this.labels = [];
     this.blocks.clear();
     this.dragHandles = [];
@@ -1165,6 +1167,67 @@ export class SceneManager {
       mat.needsUpdate = true;
     }
     mat.opacity = visual.opacity;
+  }
+
+  /**
+   * Present agent conflicts (AGT-008): a persistent pulsing ring at each
+   * conflicted building's base (red = high, amber = medium) plus the §8
+   * conflict material channel via HighlightManager. Reconciled against the
+   * prior set. Conflicts are always same-project, so one ring per building.
+   */
+  setConflicts(buildings: { path: string; severity: 'high' | 'medium' }[]): void {
+    // Collapse to the top severity per building.
+    const levels = new Map<string, 'high' | 'medium'>();
+    for (const b of buildings) {
+      const prev = levels.get(b.path);
+      if (!prev || (prev === 'medium' && b.severity === 'high')) levels.set(b.path, b.severity);
+    }
+
+    for (const [path, severity] of levels) {
+      const building = this.buildingPathMap.get(path);
+      if (!building) { levels.delete(path); continue; }
+
+      const existing = this.conflictRings.get(path);
+      if (existing && existing.severity === severity) continue;
+      if (existing) { this.disposeRing(existing.mesh); this.conflictRings.delete(path); }
+
+      const project = building.userData.project as ProjectData;
+      const half = (project.dimensions?.width ?? 3) / 2;
+      const color = severity === 'high' ? 0xff3333 : 0xffaa33;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(half + 0.4, half + 0.9, 48),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(building.position.x, 0.12, building.position.z);
+      ring.userData = { isConflictRing: true };
+      this.scene.add(ring);
+      this.conflictRings.set(path, { mesh: ring, severity });
+    }
+
+    // Remove rings for buildings no longer in conflict.
+    for (const [path, entry] of this.conflictRings) {
+      if (levels.has(path)) continue;
+      this.disposeRing(entry.mesh);
+      this.conflictRings.delete(path);
+    }
+
+    this.highlight.setConflictLevels(levels);
+  }
+
+  private disposeRing(mesh: THREE.Mesh): void {
+    mesh.parent?.remove(mesh);
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+  }
+
+  private clearConflictRings(): void {
+    for (const entry of this.conflictRings.values()) this.disposeRing(entry.mesh);
+    this.conflictRings.clear();
+    this.highlight?.setConflictLevels(new Map());
   }
 
   /**
@@ -2151,6 +2214,13 @@ export class SceneManager {
           mat.opacity = f;
         }
       }
+    }
+
+    // Conflict rings pulse — faster and brighter for high severity.
+    for (const entry of this.conflictRings.values()) {
+      const rm = entry.mesh.material as THREE.MeshBasicMaterial;
+      const speed = entry.severity === 'high' ? 5 : 2.5;
+      rm.opacity = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(elapsed * speed));
     }
 
     // Knowledge arcs breathe softly
