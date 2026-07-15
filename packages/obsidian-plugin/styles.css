@@ -53,7 +53,14 @@
   opacity: 0.12;
 }
 
-/* Hover tooltip */
+/* Hover tooltip — panel hangs off a 0×0 anchor and extends AWAY from the
+   building (left/right set inline), so it never covers the hovered mesh */
+.hypernovum-tooltip-anchor {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
 .hypernovum-tooltip {
   color: var(--text-normal, #e0e0e0);
   font-size: 12px;
@@ -65,8 +72,27 @@
   pointer-events: none;
   user-select: none;
   min-width: 160px;
+  width: max-content;
+  max-width: 280px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(8px);
+}
+
+.hypernovum-tooltip-anchor .hypernovum-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translateY(-50%);
+}
+
+.hypernovum-tooltip .tooltip-stack-none {
+  color: rgba(200, 210, 235, 0.5);
+  font-style: italic;
+}
+
+.hypernovum-tooltip .tooltip-stack-solo {
+  border-top: none;
+  margin-top: 2px;
+  padding-top: 0;
 }
 
 .hypernovum-tooltip strong {
@@ -805,6 +831,36 @@
   color: #d9beff;
   text-shadow: 0 0 8px rgba(179, 102, 255, 0.6);
   box-shadow: 0 0 12px rgba(179, 102, 255, 0.15), inset 0 0 12px rgba(179, 102, 255, 0.08);
+}
+
+/* Vault-mode toggle — amber counterpart to the violet links toggle */
+.vault-mode-toggle {
+  width: 100%;
+  height: 26px;
+  margin-top: 6px;
+  border: 1px solid rgba(255, 190, 90, 0.22);
+  border-radius: 6px;
+  background: rgba(45, 34, 16, 0.5);
+  color: rgba(255, 210, 140, 0.55);
+  font-family: var(--font-monospace, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.vault-mode-toggle:hover {
+  border-color: rgba(255, 190, 90, 0.45);
+  color: rgba(255, 222, 170, 0.85);
+}
+
+.vault-mode-toggle.active {
+  border-color: rgba(255, 190, 90, 0.6);
+  background: rgba(90, 65, 25, 0.6);
+  color: #ffd9a0;
+  text-shadow: 0 0 8px rgba(255, 190, 90, 0.6);
+  box-shadow: 0 0 12px rgba(255, 190, 90, 0.15), inset 0 0 12px rgba(255, 190, 90, 0.08);
 }
 
 /* Project inspector */

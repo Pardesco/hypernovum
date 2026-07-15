@@ -179,11 +179,10 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Enable vault mode')
-      .setDesc('Disable AI agent features and use Hypernovum as a pure 3D visualization and navigation tool.')
+      .setDesc('Disable AI agent features and use Hypernovum as a pure 3D visualization and navigation tool. Applies immediately — open city views reload.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.vaultMode).onChange(async (value) => {
-          this.plugin.settings.vaultMode = value;
-          await this.plugin.saveSettings();
+          await this.plugin.setVaultMode(value);
         }),
       );
 

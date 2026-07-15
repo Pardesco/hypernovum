@@ -1078,6 +1078,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <select class="category-select"><option value="all">All categories</option></select>
       </div>
       <button class="links-toggle" title="Show vault backlinks between projects as knowledge arcs">NEURAL LINKS &middot; OFF</button>
+      <button class="vault-mode-toggle" title="Vault mode: pure 3D visualization, no AI agent features. Reloads the view.">VAULT MODE &middot; OFF</button>
     `;
 
     const searchInput = panel.querySelector('.command-search') as HTMLInputElement;
@@ -1125,6 +1126,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         this.sceneManager?.clearLinkArcs();
       }
       this.updateConnectedPaths(this.interactionStore.getState().selectedPath);
+    });
+
+    const vaultToggle = panel.querySelector('.vault-mode-toggle') as HTMLButtonElement;
+    vaultToggle.textContent = `VAULT MODE · ${this.settings.vaultMode ? 'ON' : 'OFF'}`;
+    vaultToggle.classList.toggle('active', this.settings.vaultMode);
+    vaultToggle.addEventListener('click', () => {
+      // Reloads the view; the fresh view renders the new state
+      this.plugin.toggleVaultMode();
     });
 
     container.appendChild(panel);

@@ -1329,6 +1329,7 @@ export class SceneManager {
     let hoveredProject: ProjectData | null = null;
     let tooltipPos: THREE.Vector3 | null = null;
     let tooltipHeight = 0;
+    let tooltipVariant: 'building' | 'foundation' = 'building';
 
     if (buildingHits.length > 0) {
       const hit = buildingHits[0].object as THREE.Mesh;
@@ -1344,11 +1345,12 @@ export class SceneManager {
         hoveredProject = hitPad.userData.project as ProjectData;
         tooltipPos = visualFoundation.position;
         tooltipHeight = 0.8;
+        tooltipVariant = 'foundation';
       }
     }
 
     if (hoveredProject && tooltipPos) {
-      this.showTooltip(hoveredProject, tooltipPos, tooltipHeight);
+      this.showTooltip(hoveredProject, tooltipPos, tooltipHeight, tooltipVariant);
     }
 
     // Mirror hover into the shared store (only on change)
@@ -1751,56 +1753,63 @@ export class SceneManager {
     }
   }
 
-  private showTooltip(project: ProjectData, position: THREE.Vector3, height: number): void {
-    const div = document.createElement('div');
-    div.className = 'hypernovum-tooltip';
+  private showTooltip(
+    project: ProjectData,
+    position: THREE.Vector3,
+    height: number,
+    variant: 'building' | 'foundation' = 'building',
+  ): void {
+    let html: string;
 
-    let html = `
-      <strong>${this.escapeHtml(project.title)}</strong>
-      <div class="tooltip-row"><span>Status:</span> <span class="status-${project.status}">${project.status}</span></div>
-      <div class="tooltip-row"><span>Priority:</span> ${project.priority}</div>
-      <div class="tooltip-row"><span>Category:</span> ${project.category}</div>
-      <div class="tooltip-row"><span>Health:</span> ${project.health}%</div>
-      <div class="tooltip-row"><span>Files:</span> ${project.noteCount}</div>
-    `;
-
-    if (project.gitActivity) {
-      const lastCommit = project.gitActivity.lastCommitDate
-        ? this.formatRelativeTime(project.gitActivity.lastCommitDate)
-        : 'none';
-      html += `
-        <div class="tooltip-enriched-section">
-          <div class="tooltip-row tooltip-enriched"><span>Git:</span> ${lastCommit}</div>
-          <div class="tooltip-row tooltip-enriched"><span>Branch:</span> ${this.escapeHtml(project.gitActivity.activeBranch || 'unknown')}</div>
-          <div class="tooltip-row tooltip-enriched"><span>30d commits:</span> ${project.gitActivity.commitsLast30d}</div>
+    if (variant === 'foundation') {
+      // Foundation plinth = the tech-stack layer. Compact panel.
+      const chips = project.stack && project.stack.length > 0
+        ? project.stack.map(tech => `<span class="tooltip-stack-item">${this.escapeHtml(tech)}</span>`).join('')
+        : '<span class="tooltip-stack-none">No stack declared</span>';
+      html = `
+        <strong>${this.escapeHtml(project.title)}</strong>
+        <div class="tooltip-stack-section tooltip-stack-solo">
+          <div class="tooltip-stack-header">FOUNDATION · TECH STACK</div>
+          <div class="tooltip-stack-list">${chips}</div>
         </div>
+        <div class="tooltip-row tooltip-enriched"><span>Files:</span> ${project.noteCount}</div>
       `;
-    }
-
-    if (project.hasMemoryContext) {
-      html += `
-        <div class="tooltip-row tooltip-enriched"><span>Memory:</span> <span class="tooltip-memory">Context ready</span></div>
+    } else {
+      // Building = project vitals (stack lives on the foundation panel)
+      html = `
+        <strong>${this.escapeHtml(project.title)}</strong>
+        <div class="tooltip-row"><span>Status:</span> <span class="status-${project.status}">${project.status}</span></div>
+        <div class="tooltip-row"><span>Priority:</span> ${project.priority}</div>
+        <div class="tooltip-row"><span>Category:</span> ${project.category}</div>
+        <div class="tooltip-row"><span>Health:</span> ${project.health}%</div>
+        <div class="tooltip-row"><span>Files:</span> ${project.noteCount}</div>
       `;
-    }
 
-    if (project.questions && project.questions.length > 0) {
-      html += `
-        <div class="tooltip-row tooltip-enriched"><span>Quests:</span> <span class="tooltip-quest">${project.questions.length} open</span></div>
-      `;
-    }
-
-    if (project.stack && project.stack.length > 0) {
-      html += `
-        <div class="tooltip-stack-section">
-          <div class="tooltip-stack-header">TECH STACK</div>
-          <div class="tooltip-stack-list">
-            ${project.stack.map(tech => `<span class="tooltip-stack-item">${this.escapeHtml(tech)}</span>`).join('')}
+      if (project.gitActivity) {
+        const lastCommit = project.gitActivity.lastCommitDate
+          ? this.formatRelativeTime(project.gitActivity.lastCommitDate)
+          : 'none';
+        html += `
+          <div class="tooltip-enriched-section">
+            <div class="tooltip-row tooltip-enriched"><span>Git:</span> ${lastCommit}</div>
+            <div class="tooltip-row tooltip-enriched"><span>Branch:</span> ${this.escapeHtml(project.gitActivity.activeBranch || 'unknown')}</div>
+            <div class="tooltip-row tooltip-enriched"><span>30d commits:</span> ${project.gitActivity.commitsLast30d}</div>
           </div>
-        </div>
-      `;
-    }
+        `;
+      }
 
-    div.innerHTML = html;
+      if (project.hasMemoryContext) {
+        html += `
+          <div class="tooltip-row tooltip-enriched"><span>Memory:</span> <span class="tooltip-memory">Context ready</span></div>
+        `;
+      }
+
+      if (project.questions && project.questions.length > 0) {
+        html += `
+          <div class="tooltip-row tooltip-enriched"><span>Quests:</span> <span class="tooltip-quest">${project.questions.length} open</span></div>
+        `;
+      }
+    }
 
     // Determine which side of the screen has more space for the tooltip
     const buildingCentroid = new THREE.Vector3(position.x, height / 2, position.z);
@@ -1808,25 +1817,41 @@ export class SceneManager {
     // screenPos.x: -1 (left edge) to +1 (right edge)
     const buildingOnLeft = screenPos.x < 0;
 
-    // Offset tooltip to the side with more space (in world-space X)
-    const offsetX = buildingOnLeft ? 8 : -8;
-    const tooltipY = height + 2;
-    const tooltipX = position.x + offsetX;
+    // Anchor sits just outside the building edge; the PANEL extends away from
+    // the building via CSS (absolute child of a 0×0 anchor), so it can never
+    // cover the building regardless of zoom level or panel size.
+    const halfW = (project.dimensions?.width ?? 3) / 2;
+    const sideDir = buildingOnLeft ? 1 : -1; // direction from building toward panel
+    const tooltipX = position.x + sideDir * (halfW + 5);
+    const tooltipY = height + 3;
     const tooltipZ = position.z;
 
-    this.tooltip = new CSS2DObject(div);
+    const anchor = document.createElement('div');
+    anchor.className = 'hypernovum-tooltip-anchor';
+    const div = document.createElement('div');
+    div.className = 'hypernovum-tooltip';
+    div.innerHTML = html;
+    if (buildingOnLeft) {
+      div.style.left = '10px';
+    } else {
+      div.style.right = '10px';
+    }
+    anchor.appendChild(div);
+
+    this.tooltip = new CSS2DObject(anchor);
     this.tooltip.position.set(tooltipX, tooltipY, tooltipZ);
     this.scene.add(this.tooltip);
 
-    // Leader line: horizontal stub from tooltip, then diagonal to building centroid
+    // Leader line: straight horizontal run out from the panel edge, then
+    // angled down to the building centroid.
     const leaderGroup = new THREE.Group();
-    const stubEnd = tooltipX + (buildingOnLeft ? -2 : 2); // horizontal stub toward the building
-    const targetY = height * 0.5;  // aim at building centroid height
+    const elbowX = position.x + sideDir * (halfW + 1.0); // end of the straight run, just off the roof edge
+    const targetY = variant === 'foundation' ? 0.4 : height * 0.55;
 
     const leaderPoints = [
-      new THREE.Vector3(tooltipX, tooltipY - 0.5, tooltipZ),          // start near tooltip
-      new THREE.Vector3(stubEnd, tooltipY - 0.5, tooltipZ),           // end of horizontal stub
-      new THREE.Vector3(position.x, targetY, position.z),             // building centroid
+      new THREE.Vector3(tooltipX, tooltipY, tooltipZ),                // panel edge (anchor)
+      new THREE.Vector3(elbowX, tooltipY, tooltipZ),                  // straight-out portion
+      new THREE.Vector3(position.x, targetY, position.z),             // angle down to centroid
     ];
     const leaderGeo = new THREE.BufferGeometry().setFromPoints(leaderPoints);
     const leaderMat = new THREE.LineBasicMaterial({

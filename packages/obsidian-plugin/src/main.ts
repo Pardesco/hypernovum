@@ -103,9 +103,15 @@ export default class HypernovumPlugin extends Plugin {
 
   /** Flip vault mode and reload any open city view so it takes effect */
   async toggleVaultMode(): Promise<void> {
-    this.settings.vaultMode = !this.settings.vaultMode;
+    await this.setVaultMode(!this.settings.vaultMode);
+  }
+
+  /** Set vault mode and reload open city views — the mode is applied at view open */
+  async setVaultMode(value: boolean): Promise<void> {
+    if (this.settings.vaultMode === value) return;
+    this.settings.vaultMode = value;
     await this.saveSettings();
-    new Notice(`Hypernovum vault mode ${this.settings.vaultMode ? 'ON' : 'OFF'}`);
+    new Notice(`Hypernovum vault mode ${value ? 'ON' : 'OFF'}`);
 
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     if (leaves.length > 0) {
