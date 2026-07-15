@@ -103,23 +103,27 @@ ${skillsRoster}
 
 When Hypernovum launches an agent for a project it writes \`.hypernovum/SETUP.md\` (gitignored) into the project directory with fresh metadata and Git signals — read it first if present. If a project directory contains \`.hypernovum/MEMORY_CONTEXT.md\`, treat it as persistent memory: read it before starting and consider updating it when you finish significant work.
 
-### Make your activity visible (optional)
+### Make your activity visible (Heartbeat v2)
 
-While working on a project, you can light up its building in the city by writing \`.hypernovum-status.json\` to the vault root:
+While working, emit a v2 heartbeat so your session appears as a named, stateful orb. Each session owns its own snapshot file, so concurrent agents never clobber each other:
 
-\`\`\`json
-{ "active": true, "project": "My Project", "action": "editing", "lastPing": 1700000000000 }
+\`\`\`bash
+node "<vault-root>/scripts/heartbeat.js" \\
+  --vault="<vault-root>" --id="$CLAUDE_SESSION_ID" \\
+  --name="Claude Code" --agent-type=claude \\
+  --project="My Project" --state=editing --tool=Edit --file=src/x.ts
+
+# when done:
+node "<vault-root>/scripts/heartbeat.js" --vault="<vault-root>" --id="$CLAUDE_SESSION_ID" --stop
 \`\`\`
 
-If several agents run at once, use the fleet format instead — each agent read-modify-writes only its own entry (matched by \`id\`), and every active agent appears as its own orbiting light in the city:
+- Pass \`--id "$CLAUDE_SESSION_ID"\` so every ping updates the same orb.
+- \`--state\`: starting | planning | reading | editing | running | testing | reviewing | waiting | blocked | complete | failed (inferred from \`--tool\`/\`--action\` if omitted).
+- \`--file\` (project-relative) enables same-file conflict detection between agents.
+- \`--project\` should match the project note's title.
+- Snapshots land in \`.hypernovum/agents/<sessionId>.json\` (auto-gitignored); the plugin treats pings older than 10s as idle, then stale.
 
-\`\`\`json
-{ "agents": [
-  { "id": "claude-alpha", "name": "Claude", "project": "My Project", "action": "editing", "active": true, "lastPing": 1700000000000 }
-] }
-\`\`\`
-
-Update \`lastPing\` (epoch ms) every few seconds while active; the plugin treats pings older than 10 seconds as idle. Set \`"active": false\` (or stop updating) when done. \`project\` must match the project note's title.
+A legacy single-file \`.hypernovum-status.json\` is still read for one release (renders as an anonymous agent), but v2 gives you identity, state, and conflict detection. When Hypernovum launches an agent it writes the full per-project invocation into \`.hypernovum/SETUP.md\`.
 ${END_MARKER}`;
 }
 

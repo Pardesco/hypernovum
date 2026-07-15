@@ -20,7 +20,7 @@ Each project note becomes a building. Status maps to color, priority to height, 
 - **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md — resolving a quest (move it to `answered:`) fires an emerald shockwave at the building
 - **Abilities roster**: agent skills (`SKILL.md` files in vault or `~/.claude/skills/`) listed in the agents panel — click to copy an invocation
 - **Neural Links**: toggle vault backlinks between projects as pulsing violet knowledge arcs — your knowledge graph as city infrastructure
-- **Agent fleet presence**: multiple agents in the heartbeat file each get their own colored orb orbiting the building they're working on
+- **Agent fleet presence**: every v2 heartbeat session gets its own state-colored orb with an identity tooltip (name/state/action/file); two agents touching the same file surface a deterministic conflict ring and inspector row
 - **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
 
 ### Interactions
@@ -43,7 +43,7 @@ Each project note becomes a building. Status maps to color, priority to height, 
 - **City states**: IDLE (cyan) / STREAMING (cyan fast) / BULK_UPDATE (gold)
 
 ### Claude Code Integration
-- **Activity Monitor** polls `.hypernovum-status.json` for real-time Claude Code status
+- **Activity Monitor** polls `.hypernovum/agents/` (v2 per-session snapshots) plus the legacy `.hypernovum-status.json` for real-time agent status
 - **Persistent streaming artery** while Claude is actively working on a project
 - **Activity indicator overlay** shows current project and action
 - **Terminal Launcher** for launching Claude Code, GPT Codex, Antigravity CLI, or a custom agent command
@@ -97,17 +97,31 @@ Hypernovum has **no built-in AI**. External AI tools (Claude Code, etc.) read `S
 
 **Prepare vault for AI agents** (command palette, settings, or the agents panel) writes an `AGENTS.md` at the vault root containing the frontmatter schema, a live inventory of your projects, and instructions for making agent activity visible in the city — so any CLI agent launched in the vault immediately understands your second brain. Safe to re-run: only the marked Hypernovum section is regenerated; the rest of an existing `AGENTS.md` is preserved.
 
-The `scripts/heartbeat.js` script can be wired into Claude Code hooks to enable real-time activity visualization:
+The `scripts/heartbeat.js` script wires into Claude Code hooks to render each agent
+session as a named, stateful orb. **Heartbeat v2** gives every session its own
+snapshot file (`.hypernovum/agents/<sessionId>.json`), so any number of agents run
+concurrently without clobbering each other:
 
 ```bash
-# macOS / Linux
-node scripts/heartbeat.js --vault="/Users/you/Documents/MyVault" --project="my-project" --action="editing"
+# per ping (pass --id so every ping updates the same orb)
+node scripts/heartbeat.js --vault="/path/to/MyVault" --id="$CLAUDE_SESSION_ID" \
+  --name="Claude Code" --agent-type=claude --project="my-project" \
+  --state=editing --tool=Edit --file=src/x.ts
 
-# Windows (PowerShell)
-node scripts/heartbeat.js --vault="C:\Users\you\Documents\MyVault" --project="my-project" --action="editing"
+# on finish
+node scripts/heartbeat.js --vault="/path/to/MyVault" --id="$CLAUDE_SESSION_ID" --stop
 ```
 
-The heartbeat file (`.hypernovum-status.json`) is written to the vault root, so the `--vault` flag must point to your actual vault folder regardless of platform.
+The orb is colored by `--state` (working / waiting / blocked / complete / stale),
+carries an identity tooltip, and — when two sessions send overlapping `--file`
+values on one project — surfaces a deterministic conflict in the city. The
+`--vault` flag must point to your actual vault folder regardless of platform. See
+the `AGENTS.md` / per-project `.hypernovum/SETUP.md` that Hypernovum generates for
+ready-to-paste hook JSON.
+
+> **Legacy:** the older single-file `.hypernovum-status.json` is still read for one
+> release, so existing hooks keep working (as an anonymous agent). v2 adds
+> identity, lifecycle state, and conflict detection.
 
 ## Development
 
