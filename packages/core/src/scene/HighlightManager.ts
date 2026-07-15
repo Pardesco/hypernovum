@@ -156,6 +156,9 @@ export class HighlightManager {
       mat.opacity = vs.opacity;
     }
     entry.building.scale.setScalar(vs.scale);
+    // Edge glow is a sibling scene object sharing the mesh origin — scale it
+    // in lockstep or the selected building pokes through its own outline
+    entry.edgeGlow.scale.setScalar(vs.scale);
 
     // --- Edge glow ---
     const eg = entry.edgeGlow.material as THREE.LineBasicMaterial;
