@@ -2,7 +2,7 @@ import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Plat
 import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
-import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml } from '@hypernovum/core';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml, createInteractionStore } from '@hypernovum/core';
 import type { ProjectData, BlockPosition, RaycastHit, LinkEdge } from '@hypernovum/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
@@ -100,7 +100,15 @@ export class HypernovumView extends ItemView {
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
   private filteredProjects: ProjectData[] = [];
-  private selectedProject: ProjectData | null = null;
+  /** Single source of truth for selection/hover/move-mode (shared with SceneManager) */
+  private interactionStore = createInteractionStore();
+
+  /** Selected project resolved from the store — paths survive rebuilds, objects don't */
+  private get selectedProject(): ProjectData | null {
+    const path = this.interactionStore.getState().selectedPath;
+    if (!path) return null;
+    return this.allProjects.find((p) => p.path === path) ?? null;
+  }
   private searchQuery = '';
   private statusFilter = 'all';
   private priorityFilter = 'all';
@@ -158,6 +166,7 @@ export class HypernovumView extends ItemView {
       savedPositions: this.settings.blockPositions,
       onSaveLayout: (positions) => this.saveLayout(positions),
       settings: this.settings,
+      interactionStore: this.interactionStore,
     });
 
     // Add legend overlay
@@ -397,6 +406,12 @@ category: default
       if (this.showLinks) {
         this.sceneManager.showLinkArcs(this.computeLinkEdges());
       }
+    }
+
+    // Selection must survive rebuilds only if the project is still visible
+    const selectedPath = this.interactionStore.getState().selectedPath;
+    if (selectedPath && !this.filteredProjects.some((p) => p.path === selectedPath)) {
+      this.interactionStore.getState().clearSelection();
     }
 
     this.updateSummary();
@@ -1094,12 +1109,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   }
 
   private selectProject(project: ProjectData): void {
-    this.selectedProject = project;
-
-    if (project.position && this.sceneManager) {
-      this.sceneManager.setFocusedProject(project);
-    }
-
+    this.interactionStore.getState().select(project.path);
     this.updateInspector();
   }
 
@@ -1160,7 +1170,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     `;
 
     this.inspectorPanel.querySelector('.inspector-close')?.addEventListener('click', () => {
-      this.selectedProject = null;
+      this.interactionStore.getState().clearSelection();
       this.updateInspector();
     });
 

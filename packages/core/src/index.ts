@@ -37,6 +37,9 @@ export { DecayEffect } from './effects/DecayEffect';
 export { GlowManager } from './effects/GlowManager';
 
 // Store
+export { createInteractionStore } from './stores/interactionStore';
+export type { InteractionState, InteractionStore, TraceImpactState } from './stores/interactionStore';
+/** @deprecated see stores/projectStore.ts */
 export { createProjectStore } from './stores/projectStore';
 export type { ProjectState } from './stores/projectStore';
 

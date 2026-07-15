@@ -14,11 +14,14 @@ import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
 import { debugLog } from '../utils/log';
 import { escapeHtml } from '../utils/html';
+import type { InteractionStore } from '../stores/interactionStore';
 
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
   onSaveLayout?: (positions: BlockPosition[]) => void;
   settings?: HypernovumSettings;
+  /** Shared interaction state (selection/hover/move mode). Optional for API compat. */
+  interactionStore?: InteractionStore;
 }
 
 interface LabelInfo {
@@ -54,7 +57,7 @@ export class SceneManager {
   private container: HTMLElement;
   private animationId: number | null = null;
   private resizeObserver: ResizeObserver;
-  private focusedProject: ProjectData | null = null;
+  private store: InteractionStore | null = null;
   private hoveredMesh: THREE.Mesh | null = null;
   private tooltip: CSS2DObject | null = null;
   private tooltipLeader: THREE.Group | null = null;
@@ -139,6 +142,7 @@ export class SceneManager {
       }
     }
     this.onSaveLayout = options?.onSaveLayout;
+    this.store = options?.interactionStore ?? null;
 
     // Load visual effect settings
     if (options?.settings) {
@@ -1373,6 +1377,12 @@ export class SceneManager {
     if (hoveredProject && tooltipPos) {
       this.showTooltip(hoveredProject, tooltipPos, tooltipHeight);
     }
+
+    // Mirror hover into the shared store (only on change)
+    const hoveredPath = hoveredProject?.path ?? null;
+    if (this.store && this.store.getState().hoveredPath !== hoveredPath) {
+      this.store.getState().hover(hoveredPath);
+    }
   }
 
   private onMouseDown(event: MouseEvent): void {
@@ -2188,7 +2198,7 @@ export class SceneManager {
 
   resetCamera(): void {
     this.fitCameraToCity(this.buildings.map(b => b.userData.project).filter(Boolean));
-    this.focusedProject = null;
+    this.store?.getState().select(null);
   }
 
   /**
@@ -2213,8 +2223,16 @@ export class SceneManager {
     this.controls.update();
   }
 
-  getFocusedProject(): ProjectData | null { return this.focusedProject; }
-  setFocusedProject(project: ProjectData | null): void { this.focusedProject = project; }
+  /** @deprecated Read selection from the shared interaction store instead. */
+  getFocusedProject(): ProjectData | null {
+    const path = this.store?.getState().selectedPath;
+    if (!path) return null;
+    return (this.buildingPathMap.get(path)?.userData.project as ProjectData | undefined) ?? null;
+  }
+  /** @deprecated Write selection through the shared interaction store instead. */
+  setFocusedProject(project: ProjectData | null): void {
+    this.store?.getState().select(project?.path ?? null);
+  }
 
   /** Smoothly animate camera back to default overhead position */
   animateCameraToDefault(duration = 1000): void {

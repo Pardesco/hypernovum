@@ -1,3 +1,8 @@
+/**
+ * @deprecated Never adopted by the plugin. Interaction state now lives in
+ * `interactionStore.ts`; project/district data stays in HypernovumView.
+ * Scheduled for removal in the release after 0.4 (see docs/DEAD-CODE.md).
+ */
 import { createStore } from 'zustand/vanilla';
 import type { ProjectData, District } from '../types';
 
