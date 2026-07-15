@@ -14,6 +14,8 @@ export { resolveVisualState } from './scene/visualState';
 export type { VisualState, ResolveInput, LabelTier } from './scene/visualState';
 export { loftTower, loftVertexCount } from './renderers/TowerLoft';
 export type { TowerLoftParams, TowerProfile } from './renderers/TowerLoft';
+export { presetForProject, isParametricCategory } from './renderers/TowerPresets';
+export type { TowerBuildInput, TowerBuildResult } from './renderers/TowerPresets';
 export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbVisual';
 export type { OrbVisual } from './scene/agentOrbVisual';
 export type { AgentOrbInput } from './scene/SceneManager';
