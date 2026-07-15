@@ -8,6 +8,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, LinkEdge } from '../types';
 import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
+import { labelVisible, type LabelTier } from './visualState';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
@@ -96,6 +97,8 @@ export class SceneManager {
   private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
   private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
   private linkArcs: THREE.Mesh[] = []; // backlink knowledge arcs between buildings
+  private linkNeighbors = new Map<string, Set<string>>(); // INT-008: path → backlink neighbors
+  private hoveredLinkPath: string | null = null; // building whose arcs are boosted
   private questBursts: { mesh: THREE.Mesh; start: number }[] = []; // quest-resolved shockwaves
   private agentOrbs = new Map<string, AgentOrbEntry>(); // fleet presence
   private conflictRings = new Map<string, { mesh: THREE.Mesh; severity: 'high' | 'medium' }>(); // AGT-008
@@ -135,6 +138,8 @@ export class SceneManager {
   // Shader system
   private useShaders = false;
   private useBloom = false;
+  private showLabels = true;          // INT-006 master label toggle
+  private lastLabelTick = 0;          // throttle for the 4Hz label-visibility pass
   private useAtmosphere = false;
   private bloomIntensity = 0.8;
   private buildingShader: BuildingShader;
@@ -181,6 +186,7 @@ export class SceneManager {
       this.useBloom = options.settings.enableBloom;
       this.useAtmosphere = options.settings.enableAtmosphere;
       this.bloomIntensity = options.settings.bloomIntensity;
+      this.showLabels = options.settings.showLabels;
     }
 
     this.initScene();
@@ -1012,6 +1018,12 @@ export class SceneManager {
   showLinkArcs(edges: LinkEdge[]): void {
     this.clearLinkArcs();
 
+    const addNeighbor = (a: string, b: string) => {
+      let set = this.linkNeighbors.get(a);
+      if (!set) { set = new Set(); this.linkNeighbors.set(a, set); }
+      set.add(b);
+    };
+
     for (const edge of edges) {
       const a = this.buildingPathMap.get(edge.from);
       const b = this.buildingPathMap.get(edge.to);
@@ -1041,11 +1053,15 @@ export class SceneManager {
       const arc = new THREE.Mesh(tube, mat);
       arc.userData = {
         isLinkArc: true,
+        from: edge.from,
+        to: edge.to,
         baseOpacity: 0.2 + Math.min(edge.count, 6) * 0.04,
         pulsePhase: (start.x + end.z) % (Math.PI * 2),
       };
       this.scene.add(arc);
       this.linkArcs.push(arc);
+      addNeighbor(edge.from, edge.to);
+      addNeighbor(edge.to, edge.from);
     }
   }
 
@@ -1056,6 +1072,24 @@ export class SceneManager {
       this.scene.remove(arc);
     }
     this.linkArcs = [];
+    this.linkNeighbors.clear();
+    // A hover neighborhood referencing arcs that no longer exist must clear.
+    if (this.hoveredLinkPath !== null) {
+      this.hoveredLinkPath = null;
+      this.highlight?.setHoverNeighbors(new Set());
+    }
+  }
+
+  /**
+   * Hover neighborhood (INT-008): mark the hovered building's backlink
+   * neighbors as connected (brighten + always-label) and boost their arcs.
+   * Cheap — only the changed neighbor set is re-resolved.
+   */
+  private updateHoverNeighborhood(path: string | null): void {
+    if (path === this.hoveredLinkPath) return;
+    this.hoveredLinkPath = path;
+    const neighbors = path ? this.linkNeighbors.get(path) ?? new Set<string>() : new Set<string>();
+    this.highlight.setHoverNeighbors(neighbors);
   }
 
   /**
@@ -1318,6 +1352,24 @@ export class SceneManager {
     }
   }
 
+  /**
+   * Label visibility policy (INT-006): hide distant 'normal' labels, always
+   * show selected/hovered/connected/warning labels, and honor the showLabels
+   * master toggle. Runs on a 4Hz tick (cheap ~N distance ops), no DOM churn
+   * beyond CSS2DRenderer's own visible→display handling.
+   */
+  private updateLabelVisibility(): void {
+    const camPos = this.camera.position;
+    // Threshold scales with city radius so labels cull relative to city size.
+    const threshold = Math.max(this.cityBounds.radius * 2.2, 60);
+    for (const entry of this.parts.values()) {
+      if (!entry.label) continue;
+      const tier: LabelTier = entry.state?.labelTier ?? 'normal';
+      const dist = camPos.distanceTo(entry.label.position);
+      entry.label.visible = labelVisible(tier, this.showLabels, dist, threshold);
+    }
+  }
+
   private getStatusColor(status: string): THREE.Color {
     // Unified palette (types.STATUS_COLORS) — shared with the shader path
     return new THREE.Color(statusColor(status));
@@ -1481,6 +1533,7 @@ export class SceneManager {
             if (st.hoveredAgentId !== agentId) st.hoverAgent(agentId);
             if (st.hoveredPath !== null) st.hover(null);
           }
+          this.updateHoverNeighborhood(null); // orb hover suppresses building neighborhood
           return;
         }
       }
@@ -1524,6 +1577,7 @@ export class SceneManager {
     if (this.store && this.store.getState().hoveredPath !== hoveredPath) {
       this.store.getState().hover(hoveredPath);
     }
+    this.updateHoverNeighborhood(hoveredPath);
   }
 
   private onMouseDown(event: MouseEvent): void {
@@ -2223,11 +2277,21 @@ export class SceneManager {
       rm.opacity = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(elapsed * speed));
     }
 
-    // Knowledge arcs breathe softly
+    // Label visibility policy (INT-006) — 4Hz throttled distance culling.
+    if (elapsed - this.lastLabelTick >= 0.25) {
+      this.lastLabelTick = elapsed;
+      this.updateLabelVisibility();
+    }
+
+    // Knowledge arcs breathe softly; arcs touching the hovered building
+    // brighten (INT-008 hover neighborhood).
     for (const arc of this.linkArcs) {
       const base = arc.userData.baseOpacity as number;
+      const touching = this.hoveredLinkPath !== null &&
+        (arc.userData.from === this.hoveredLinkPath || arc.userData.to === this.hoveredLinkPath);
+      const breathe = 0.75 + 0.25 * Math.sin(elapsed * 1.5 + (arc.userData.pulsePhase as number));
       (arc.material as THREE.MeshBasicMaterial).opacity =
-        base * (0.75 + 0.25 * Math.sin(elapsed * 1.5 + (arc.userData.pulsePhase as number)));
+        Math.min(base * breathe * (touching ? 3 : 1), 1);
     }
 
     // Quest-resolved shockwaves: expand and fade, then self-dispose

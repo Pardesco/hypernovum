@@ -38,6 +38,7 @@ export class HighlightManager {
   private weather = new Map<string, WeatherData>();
   private lensColors: Map<string, number> | null = null;
   private connectedPaths = new Set<string>();
+  private hoverNeighbors = new Set<string>();
   private conflictLevels = new Map<string, 'high' | 'medium'>();
   private bloom: boolean;
   /** Dim-unrelated focus pass while a selection or trace overlay is active */
@@ -102,6 +103,19 @@ export class HighlightManager {
     this.refreshAll();
   }
 
+  /**
+   * Hover neighborhood (INT-008): backlink neighbors of the hovered building
+   * are treated as connected (brighten + label). Refreshes only the buildings
+   * whose neighbor membership changed, so hover feedback stays allocation-light.
+   */
+  setHoverNeighbors(paths: Set<string>): void {
+    const changed = new Set<string>();
+    for (const p of this.hoverNeighbors) if (!paths.has(p)) changed.add(p);
+    for (const p of paths) if (!this.hoverNeighbors.has(p)) changed.add(p);
+    this.hoverNeighbors = paths;
+    for (const p of changed) this.refresh(p);
+  }
+
   refresh(path: string | null | undefined): void {
     if (!path) return;
     const entry = this.parts.get(path);
@@ -120,7 +134,7 @@ export class HighlightManager {
     const selected = s?.selectedPath === entry.path;
     const hovered = s?.hoveredPath === entry.path;
     const moveMode = s?.moveModePath === entry.path;
-    const connected = this.connectedPaths.has(entry.path);
+    const connected = this.connectedPaths.has(entry.path) || this.hoverNeighbors.has(entry.path);
     const focusActive = this.focusDimEnabled && !!(s?.selectedPath || s?.traceImpact);
     const dimmed = focusActive && !selected && !hovered && !connected && !moveMode;
 
@@ -227,6 +241,7 @@ export class HighlightManager {
     this.unsubscribe = null;
     this.weather.clear();
     this.connectedPaths.clear();
+    this.hoverNeighbors.clear();
     this.conflictLevels.clear();
     this.lensColors = null;
   }

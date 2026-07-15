@@ -42,6 +42,25 @@ export interface ResolveInput {
 
 export type LabelTier = 'always' | 'normal' | 'hidden';
 
+/**
+ * Label visibility policy (INT-006). Pure so it can be table-tested.
+ *   - 'hidden' (dimmed buildings)     → never shown
+ *   - 'always' (selected/hovered/connected/warning) → always shown
+ *   - master toggle off               → only 'always' labels
+ *   - 'normal'                        → shown when within the distance threshold
+ */
+export function labelVisible(
+  tier: LabelTier,
+  showLabels: boolean,
+  distance: number,
+  threshold: number,
+): boolean {
+  if (tier === 'hidden') return false;
+  if (tier === 'always') return true;
+  if (!showLabels) return false;
+  return distance <= threshold;
+}
+
 export interface VisualState {
   baseColor: number;
   emissiveColor: number;

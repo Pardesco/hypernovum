@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveVisualState } from '../src/scene/visualState';
+import { resolveVisualState, labelVisible } from '../src/scene/visualState';
 import { STATUS_COLORS } from '../src/types';
 
 const weather = (over: Partial<{ hasMergeConflicts: boolean; churnScore: number; staleBranchCount: number }> = {}) => ({
@@ -137,5 +137,26 @@ describe('resolveVisualState precedence (§8)', () => {
     const s = resolveVisualState({ status: 'active', conflict: 'high', selected: true });
     expect(s.scale).toBe(1.04);
     expect(s.labelTier).toBe('always');
+  });
+});
+
+describe('labelVisible policy (INT-006)', () => {
+  it('always-tier labels ignore distance and the master toggle', () => {
+    expect(labelVisible('always', false, 9999, 50)).toBe(true);
+    expect(labelVisible('always', true, 9999, 50)).toBe(true);
+  });
+
+  it('hidden-tier (dimmed) labels are never shown', () => {
+    expect(labelVisible('hidden', true, 0, 50)).toBe(false);
+  });
+
+  it('master toggle off shows only always-tier labels', () => {
+    expect(labelVisible('normal', false, 10, 50)).toBe(false);
+  });
+
+  it('normal-tier labels cull by distance when the toggle is on', () => {
+    expect(labelVisible('normal', true, 40, 50)).toBe(true);
+    expect(labelVisible('normal', true, 60, 50)).toBe(false);
+    expect(labelVisible('normal', true, 50, 50)).toBe(true); // boundary inclusive
   });
 });
