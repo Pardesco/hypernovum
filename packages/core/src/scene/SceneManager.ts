@@ -12,6 +12,8 @@ import { labelVisible, type LabelTier } from './visualState';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
+import { loftTower } from '../renderers/TowerLoft';
+import { presetForProject } from '../renderers/TowerPresets';
 import { RooftopFactory } from '../renderers/RooftopFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
@@ -141,6 +143,7 @@ export class SceneManager {
   private showLabels = true;          // INT-006 master label toggle
   private lastLabelTick = 0;          // throttle for the 4Hz label-visibility pass
   private useShadows = true;          // PERF-004 — gate the shadow map
+  private buildingStyle: 'classic' | 'parametric' = 'classic'; // BLD-004
   private useAtmosphere = false;
   private bloomIntensity = 0.8;
   private buildingShader: BuildingShader;
@@ -189,6 +192,7 @@ export class SceneManager {
       this.bloomIntensity = options.settings.bloomIntensity;
       this.showLabels = options.settings.showLabels;
       this.useShadows = options.settings.enableShadows;
+      this.buildingStyle = options.settings.buildingStyle;
     }
 
     this.initScene();
@@ -840,14 +844,15 @@ export class SceneManager {
 
     // Building silhouette: category-specific parametric shape where one is
     // mapped, status/height-based BuildingFactory shape otherwise
-    const geometry = this.createBuildingGeometry(project);
+    const build = this.buildBuildingGeometry(project);
+    const geometry = build.geometry;
 
     // Try shader material if enabled, fallback to standard material
     let material: THREE.Material;
     let isShaderMaterial = false;
 
     if (this.useShaders && BuildingShader.isAvailable()) {
-      const shaderMat = this.buildingShader.createMaterial(project);
+      const shaderMat = this.buildingShader.createMaterial(project, { floors: build.floors, diagrid: build.diagrid });
       if (shaderMat) {
         material = shaderMat;
         isShaderMaterial = true;
@@ -974,6 +979,31 @@ export class SceneManager {
    * GeometryFactory shapes are CENTER-anchored while createBuilding expects
    * bottom-anchored geometry (base at y=0) — bottom-anchor via bounding box.
    */
+  /**
+   * Resolve a building's geometry + shader hints (BLD-004). In parametric mode,
+   * mapped categories loft a data-true tower (returning its floor count + diagrid
+   * flag for the shader); unmapped categories and any error fall back to the
+   * classic silhouette. Classic mode is byte-for-byte the prior behavior.
+   */
+  private buildBuildingGeometry(project: ProjectData): { geometry: THREE.BufferGeometry; floors: number; diagrid: boolean } {
+    if (this.buildingStyle === 'parametric' && project.dimensions) {
+      const { width, height, depth } = project.dimensions;
+      const preset = presetForProject({ path: project.path, category: project.category, width, height, depth });
+      if (preset) {
+        try {
+          const geometry = loftTower(preset.params);
+          // loftTower is bottom-anchored already; normalize defensively.
+          geometry.computeBoundingBox();
+          geometry.translate(0, -geometry.boundingBox!.min.y, 0);
+          return { geometry, floors: preset.floors, diagrid: preset.diagrid };
+        } catch {
+          // fall through to classic
+        }
+      }
+    }
+    return { geometry: this.createBuildingGeometry(project), floors: 0, diagrid: false };
+  }
+
   private createBuildingGeometry(project: ProjectData): THREE.BufferGeometry {
     const { width, height, depth } = project.dimensions!;
     let geometry: THREE.BufferGeometry;

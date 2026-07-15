@@ -7,6 +7,8 @@ uniform float uGlitch;        // 0.0 = normal, 1.0 = blocked glitch
 uniform float uScope;         // File count (fallback window density)
 uniform float uTotalTasks;    // Task count (drives window grid density)
 uniform float uDimFactor;     // 1.0 = normal, <1 = dimmed (focus mode unrelated)
+uniform float uFloors;        // 0 = legacy auto-density; >0 = real floor count (parametric)
+uniform float uDiagrid;       // 0 = off; >0 = draw a diagrid facade (preset D)
 
 varying vec2 vUv;
 varying vec3 vNormal;
@@ -26,9 +28,11 @@ void main() {
   // Task-based grid if tasks exist, else scope-based
   float taskSource = uTotalTasks > 0.0 ? uTotalTasks : uScope;
   float windowCols = 3.0 + floor(taskSource / 8.0);
-  float windowRows = 4.0 + floor(taskSource / 5.0);
   windowCols = clamp(windowCols, 3.0, 10.0);
-  windowRows = clamp(windowRows, 4.0, 20.0);
+  // Parametric mode: window rows = real floor count. Classic (uFloors 0): auto.
+  float windowRows = uFloors > 0.5
+    ? uFloors
+    : clamp(4.0 + floor(taskSource / 5.0), 4.0, 20.0);
 
   vec2 windowGrid = fract(vUv * vec2(windowCols, windowRows));
   // Soft-edged panes read as inset glass instead of painted-on decals
@@ -67,6 +71,16 @@ void main() {
   vec3 wallColor = mix(uColor * 0.6, decayColor, uDecay * 0.5);
   // Vertical gradient: grounded shadow at the base, lifted crown at the top
   wallColor *= 0.72 + 0.4 * vUv.y;
+
+  // === DIAGRID FACADE (preset D) ===
+  // Two crossing line families etched into the wall color.
+  if (uDiagrid > 0.5) {
+    float density = 9.0;
+    float d1 = abs(fract((vUv.x + vUv.y) * density) - 0.5);
+    float d2 = abs(fract((vUv.x - vUv.y) * density) - 0.5);
+    float lines = smoothstep(0.0, 0.07, d1) * smoothstep(0.0, 0.07, d2);
+    wallColor *= 0.55 + 0.45 * lines; // darken along the diagonal members
+  }
 
   // === COMBINE ===
   vec3 finalColor = mix(wallColor, windowColor, isWindow * lightOn);

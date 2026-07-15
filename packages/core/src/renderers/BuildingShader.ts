@@ -37,6 +37,8 @@ export class BuildingShader {
           uScope: { value: 10.0 },
           uTotalTasks: { value: 0.0 },
           uDimFactor: { value: 1.0 },
+          uFloors: { value: 0.0 },
+          uDiagrid: { value: 0.0 },
         },
         vertexShader,
         fragmentShader,
@@ -77,7 +79,7 @@ export class BuildingShader {
    * Create shader material for a project building.
    * Returns null if shader compilation previously failed.
    */
-  createMaterial(project: ProjectData): THREE.ShaderMaterial | null {
+  createMaterial(project: ProjectData, opts?: { floors?: number; diagrid?: boolean }): THREE.ShaderMaterial | null {
     if (BuildingShader.compilationFailed) {
       return null;
     }
@@ -94,6 +96,9 @@ export class BuildingShader {
           uScope: { value: project.scope || project.noteCount || 10 },
           uTotalTasks: { value: project.totalTasks ?? 0 },
           uDimFactor: { value: 1.0 },
+          // Parametric mode passes real floor count + optional diagrid facade.
+          uFloors: { value: opts?.floors ?? 0 },
+          uDiagrid: { value: opts?.diagrid ? 1.0 : 0.0 },
         },
         vertexShader,
         fragmentShader,

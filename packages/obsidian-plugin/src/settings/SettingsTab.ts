@@ -189,6 +189,20 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(containerEl).setName('Visual effects').setHeading();
 
     new Setting(containerEl)
+      .setName('Building style')
+      .setDesc('Classic silhouettes, or Parametric (beta) data-true towers whose window rows equal their floor count. Reload view after changing.')
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption('classic', 'Classic')
+          .addOption('parametric', 'Parametric (beta)')
+          .setValue(this.plugin.settings.buildingStyle)
+          .onChange(async (value) => {
+            this.plugin.settings.buildingStyle = value as 'classic' | 'parametric';
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
       .setName('Procedural shaders')
       .setDesc('Enable GPU shaders for procedural windows and glitch effects. Reload view after changing.')
       .addToggle((toggle) =>
