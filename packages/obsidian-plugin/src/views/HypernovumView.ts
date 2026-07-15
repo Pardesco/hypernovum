@@ -1394,8 +1394,12 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   /** Render one orbiting orb per active agent (fleet presence) */
   private onFleetUpdate(agents: AgentPresence[]): void {
     if (!this.sceneManager) return;
+    // The monitor now emits the full fleet (incl. stale/complete); render orbs
+    // only for fresh, active sessions here (registry-driven visuals land in AGT-003+).
+    const now = Date.now();
+    const fresh = agents.filter((a) => a.active && now - a.lastPing <= 10000);
     this.sceneManager.updateAgentPresence(
-      agents.map((a) => ({
+      fresh.map((a) => ({
         id: a.id,
         projectPath: a.project
           ? this.sceneManager?.findProjectByName(a.project)?.path ?? null

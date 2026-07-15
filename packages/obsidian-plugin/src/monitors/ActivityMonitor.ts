@@ -1,4 +1,12 @@
 import { App } from 'obsidian';
+import {
+  type AgentPresence,
+  mergeFleet,
+  parseSnapshotToPresence,
+  legacyToPresence,
+} from './fleetMerge';
+
+export type { AgentPresence } from './fleetMerge';
 
 /** Status file format written by heartbeat script */
 export interface ActivityStatus {
@@ -11,23 +19,19 @@ export interface ActivityStatus {
   stoppedAt?: number;
 }
 
-/** One agent's presence when the status file carries a fleet (agents array) */
-export interface AgentPresence {
-  id: string;
-  name?: string;
-  project: string | null;
-  action: string | null;
-  lastPing: number;
-  active: boolean;
-}
-
 export interface ActivityCallbacks {
   onActivityStart?: (status: ActivityStatus) => void;
   onActivityUpdate?: (status: ActivityStatus) => void;
   onActivityStop?: () => void;
   onProjectChange?: (newProject: string | null, oldProject: string | null) => void;
-  /** Called every poll with all fresh (active, recently pinged) agents */
+  /**
+   * Called every poll with the full merged fleet (v2 sessions + legacy),
+   * freshest-first, capped. Includes stale/complete sessions so the registry
+   * (AGT-003) can drive the §10 lifecycle; consumers filter as needed.
+   */
   onFleetUpdate?: (agents: AgentPresence[]) => void;
+  /** Called when unreadable snapshot files were skipped this poll (degraded data). */
+  onDegradedData?: (skippedCount: number) => void;
 }
 
 /**
@@ -43,6 +47,7 @@ export class ActivityMonitor {
   private lastStatus: ActivityStatus | null = null;
   private isActive = false;
   private statusFilePath = '.hypernovum-status.json';
+  private agentsDirPath = '.hypernovum/agents';
 
   constructor(
     app: App,
@@ -79,13 +84,23 @@ export class ActivityMonitor {
   /** Check current activity status */
   private async poll(): Promise<void> {
     try {
-      const raw = await this.readStatusFile();
       const now = Date.now();
 
-      // Fleet extraction: agents array (multi-agent) or legacy single object
-      const agents = this.extractAgents(raw);
+      // v2: per-session snapshots in .hypernovum/agents/*.json
+      const { presences: v2, skipped } = await this.readAgentSnapshots();
+
+      // Legacy: single .hypernovum-status.json (old hooks / third-party writers)
+      const legacyRaw = await this.readStatusFile();
+      const legacy = legacyRaw ? legacyToPresence(legacyRaw) : null;
+
+      const agents = mergeFleet(v2, legacy);
+      if (skipped > 0) this.callbacks.onDegradedData?.(skipped);
+
+      // Full fleet (incl. stale/complete) drives the registry (AGT-003).
+      this.callbacks.onFleetUpdate?.(agents);
+
+      // Legacy single-status callbacks + activity indicator use fresh only.
       const fresh = agents.filter((a) => a.active && now - a.lastPing <= this.idleTimeout);
-      this.callbacks.onFleetUpdate?.(fresh);
 
       if (fresh.length === 0) {
         if (this.isActive) {
@@ -136,26 +151,34 @@ export class ActivityMonitor {
     this.callbacks.onActivityStop?.();
   }
 
-  /** Normalize the status file into a list of agent presences */
-  private extractAgents(raw: any): AgentPresence[] {
-    if (!raw) return [];
-    if (Array.isArray(raw.agents)) {
-      return raw.agents.map((a: any, i: number) => ({
-        id: String(a.id ?? `agent-${i}`),
-        name: typeof a.name === 'string' ? a.name : undefined,
-        project: typeof a.project === 'string' ? a.project : null,
-        action: typeof a.action === 'string' ? a.action : null,
-        lastPing: Number(a.lastPing) || 0,
-        active: a.active !== false,
-      }));
+  /**
+   * List and parse .hypernovum/agents/*.json into presences. Unparseable
+   * files are skipped and counted (degraded-data signal). Directory absent →
+   * empty (legacy-only vault, behaves exactly as before).
+   */
+  private async readAgentSnapshots(): Promise<{ presences: AgentPresence[]; skipped: number }> {
+    const presences: AgentPresence[] = [];
+    let skipped = 0;
+    try {
+      const exists = await this.app.vault.adapter.exists(this.agentsDirPath);
+      if (!exists) return { presences, skipped };
+
+      const listing = await this.app.vault.adapter.list(this.agentsDirPath);
+      for (const filePath of listing.files) {
+        if (!filePath.endsWith('.json')) continue;
+        try {
+          const content = await this.app.vault.adapter.read(filePath);
+          const presence = parseSnapshotToPresence(JSON.parse(content));
+          if (presence) presences.push(presence);
+          else skipped++;
+        } catch {
+          skipped++; // torn write / bad JSON / vanished mid-read — skip
+        }
+      }
+    } catch {
+      // adapter.list failed — treat as no v2 data this poll
     }
-    return [{
-      id: 'default',
-      project: typeof raw.project === 'string' ? raw.project : null,
-      action: typeof raw.action === 'string' ? raw.action : null,
-      lastPing: Number(raw.lastPing) || 0,
-      active: raw.active !== false,
-    }];
+    return { presences, skipped };
   }
 
   /** Read and parse the status file (uses vault adapter to bypass file index) */
