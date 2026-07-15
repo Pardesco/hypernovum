@@ -9,8 +9,12 @@
     "build": "npm run build:core && npm run build:plugin",
     "build:core": "npm run build -w packages/core",
     "build:plugin": "npm run build -w packages/obsidian-plugin",
-    "dev": "npm run dev -w packages/obsidian-plugin"
+    "dev": "npm run dev -w packages/obsidian-plugin",
+    "test": "vitest run"
   },
   "author": "Randall Morgan",
-  "license": "AGPL-3.0-only"
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
 }
