@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Platform } from 'obsidian';
+import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Platform, debounce } from 'obsidian';
 import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
@@ -361,9 +361,27 @@ category: default
     }
   }
 
+  private static readonly PRIORITY_RANK: Record<string, number> = {
+    critical: 4, high: 3, medium: 2, low: 1,
+  };
+
   private async buildCity(): Promise<void> {
     // Parse vault metadata into project data
     this.allProjects = await this.parser.parseProjects(this.settings);
+
+    // Enforce maxBuildings so oversized vaults degrade predictably (PERF-003):
+    // keep the top-N by priority then recency, and tell the user what was cut.
+    const cap = this.settings.maxBuildings;
+    if (cap > 0 && this.allProjects.length > cap) {
+      const total = this.allProjects.length;
+      this.allProjects.sort((a, b) => {
+        const pr = (HypernovumView.PRIORITY_RANK[b.priority] ?? 0) - (HypernovumView.PRIORITY_RANK[a.priority] ?? 0);
+        if (pr !== 0) return pr;
+        return (b.lastModified ?? 0) - (a.lastModified ?? 0);
+      });
+      this.allProjects = this.allProjects.slice(0, cap);
+      new Notice(`Hypernovum: showing ${cap} of ${total} projects — raise "Max buildings" in settings`, 8000);
+    }
 
     // Cap simultaneous git scans (each spawns several `git` processes) so a
     // large vault doesn't fork hundreds at once.
@@ -1105,9 +1123,11 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.categorySelect = panel.querySelector('.category-select') as HTMLSelectElement;
     this.summaryEl = panel.querySelector('.command-panel-summary') as HTMLElement;
 
+    // Debounce so a rebuild fires once per typing pause, not per keystroke (PERF-001).
+    const debouncedSearch = debounce(() => this.applyFiltersAndRebuild(), 200, false);
     searchInput.addEventListener('input', () => {
       this.searchQuery = searchInput.value;
-      this.applyFiltersAndRebuild();
+      debouncedSearch();
     });
 
     layerSelect.addEventListener('change', () => {

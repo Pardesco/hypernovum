@@ -140,6 +140,7 @@ export class SceneManager {
   private useBloom = false;
   private showLabels = true;          // INT-006 master label toggle
   private lastLabelTick = 0;          // throttle for the 4Hz label-visibility pass
+  private useShadows = true;          // PERF-004 — gate the shadow map
   private useAtmosphere = false;
   private bloomIntensity = 0.8;
   private buildingShader: BuildingShader;
@@ -187,6 +188,7 @@ export class SceneManager {
       this.useAtmosphere = options.settings.enableAtmosphere;
       this.bloomIntensity = options.settings.bloomIntensity;
       this.showLabels = options.settings.showLabels;
+      this.useShadows = options.settings.enableShadows;
     }
 
     this.initScene();
@@ -247,7 +249,9 @@ export class SceneManager {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.renderer.shadowMap.enabled = true;
+    // Honor the enableShadows setting (PERF-004). With the shadow map off the
+    // per-mesh cast/receive flags are inert, so gating here is sufficient.
+    this.renderer.shadowMap.enabled = this.useShadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
