@@ -5,6 +5,8 @@ export const CORE_BUILD_VERSION = 'dev';
 // Types
 export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, LinkEdge, RecentCommit, GraphEdge, EdgeType } from './types';
 export { EdgeManager } from './scene/EdgeManager';
+export { collectImpact } from './graph/traverse';
+export type { TraceImpactResult, TraceNode, TraceOptions } from './graph/traverse';
 export { DEFAULT_SETTINGS, STATUS_COLORS, STATUS_COLOR_DEFAULT, statusColor } from './types';
 
 // Scene engine
