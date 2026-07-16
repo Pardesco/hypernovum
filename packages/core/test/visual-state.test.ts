@@ -138,6 +138,21 @@ describe('resolveVisualState precedence (§8)', () => {
     expect(s.scale).toBe(1.04);
     expect(s.labelTier).toBe('always');
   });
+
+  it('trace tints: upstream info-blue, downstream amber, both pierce dimming', () => {
+    const up = resolveVisualState({ status: 'active', dimmed: true, trace: 'upstream' });
+    expect(up.baseColor).toBe(0x4488ff);
+    expect(up.opacity).toBe(1);
+    const down = resolveVisualState({ status: 'active', dimmed: true, trace: 'downstream' });
+    expect(down.baseColor).toBe(0xffaa33);
+    expect(down.dimFactor).toBe(1);
+    expect(down.labelTier).toBe('always');
+  });
+
+  it('trace origin brightens without a color override', () => {
+    const s = resolveVisualState({ status: 'active', trace: 'origin' });
+    expect(s.emissiveBase).toBeGreaterThanOrEqual(0.6);
+  });
 });
 
 describe('labelVisible policy (INT-006)', () => {

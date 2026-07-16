@@ -3,7 +3,8 @@ import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml, createInteractionStore } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult } from '@hypernovum/core';
+import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
 import { SessionReader } from '../monitors/SessionReader';
@@ -159,6 +160,8 @@ export class HypernovumView extends ItemView {
   private depScan = new Map<string, DependencyScanResult>();
   private edgeChips: HTMLButtonElement[] = [];
   private sessionReader = new SessionReader();
+  /** Active trace-impact overlay result (IMP-002), null when not tracing. */
+  private traceResult: TraceImpactResult | null = null;
   private inspectorPanel: HTMLElement | null = null;
   private statusSelect: HTMLSelectElement | null = null;
   private prioritySelect: HTMLSelectElement | null = null;
@@ -1353,9 +1356,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.storeUnsubscribe?.();
     this.storeUnsubscribe = this.interactionStore.subscribe((state, prev) => {
       if (state.selectedPath !== prev.selectedPath) {
+        // A selection away from the trace origin exits trace mode (§ IMP-002).
+        if (this.traceResult && state.selectedPath !== this.traceResult.origin) this.exitTrace();
         this.updateConnectedPaths(state.selectedPath);
         this.updateInspector();
       }
+      // Esc / empty-space clear traceImpact in the store — mirror to the scene.
+      if (state.traceImpact !== prev.traceImpact && !state.traceImpact) this.exitTrace();
     });
   }
 
@@ -1595,6 +1602,52 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     return this.allProjects.find((p) => p.path === path)?.title ?? path;
   }
 
+  // --- Trace impact (IMP-002) ---
+
+  private enterTraceImpact(project: ProjectData): void {
+    const result = collectImpact(this.structuralEdges, project.path);
+    this.traceResult = result;
+    const up = new Set(result.upstream.map((n) => n.path));
+    const down = new Set(result.downstream.map((n) => n.path));
+    if (up.size === 0 && down.size === 0) {
+      new Notice('No known dependencies or dependents');
+      this.traceResult = null;
+      return;
+    }
+    this.interactionStore.getState().select(project.path);
+    this.interactionStore.getState().setTraceImpact({ originPath: project.path });
+    this.sceneManager?.setTraceImpact(project.path, up, down);
+    this.updateInspector();
+  }
+
+  private exitTrace(): void {
+    if (!this.traceResult) return;
+    this.traceResult = null;
+    this.sceneManager?.setTraceImpact(null, new Set(), new Set());
+    if (this.interactionStore.getState().traceImpact) this.interactionStore.getState().setTraceImpact(null);
+    this.updateInspector();
+  }
+
+  /** Trace-impact result list for the origin's inspector (grouped by direction). */
+  private renderTraceImpact(projectPath: string): string {
+    const r = this.traceResult;
+    if (!r || r.origin !== projectPath) return '';
+    const liveAgents = new Set(this.fleetSessions.filter((s) => s.projectPath).map((s) => s.projectPath!));
+    const row = (n: { path: string; depth: number }): string => {
+      const agentChip = liveAgents.has(n.path) ? '<span class="trace-agent">●</span>' : '';
+      return `<div class="dep-row" data-focus-path="${this.escapeHtml(n.path)}"><span class="trace-depth">${n.depth}</span>${this.escapeHtml(this.titleOf(n.path))}${agentChip}</div>`;
+    };
+    const group = (label: string, nodes: { path: string; depth: number }[]): string =>
+      nodes.length === 0 ? '' : `<div class="trace-group"><div class="trace-group-label">${label}</div>${nodes.map(row).join('')}</div>`;
+    const truncNote = r.truncated ? '<div class="inspector-empty-inline">Results truncated (depth/size cap)</div>' : '';
+    return `<div class="inspector-section trace-section">
+      <span class="section-label">Trace Impact <button class="trace-exit" title="Exit trace (Esc)">✕</button></span>
+      ${group('Upstream · dependencies', r.upstream)}
+      ${group('Downstream · dependents', r.downstream)}
+      ${truncNote}
+    </div>`;
+  }
+
   private formatDuration(ms: number): string {
     const min = Math.round(ms / 60000);
     if (min < 1) return '<1m';
@@ -1707,6 +1760,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <span class="section-label">Open Quests${project.answeredQuestions?.length ? ` · ${project.answeredQuestions.length} resolved` : ''}</span>
         ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
       </div>` : ''}
+      ${this.renderTraceImpact(project.path)}
       ${this.renderProjectWarnings(project.path)}
       ${this.renderDependencySections(project.path)}
       ${this.renderAgentsSection(project.path)}
@@ -1766,9 +1820,15 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     this.wireWarningActions(this.inspectorPanel);
 
-    // Dependency rows focus the referenced project (EDG-007).
+    // Dependency + trace rows focus the referenced project (EDG-007 / IMP-002).
     this.inspectorPanel.querySelectorAll<HTMLElement>('.dep-row').forEach((row) => {
       row.addEventListener('click', () => this.runWarningAction('focus', row.dataset.focusPath || null));
+    });
+
+    // Trace-impact exit button (IMP-002).
+    this.inspectorPanel.querySelector('.trace-exit')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.exitTrace();
     });
   }
 
@@ -2205,6 +2265,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         .setTitle('Add quest')
         .setIcon('diamond')
         .onClick(() => this.addQuestForProject(project));
+    });
+
+    menu.addItem((item) => {
+      item
+        .setTitle('Trace impact')
+        .setIcon('git-fork')
+        .onClick(() => this.enterTraceImpact(project));
     });
 
     menu.addSeparator();

@@ -42,6 +42,10 @@ export class HighlightManager {
   private connectedPaths = new Set<string>();
   private hoverNeighbors = new Set<string>();
   private conflictLevels = new Map<string, 'high' | 'medium'>();
+  // Trace-impact overlay (IMP-002)
+  private traceOrigin: string | null = null;
+  private traceUpstream = new Set<string>();
+  private traceDownstream = new Set<string>();
   private bloom: boolean;
   /** Dim-unrelated focus pass while a selection or trace overlay is active */
   focusDimEnabled = true;
@@ -114,6 +118,14 @@ export class HighlightManager {
     this.refreshAll();
   }
 
+  /** Trace-impact overlay sets (IMP-002). Null origin clears it. */
+  setTraceSets(origin: string | null, upstream: Set<string>, downstream: Set<string>): void {
+    this.traceOrigin = origin;
+    this.traceUpstream = upstream;
+    this.traceDownstream = downstream;
+    this.refreshAll();
+  }
+
   /**
    * Hover neighborhood (INT-008): backlink neighbors of the hovered building
    * are treated as connected (brighten + label). Refreshes only the buildings
@@ -157,7 +169,16 @@ export class HighlightManager {
       else attentionDim = true;
     }
 
-    const focusDim = focusActive && !selected && !hovered && !connected && !moveMode;
+    // Trace-impact role (IMP-002) — trace members are exempt from focus dimming.
+    let trace: 'origin' | 'upstream' | 'downstream' | null = null;
+    if (this.traceOrigin !== null) {
+      if (entry.path === this.traceOrigin) trace = 'origin';
+      else if (this.traceUpstream.has(entry.path)) trace = 'upstream';
+      else if (this.traceDownstream.has(entry.path)) trace = 'downstream';
+    }
+    const traceMember = trace !== null;
+
+    const focusDim = focusActive && !selected && !hovered && !connected && !moveMode && !traceMember;
     const dimmed = focusDim || (attentionDim && !selected && !hovered && !moveMode);
 
     const weather = this.weather.get(entry.path) ?? null;
@@ -165,6 +186,7 @@ export class HighlightManager {
       status: entry.project.status,
       lensColor,
       weather,
+      trace,
       decayFactor: weather
         ? HighlightManager.timeDecay(weather.lastCommitDate)
         : HighlightManager.timeDecay(entry.project.lastModified),
@@ -265,6 +287,9 @@ export class HighlightManager {
     this.connectedPaths.clear();
     this.hoverNeighbors.clear();
     this.conflictLevels.clear();
+    this.traceUpstream.clear();
+    this.traceDownstream.clear();
+    this.traceOrigin = null;
     this.lensColors = null;
     this.attentionColors = null;
   }

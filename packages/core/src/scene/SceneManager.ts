@@ -1080,6 +1080,16 @@ export class SceneManager {
   }
 
   /**
+   * Trace-impact overlay (IMP-002): tint the origin, its upstream dependencies
+   * (info-blue) and downstream dependents (amber), dim the rest, and boost the
+   * origin's edges. Pass null origin to clear.
+   */
+  setTraceImpact(origin: string | null, upstream: Set<string>, downstream: Set<string>): void {
+    this.highlight.setTraceSets(origin, upstream, downstream);
+    this.edges.highlightForPath(origin);
+  }
+
+  /**
    * Hover neighborhood (INT-008, EDG-008): mark the hovered building's edge
    * neighbors (across visible types) as connected (brighten + always-label)
    * and boost their arcs via EdgeManager.

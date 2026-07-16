@@ -38,6 +38,8 @@ export interface ResolveInput {
   bloom?: boolean;
   /** Agent conflict on this building (§8 row 4) — pierces dimming */
   conflict?: 'high' | 'medium' | null;
+  /** Trace-impact role (§8 row 6) — origin / upstream dep / downstream dependent */
+  trace?: 'origin' | 'upstream' | 'downstream' | null;
 }
 
 export type LabelTier = 'always' | 'normal' | 'hidden';
@@ -186,6 +188,20 @@ export function resolveVisualState(i: ResolveInput): VisualState {
     dimFactor = 1;
     emissiveBase = Math.max(emissiveBase, anim.base + 0.05);
     edgeGlowPulse = status === 'blocked';
+    labelTier = 'always';
+  }
+
+  // 6 — trace impact tint (info-blue upstream / amber downstream / bright origin)
+  if (i.trace) {
+    opacity = 1;
+    dimFactor = 1;
+    if (i.trace === 'upstream') {
+      baseColor = 0x4488ff; emissiveColor = 0x4488ff;
+    } else if (i.trace === 'downstream') {
+      baseColor = 0xffaa33; emissiveColor = 0xffaa33;
+    }
+    emissiveBase = Math.max(emissiveBase, i.trace === 'origin' ? 0.6 : 0.4);
+    edgeGlowOpacity = Math.max(edgeGlowOpacity, 0.7);
     labelTier = 'always';
   }
 

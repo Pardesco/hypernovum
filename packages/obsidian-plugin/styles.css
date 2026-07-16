@@ -1247,6 +1247,38 @@
 .dep-row:hover { background: rgba(35, 52, 74, 0.6); }
 .dep-row .dep-arrow { color: rgba(120, 200, 255, 0.7); flex-shrink: 0; }
 
+/* --- Trace impact (IMP-002) --- */
+.trace-section .section-label { display: flex; align-items: center; justify-content: space-between; }
+.trace-exit {
+  border: none;
+  background: transparent;
+  color: rgba(200, 215, 240, 0.6);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.trace-exit:hover { color: #fff; }
+.trace-group { margin-top: 6px; }
+.trace-group-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(150, 175, 210, 0.6);
+  margin: 4px 0 2px;
+}
+.trace-depth {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+  background: rgba(120, 160, 200, 0.2);
+  color: rgba(200, 220, 245, 0.8);
+  font-size: 9px;
+}
+.trace-agent { color: #22d3ee; margin-left: auto; text-shadow: 0 0 6px #22d3ee; }
+
 /* --- Recent activity feed (TRI-005) --- */
 .activity-row {
   display: flex;
