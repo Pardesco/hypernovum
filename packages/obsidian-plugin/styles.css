@@ -1229,6 +1229,24 @@
 }
 .warning-action:hover { background: rgba(255, 255, 255, 0.16); }
 
+/* --- Dependency rows (EDG-007) --- */
+.dep-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 160, 200, 0.2);
+  background: rgba(20, 32, 48, 0.4);
+  color: rgba(205, 220, 240, 0.85);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.dep-row:hover { background: rgba(35, 52, 74, 0.6); }
+.dep-row .dep-arrow { color: rgba(120, 200, 255, 0.7); flex-shrink: 0; }
+
 /* --- Recent activity feed (TRI-005) --- */
 .activity-row {
   display: flex;

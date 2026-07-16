@@ -1589,6 +1589,33 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     </div>`;
   }
 
+  private titleOf(path: string): string {
+    return this.allProjects.find((p) => p.path === path)?.title ?? path;
+  }
+
+  /** Depends on / Used by / Blocked by / Blocks sections for one project (EDG-007). */
+  private renderDependencySections(projectPath: string): string {
+    const deps: string[] = [], usedBy: string[] = [], blockedBy: string[] = [], blocks: string[] = [];
+    for (const e of this.structuralEdges) {
+      if (e.type === 'depends-on') {
+        if (e.from === projectPath) deps.push(e.to);
+        else if (e.to === projectPath) usedBy.push(e.from);
+      } else if (e.type === 'blocked-by') {
+        if (e.to === projectPath) blockedBy.push(e.from);   // blocker → blocked (this)
+        else if (e.from === projectPath) blocks.push(e.to);
+      }
+    }
+    const section = (label: string, paths: string[]): string => {
+      const uniq = [...new Set(paths)];
+      if (uniq.length === 0) return '';
+      return `<div class="inspector-section">
+        <span class="section-label">${label}</span>
+        ${uniq.map((p) => `<div class="dep-row" data-focus-path="${this.escapeHtml(p)}"><span class="dep-arrow">→</span>${this.escapeHtml(this.titleOf(p))}</div>`).join('')}
+      </div>`;
+    };
+    return section('Depends on', deps) + section('Used by', usedBy) + section('Blocked by', blockedBy) + section('Blocks', blocks);
+  }
+
   /** A project's full warning list (TRI-003), actionable, severity-ordered. */
   private renderProjectWarnings(projectPath: string): string {
     const relevant = this.warnings.filter((w) => w.projectPath === projectPath);
@@ -1643,6 +1670,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
       </div>` : ''}
       ${this.renderProjectWarnings(project.path)}
+      ${this.renderDependencySections(project.path)}
       ${this.renderAgentsSection(project.path)}
       <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
       <div class="inspector-actions">
@@ -1698,6 +1726,11 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
 
     this.wireWarningActions(this.inspectorPanel);
+
+    // Dependency rows focus the referenced project (EDG-007).
+    this.inspectorPanel.querySelectorAll<HTMLElement>('.dep-row').forEach((row) => {
+      row.addEventListener('click', () => this.runWarningAction('focus', row.dataset.focusPath || null));
+    });
   }
 
   /** Recent-activity feed (TRI-005): recent commits + just-completed sessions. */
