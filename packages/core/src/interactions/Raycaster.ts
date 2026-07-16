@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { ProjectData } from '../types';
+import { isSceneVisible } from './visibility';
 
 export interface RaycastHit {
   project: ProjectData;
@@ -101,7 +102,10 @@ export class BuildingRaycaster {
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.mouse, this.camera);
-    return this.raycaster.intersectObjects(this.scene.children, false);
+    // three's raycaster ignores .visible, so a filtered-out (hidden) building
+    // would still be clickable and would block clicks to visible ones behind it.
+    return this.raycaster.intersectObjects(this.scene.children, false)
+      .filter((h) => isSceneVisible(h.object));
   }
 
   private handleClick(event: MouseEvent, domElement: HTMLElement): void {

@@ -10,6 +10,7 @@ import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
 import { EdgeManager } from './EdgeManager';
 import { labelVisible, type LabelTier } from './visualState';
+import { isSceneVisible } from '../interactions/visibility';
 import type { GraphEdge, EdgeType } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
@@ -1561,8 +1562,10 @@ export class SceneManager {
       const orbTargets: THREE.Mesh[] = [];
       for (const e of this.agentOrbs.values()) orbTargets.push(e.orb);
       const orbHits = this.raycaster.intersectObjects(orbTargets, false);
-      if (orbHits.length > 0) {
-        const agentId = orbHits[0].object.userData.agentId as string;
+      // three's raycaster ignores .visible — skip orbs of hidden buildings.
+      const orbHit = orbHits.find((h) => isSceneVisible(h.object));
+      if (orbHit) {
+        const agentId = orbHit.object.userData.agentId as string;
         const entry = this.agentOrbs.get(agentId);
         if (entry) {
           this.showAgentTooltip(entry);
@@ -1583,12 +1586,17 @@ export class SceneManager {
     }
     this.container.style.cursor = 'default';
 
+    // First VISIBLE hit per array — hidden (filtered-out) buildings must not be
+    // hoverable, nor may they steal hover from a visible building behind them.
+    const buildingHit = buildingHits.find((h) => isSceneVisible(h.object));
+    const foundationHit = foundationHits.find((h) => isSceneVisible(h.object));
+
     // District drag handle: hover it ONLY when it is the frontmost object. A
     // building or its foundation in front of the (invisible) hitbox keeps its
     // tooltip — the handle no longer overrides hover for buildings behind it.
     const nearestContent = Math.min(
-      buildingHits.length ? buildingHits[0].distance : Infinity,
-      foundationHits.length ? foundationHits[0].distance : Infinity,
+      buildingHit ? buildingHit.distance : Infinity,
+      foundationHit ? foundationHit.distance : Infinity,
     );
     if (handleHits.length > 0 && handleHits[0].distance < nearestContent) {
       const hitBox = handleHits[0].object as THREE.Mesh;
@@ -1608,15 +1616,15 @@ export class SceneManager {
     let tooltipHeight = 0;
     let tooltipVariant: 'building' | 'foundation' = 'building';
 
-    if (buildingHits.length > 0) {
-      const hit = buildingHits[0].object as THREE.Mesh;
+    if (buildingHit) {
+      const hit = buildingHit.object as THREE.Mesh;
       if (hit.userData.isBuilding && hit.userData.project) {
         hoveredProject = hit.userData.project as ProjectData;
         tooltipPos = hit.position;
         tooltipHeight = hoveredProject.dimensions!.height + 0.8;
       }
-    } else if (foundationHits.length > 0) {
-      const hitPad = foundationHits[0].object as THREE.Mesh;
+    } else if (foundationHit) {
+      const hitPad = foundationHit.object as THREE.Mesh;
       if (hitPad.userData.isFoundation && hitPad.userData.project) {
         const visualFoundation = (hitPad.userData.visualFoundation ?? hitPad) as THREE.Mesh;
         hoveredProject = hitPad.userData.project as ProjectData;
