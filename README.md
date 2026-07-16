@@ -24,18 +24,17 @@ Each project note becomes a building. Status maps to color, priority to height, 
 - **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
 
 ### Interactions
-- **Search and filters** for quickly narrowing the city by title, status, priority, category, path, or stack
-- **Visual scan modes**: status, read-only Git activity, memory-ready, task-progress ramp, recency heatmap, and tech-stack colors — with an adaptive legend
-- **City overview**: the inspector doubles as a district analytics readout (per-district counts, active %, open quests) when nothing is selected
-- **Snapshot**: one click saves a clean cinematic PNG of the city (title card, no HUD) into your vault
-- **Project inspector** with note/folder/agent/context/focus actions
-- **Click** a building to open its note
-- **Right-click** a building for context menu (Launch Agent, Inspect Project, Open in Explorer, Open Note, Focus Camera)
-- **Right-click** the Neural Core orb to launch Claude Code in any folder via OS folder picker
-- **Double-click** a building to enter move mode (reposition individual buildings)
-- **Drag handles** to rearrange entire category blocks
-- **Scroll** to zoom, **right-drag** to pan
-- **Keyboard shortcuts**: cycle blocked/stale projects, reset camera
+- **Single-click** a building to **select + focus** it — the city dims around your selection and connected neighbors stay lit; the camera doesn't move. **Double-click** opens the note. *(This changed in 0.4 — click no longer opens; a one-time hint appears.)*
+- **Esc** or a click on empty ground clears the selection; **Move building** is a right-click menu item.
+- **Right-click** menu: Launch agent · Inspect · Move building · **Trace impact** · Open folder · Open terminal · Copy path · Add quest · Open note · Focus camera.
+- **Search and filters** narrow the city by title, status, priority, category, path, or stack — filtered-out buildings hide in place (no re-shuffling).
+- **Scan lenses** (dropdown): status, **Needs Attention** (triage), Git activity, memory-ready, task-progress ramp, recency heatmap, tech-stack — with an adaptive legend. A **⚠ badge** jumps to the attention lens.
+- **Saved lens presets**: three defaults (Active Work / Needs Attention / Agents) plus "Save current view".
+- **EDGES chips** toggle the typed project graph: Backlinks · Deps · Blocked · Agents.
+- **Project inspector**: git signals + recent commits, warnings, dependency sections (Depends on / Used by / Blocked by / Blocks), agent activity, and a last-session digest. **City overview** (nothing selected) shows district analytics, a fleet summary, an attention list, and a recent-activity feed.
+- **Building style** (settings): Classic silhouettes or **Parametric** data-true towers (opt-in, applies live).
+- **Snapshot**: one click saves a clean cinematic PNG (title card, no HUD) into your vault.
+- **Drag handles** rearrange category blocks; **scroll** to zoom, **right-drag** to pan; **keyboard** cycles blocked/stale projects + resets camera.
 
 ### Neural Core & Data Arteries
 - Central **geodesic wireframe sphere** with RGB chromatic split and rotating rings

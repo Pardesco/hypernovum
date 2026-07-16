@@ -43,6 +43,10 @@ The detection tag can be customized in plugin settings (default: `project`).
 | `tasks_done` | `number` | parsed from checkboxes | **Lit windows** (fill from bottom) |
 | `stack` | `string[]` or CSV | — | **Tech stack** shown on foundation hover |
 | `projectDir` | `string` | — | **Project directory** path for terminal launch (absolute or vault-relative). **Required for "Launch Claude" and "Open in Explorer" to work.** |
+| `questions` | `string[]` or `string` | — | Open research **quests** — floating gold gems above the building, published to agents. The city's "Add quest" action appends here. |
+| `blocked_by` | `string[]` or `string` | — | Projects that block this one → directed **blocked-by** edges + a "Blocked by X" warning. Refs may be `[[Wikilink]]`, a title, or a note path. |
+| `depends_on` | `string[]` or `string` | — | Explicit cross-language **depends-on** edges (for non-npm projects). Same ref forms as `blocked_by`. |
+| `no_deps` | `boolean` | `false` | Suppress automatic `package.json` dependency scanning for this project. |
 
 ### Status Values → Building Color
 
@@ -74,6 +78,23 @@ The detection tag can be customized in plugin settings (default: `project`).
 ### Category → Z-Axis District
 
 Categories can be any string. Projects sharing the same category are grouped into the same district (cluster) along the Z axis. Examples: `work`, `personal`, `art`, `research`, `client-name`.
+
+### Typed Project Graph (edges)
+
+Hypernovum draws four kinds of arcs between buildings, toggled by the **EDGES** chips in the command panel:
+
+| Edge | Source | Direction | Look |
+|------|--------|-----------|------|
+| **Backlinks** | vault `[[links]]` between project notes | undirected | violet, thicker with link count |
+| **Depends on** | `package.json` deps matching a sibling project (by name, `file:`/`link:` path, or `workspace:*`) + frontmatter `depends_on` | dependent → dependency | teal, arrowhead |
+| **Blocked by** | frontmatter `blocked_by` | blocker → blocked | red-amber, arrowhead |
+| **Agents** | live agent sessions (heartbeat) | core → project | cyan |
+
+Dependency scanning matches only **sibling projects** (external packages like `react`/`three` are ignored). `no_deps: true` opts a project out of manifest scanning; frontmatter `depends_on` still applies. Right-click a building → **Trace impact** to walk the dependency graph upstream/downstream.
+
+### Agent activity (heartbeat v2)
+
+Agents make themselves visible by writing per-session snapshots to `<vault>/.hypernovum/agents/<sessionId>.json` (and an optional event log to `.hypernovum/sessions/<sessionId>.jsonl`) via `scripts/heartbeat.js`. Each session becomes a state-colored orb; two agents touching the same file surface a conflict. See the generated `AGENTS.md` / per-project `.hypernovum/SETUP.md` for the exact invocation. The `.hypernovum/` directory is auto-gitignored.
 
 ---
 
