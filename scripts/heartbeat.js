@@ -166,6 +166,7 @@ function logSessionEvent(vaultPath, snap, prior, isStop, now) {
     t: now,
     sessionId: snap.sessionId,
     kind,
+    name: snap.name,
     project: snap.project ?? undefined,
     state: snap.state,
     tool: snap.tool ?? undefined,

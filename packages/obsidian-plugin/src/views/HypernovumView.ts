@@ -6,6 +6,7 @@ import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml, cr
 import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
+import { SessionReader } from '../monitors/SessionReader';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
@@ -157,6 +158,7 @@ export class HypernovumView extends ItemView {
   private depScanner = new DependencyScanner();
   private depScan = new Map<string, DependencyScanResult>();
   private edgeChips: HTMLButtonElement[] = [];
+  private sessionReader = new SessionReader();
   private inspectorPanel: HTMLElement | null = null;
   private statusSelect: HTMLSelectElement | null = null;
   private prioritySelect: HTMLSelectElement | null = null;
@@ -1593,6 +1595,42 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     return this.allProjects.find((p) => p.path === path)?.title ?? path;
   }
 
+  private formatDuration(ms: number): string {
+    const min = Math.round(ms / 60000);
+    if (min < 1) return '<1m';
+    if (min < 60) return `${min}m`;
+    const h = Math.floor(min / 60), m = min % 60;
+    return m ? `${h}h ${m}m` : `${h}h`;
+  }
+
+  /** Last-session digest for a project (SES-002/003), lazily read from JSONL. */
+  private renderSessionDigest(project: ProjectData): string {
+    const vaultBase = (this.app.vault.adapter as any).basePath as string;
+    if (!vaultBase) return '';
+    const sessionsDir = path.join(vaultBase, '.hypernovum', 'sessions');
+    const dirBase = this.resolveProjectPath(project).split(/[\\/]/).pop()?.toLowerCase();
+    const digest = this.sessionReader.readLatestForProject(sessionsDir, (proj) => {
+      if (!proj) return false;
+      const p = proj.toLowerCase();
+      return p === project.title.toLowerCase() || p === dirBase;
+    });
+    if (!digest) return '';
+
+    const files = digest.filesTouched.length;
+    // Commits that landed inside the session window (from cached recentCommits).
+    const commits = (project.gitActivity?.recentCommits ?? [])
+      .filter((c) => c.ts >= digest.startT && c.ts <= digest.endT + 60_000).length;
+    const parts = [digest.name ?? 'Session', this.formatDuration(digest.durationMs), `${files} file${files === 1 ? '' : 's'}`];
+    if (commits > 0) parts.push(`${commits} commit${commits === 1 ? '' : 's'}`);
+
+    let rows = `<div class="signal-row"><span>Last session</span><strong>${this.escapeHtml(parts.join(' · '))}</strong></div>`;
+    // Plan-vs-action lite (SES-003): only when the agent declared plannedFiles.
+    if (digest.plannedFiles && digest.plannedFiles.length) {
+      rows += `<div class="signal-row"><span>Plan vs action</span><strong>planned ${digest.plannedFiles.length} · touched ${files}</strong></div>`;
+    }
+    return `<div class="inspector-section"><span class="section-label">Session</span>${rows}</div>`;
+  }
+
   /** Depends on / Used by / Blocked by / Blocks sections for one project (EDG-007). */
   private renderDependencySections(projectPath: string): string {
     const deps: string[] = [], usedBy: string[] = [], blockedBy: string[] = [], blocks: string[] = [];
@@ -1672,6 +1710,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       ${this.renderProjectWarnings(project.path)}
       ${this.renderDependencySections(project.path)}
       ${this.renderAgentsSection(project.path)}
+      ${this.renderSessionDigest(project)}
       <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
       <div class="inspector-actions">
         <button data-action="note">Open Note</button>
