@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml, createInteractionStore } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit, LinkEdge } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, GraphEdge } from '@hypernovum/core';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
@@ -516,7 +516,8 @@ category: default
    * it IS the project note or lives inside the project's folder; links whose
    * endpoints belong to two different projects become undirected edges.
    */
-  private computeLinkEdges(): LinkEdge[] {
+  /** Vault backlinks between projects as undirected GraphEdges (EDG-002). */
+  private computeLinkEdges(): GraphEdge[] {
     const resolved = this.app.metadataCache.resolvedLinks as Record<string, Record<string, number>>;
     const projects = this.filteredProjects;
     const byNote = new Map(projects.map((p) => [p.path, p]));
@@ -524,7 +525,7 @@ category: default
     const ownerOf = (file: string): ProjectData | undefined =>
       byNote.get(file) ?? owners.find((o) => file.startsWith(o.prefix))?.project;
 
-    const edges = new Map<string, LinkEdge>();
+    const edges = new Map<string, GraphEdge>();
     for (const [source, targets] of Object.entries(resolved)) {
       const a = ownerOf(source);
       if (!a) continue;
@@ -532,8 +533,11 @@ category: default
         const b = ownerOf(target);
         if (!b || b === a) continue;
         const key = a.path < b.path ? `${a.path}|${b.path}` : `${b.path}|${a.path}`;
-        const edge = edges.get(key) ?? { from: a.path, to: b.path, count: 0 };
-        edge.count += count;
+        const edge = edges.get(key) ?? {
+          from: a.path, to: b.path, type: 'backlink' as const,
+          direction: 'undirected' as const, source: 'deterministic' as const, weight: 0,
+        };
+        edge.weight = (edge.weight ?? 0) + count;
         edges.set(key, edge);
       }
     }

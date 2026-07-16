@@ -75,6 +75,23 @@ export interface LinkEdge {
   count: number;
 }
 
+/** Typed project-graph edge (Phase 4, §7.3). One model for all arc kinds. */
+export type EdgeType = 'backlink' | 'agent-working-on' | 'depends-on' | 'blocked-by';
+
+export interface GraphEdge {
+  /** Project note path, or the 'core' sentinel for agent edges */
+  from: string;
+  /** Project note path */
+  to: string;
+  type: EdgeType;
+  direction: 'directed' | 'undirected';
+  /** Backlink count / dependency count — drives opacity/thickness */
+  weight?: number;
+  /** Nothing emits 'inferred' yet; the slot reserves it for later */
+  source: 'deterministic' | 'inferred';
+  meta?: { agentId?: string; via?: 'manifest' | 'frontmatter' };
+}
+
 /** Saved block position for user-arranged city layout */
 export interface BlockPosition {
   category: string;

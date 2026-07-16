@@ -5,10 +5,12 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, LinkEdge } from '../types';
+import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
 import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
+import { EdgeManager } from './EdgeManager';
 import { labelVisible, type LabelTier } from './visualState';
+import type { GraphEdge, EdgeType } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
@@ -98,9 +100,7 @@ export class SceneManager {
   private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
   private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
   private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
-  private linkArcs: THREE.Mesh[] = []; // backlink knowledge arcs between buildings
-  private linkNeighbors = new Map<string, Set<string>>(); // INT-008: path → backlink neighbors
-  private hoveredLinkPath: string | null = null; // building whose arcs are boosted
+  private edges!: EdgeManager; // typed project-graph edge renderer (EDG-001)
   private questBursts: { mesh: THREE.Mesh; start: number }[] = []; // quest-resolved shockwaves
   private agentOrbs = new Map<string, AgentOrbEntry>(); // fleet presence
   private conflictRings = new Map<string, { mesh: THREE.Mesh; severity: 'high' | 'medium' }>(); // AGT-008
@@ -183,6 +183,11 @@ export class SceneManager {
     this.highlight = new HighlightManager(this.parts, this.store, {
       bloom: options?.settings?.enableBloom ?? false,
     });
+    this.edges = new EdgeManager(
+      this.scene,
+      this.buildingPathMap,
+      () => (this.neuralCore ? this.neuralCore.position.clone() : null),
+    );
 
     // Load visual effect settings
     if (options?.settings) {
@@ -1050,80 +1055,33 @@ export class SceneManager {
    * additive tubes that rise with distance, pulse gently, and thicken with
    * link count. Rebuilt whenever the city rebuilds; cleared via clearLinkArcs.
    */
-  showLinkArcs(edges: LinkEdge[]): void {
-    this.clearLinkArcs();
-
-    const addNeighbor = (a: string, b: string) => {
-      let set = this.linkNeighbors.get(a);
-      if (!set) { set = new Set(); this.linkNeighbors.set(a, set); }
-      set.add(b);
-    };
-
-    for (const edge of edges) {
-      const a = this.buildingPathMap.get(edge.from);
-      const b = this.buildingPathMap.get(edge.to);
-      if (!a || !b) continue;
-
-      const geoA = a.geometry as THREE.BufferGeometry;
-      const geoB = b.geometry as THREE.BufferGeometry;
-      geoA.computeBoundingBox();
-      geoB.computeBoundingBox();
-      const start = new THREE.Vector3(a.position.x, a.position.y + (geoA.boundingBox?.max.y ?? 5) * 0.9, a.position.z);
-      const end = new THREE.Vector3(b.position.x, b.position.y + (geoB.boundingBox?.max.y ?? 5) * 0.9, b.position.z);
-
-      const dist = start.distanceTo(end);
-      const control = start.clone().add(end).multiplyScalar(0.5);
-      control.y += Math.max(3, dist * 0.35);
-
-      const curve = new THREE.QuadraticBezierCurve3(start, control, end);
-      const radius = 0.05 + Math.min(edge.count, 6) * 0.015;
-      const tube = new THREE.TubeGeometry(curve, 24, radius, 5, false);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xb38cff, // brand violet — distinct from the cyan activity arteries
-        transparent: true,
-        opacity: 0.32,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-      const arc = new THREE.Mesh(tube, mat);
-      arc.userData = {
-        isLinkArc: true,
-        from: edge.from,
-        to: edge.to,
-        baseOpacity: 0.2 + Math.min(edge.count, 6) * 0.04,
-        pulsePhase: (start.x + end.z) % (Math.PI * 2),
-      };
-      this.scene.add(arc);
-      this.linkArcs.push(arc);
-      addNeighbor(edge.from, edge.to);
-      addNeighbor(edge.to, edge.from);
-    }
+  /** Render the typed project-graph edges (EDG-001). Delegates to EdgeManager. */
+  showLinkArcs(edges: GraphEdge[]): void {
+    this.edges.setEdges(edges);
+    // A prior hover neighborhood may reference edges that no longer exist.
+    this.updateHoverNeighborhood(null);
   }
 
   clearLinkArcs(): void {
-    for (const arc of this.linkArcs) {
-      arc.geometry.dispose();
-      (arc.material as THREE.Material).dispose();
-      this.scene.remove(arc);
-    }
-    this.linkArcs = [];
-    this.linkNeighbors.clear();
-    // A hover neighborhood referencing arcs that no longer exist must clear.
-    if (this.hoveredLinkPath !== null) {
-      this.hoveredLinkPath = null;
-      this.highlight?.setHoverNeighbors(new Set());
-    }
+    this.edges?.clear();
+    this.highlight?.setHoverNeighbors(new Set());
+  }
+
+  /** Toggle which edge types render (EDG-006). */
+  setEdgeVisibleTypes(types: Set<EdgeType>): void {
+    this.edges.setVisibleTypes(types);
+    // Neighborhood set may have changed with visibility.
+    this.updateHoverNeighborhood(null);
   }
 
   /**
-   * Hover neighborhood (INT-008): mark the hovered building's backlink
-   * neighbors as connected (brighten + always-label) and boost their arcs.
-   * Cheap — only the changed neighbor set is re-resolved.
+   * Hover neighborhood (INT-008, EDG-008): mark the hovered building's edge
+   * neighbors (across visible types) as connected (brighten + always-label)
+   * and boost their arcs via EdgeManager.
    */
   private updateHoverNeighborhood(path: string | null): void {
-    if (path === this.hoveredLinkPath) return;
-    this.hoveredLinkPath = path;
-    const neighbors = path ? this.linkNeighbors.get(path) ?? new Set<string>() : new Set<string>();
+    this.edges.highlightForPath(path);
+    const neighbors = path ? this.edges.neighborsOf(path) : new Set<string>();
     this.highlight.setHoverNeighbors(neighbors);
   }
 
@@ -2325,16 +2283,8 @@ export class SceneManager {
       this.updateLabelVisibility();
     }
 
-    // Knowledge arcs breathe softly; arcs touching the hovered building
-    // brighten (INT-008 hover neighborhood).
-    for (const arc of this.linkArcs) {
-      const base = arc.userData.baseOpacity as number;
-      const touching = this.hoveredLinkPath !== null &&
-        (arc.userData.from === this.hoveredLinkPath || arc.userData.to === this.hoveredLinkPath);
-      const breathe = 0.75 + 0.25 * Math.sin(elapsed * 1.5 + (arc.userData.pulsePhase as number));
-      (arc.material as THREE.MeshBasicMaterial).opacity =
-        Math.min(base * breathe * (touching ? 3 : 1), 1);
-    }
+    // Typed graph edges breathe + hovered-neighborhood boost (EdgeManager).
+    this.edges.update(elapsed);
 
     // Quest-resolved shockwaves: expand and fade, then self-dispose
     if (this.questBursts.length > 0) {
