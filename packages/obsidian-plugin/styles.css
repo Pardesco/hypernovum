@@ -909,6 +909,39 @@
   box-shadow: 0 0 12px rgba(179, 102, 255, 0.15), inset 0 0 12px rgba(179, 102, 255, 0.08);
 }
 
+/* Edge-type toggle chips (EDG-006) */
+.edge-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+}
+.edge-toggles-label {
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: rgba(170, 190, 220, 0.5);
+  margin-right: 2px;
+}
+.edge-chip {
+  padding: 3px 9px;
+  border: 1px solid rgba(120, 150, 190, 0.25);
+  border-radius: 11px;
+  background: rgba(18, 26, 40, 0.6);
+  color: rgba(190, 205, 230, 0.6);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.edge-chip:hover { color: rgba(220, 232, 250, 0.9); }
+.edge-chip.active { color: #fff; }
+.edge-chip[data-edge="backlink"].active { border-color: #b38cff; background: rgba(90, 60, 140, 0.5); box-shadow: 0 0 8px rgba(179, 140, 255, 0.3); }
+.edge-chip[data-edge="depends-on"].active { border-color: #2dd4bf; background: rgba(20, 80, 72, 0.5); box-shadow: 0 0 8px rgba(45, 212, 191, 0.3); }
+.edge-chip[data-edge="blocked-by"].active { border-color: #ff8844; background: rgba(90, 50, 20, 0.5); box-shadow: 0 0 8px rgba(255, 136, 68, 0.3); }
+.edge-chip[data-edge="agent-working-on"].active { border-color: #22d3ee; background: rgba(15, 70, 85, 0.5); box-shadow: 0 0 8px rgba(34, 211, 238, 0.3); }
+
 /* Vault-mode toggle — amber counterpart to the violet links toggle */
 .vault-mode-toggle {
   width: 100%;

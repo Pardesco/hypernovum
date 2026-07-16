@@ -1074,6 +1074,11 @@ export class SceneManager {
     this.updateHoverNeighborhood(null);
   }
 
+  /** Neighbors of a path across currently-visible edges (EDG-008 connected set). */
+  edgeNeighborsOf(path: string): Set<string> {
+    return this.edges.neighborsOf(path);
+  }
+
   /**
    * Hover neighborhood (INT-008, EDG-008): mark the hovered building's edge
    * neighbors (across visible types) as connected (brighten + always-label)

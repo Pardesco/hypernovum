@@ -3,7 +3,9 @@ import { existsSync } from 'fs';
 import { exec } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml, createInteractionStore } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit, GraphEdge } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType } from '@hypernovum/core';
+import { DependencyScanner } from '../monitors/DependencyScanner';
+import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
@@ -148,7 +150,13 @@ export class HypernovumView extends ItemView {
   private priorityFilter = 'all';
   private categoryFilter = 'all';
   private visualLayer: VisualLayer = 'status';
-  private showLinks = false;
+  /** Active edge types (EDG-006). Default: agents on, structural edges off. */
+  private edgeTypes = new Set<EdgeType>(['agent-working-on']);
+  /** Structural edges (backlink/blocked-by/depends-on), recomputed on rebuild. */
+  private structuralEdges: GraphEdge[] = [];
+  private depScanner = new DependencyScanner();
+  private depScan = new Map<string, DependencyScanResult>();
+  private edgeChips: HTMLButtonElement[] = [];
   private inspectorPanel: HTMLElement | null = null;
   private statusSelect: HTMLSelectElement | null = null;
   private prioritySelect: HTMLSelectElement | null = null;
@@ -425,6 +433,15 @@ category: default
       }
     });
 
+    // Dependency scan (EDG-004): manifest + frontmatter depends_on → sibling edges.
+    this.depScan = this.depScanner.scan(this.allProjects.map((p) => ({
+      path: p.path,
+      title: p.title,
+      projectDir: this.resolveProjectPath(p),
+      dependsOn: p.dependsOn,
+      noDeps: p.noDeps,
+    })));
+
     // Detect quests resolved since the last parse — celebrate after rebuild
     const resolvedPaths: string[] = [];
     for (const project of this.allProjects) {
@@ -491,9 +508,9 @@ category: default
         this.sceneManager.setAttentionLens(this.attentionLensColors());
       }
 
-      if (this.showLinks) {
-        this.sceneManager.showLinkArcs(this.computeLinkEdges());
-      }
+      // Recompute structural edges (backlink/blocked/depends) + render all.
+      this.structuralEdges = this.computeStructuralEdges();
+      this.refreshEdges();
     }
 
     // Selection must survive rebuilds only if the project is still visible
@@ -542,6 +559,67 @@ category: default
       }
     }
     return [...edges.values()];
+  }
+
+  // --- Typed graph edge assembly (Phase 4) ---
+
+  /** Structural edges (backlink + blocked-by + depends-on) among visible projects. */
+  private computeStructuralEdges(): GraphEdge[] {
+    const edges: GraphEdge[] = this.computeLinkEdges(); // backlinks (undirected)
+    const visible = new Set(this.filteredProjects.map((p) => p.path));
+    const refList = this.filteredProjects.map((p) => ({ path: p.path, title: p.title }));
+
+    for (const p of this.filteredProjects) {
+      // blocked-by: directed blocker → blocked (p is blocked by each ref)
+      for (const ref of p.blockedBy ?? []) {
+        const blocker = resolveProjectRef(ref, refList);
+        if (blocker && blocker !== p.path && visible.has(blocker)) {
+          edges.push({ from: blocker, to: p.path, type: 'blocked-by', direction: 'directed', source: 'deterministic', meta: { via: 'frontmatter' } });
+        }
+      }
+      // depends-on: directed dependent → dependency
+      for (const dep of this.depScan.get(p.path)?.dependsOn ?? []) {
+        if (dep.targetPath !== p.path && visible.has(dep.targetPath)) {
+          edges.push({ from: p.path, to: dep.targetPath, type: 'depends-on', direction: 'directed', source: 'deterministic', meta: { via: dep.via } });
+        }
+      }
+    }
+    return edges;
+  }
+
+  private static readonly LIVE_AGENT_STATES = new Set([
+    'starting', 'planning', 'reading', 'editing', 'running', 'testing', 'reviewing', 'waiting', 'blocked',
+  ]);
+
+  /** agent-working-on edges: neural core → each project with a live session. */
+  private agentEdges(): GraphEdge[] {
+    const edges: GraphEdge[] = [];
+    const seen = new Set<string>();
+    for (const s of this.fleetSessions) {
+      if (!s.projectPath || !HypernovumView.LIVE_AGENT_STATES.has(s.state) || seen.has(s.projectPath)) continue;
+      seen.add(s.projectPath);
+      edges.push({ from: 'core', to: s.projectPath, type: 'agent-working-on', direction: 'directed', source: 'deterministic', meta: { agentId: s.sessionId } });
+    }
+    return edges;
+  }
+
+  private agentEdgeSignature(): string {
+    return this.agentEdges().map((e) => e.to).sort().join('|');
+  }
+  private lastAgentSig = '';
+
+  private syncEdgeChips(): void {
+    for (const chip of this.edgeChips) {
+      chip.classList.toggle('active', this.edgeTypes.has(chip.dataset.edge as EdgeType));
+    }
+  }
+
+  /** Push the current edge set to the scene and apply the active type filter. */
+  private refreshEdges(): void {
+    if (!this.sceneManager) return;
+    this.sceneManager.showLinkArcs([...this.structuralEdges, ...this.agentEdges()]);
+    this.sceneManager.setEdgeVisibleTypes(this.edgeTypes);
+    this.lastAgentSig = this.agentEdgeSignature();
   }
 
   /** Per-project colors for the data-visualization scan modes */
@@ -1171,7 +1249,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         <select class="priority-select"><option value="all">All priority</option></select>
         <select class="category-select"><option value="all">All categories</option></select>
       </div>
-      <button class="links-toggle" title="Show vault backlinks between projects as knowledge arcs">NEURAL LINKS &middot; OFF</button>
+      <div class="edge-toggles" title="Show typed project-graph edges">
+        <span class="edge-toggles-label">EDGES</span>
+        <button class="edge-chip" data-edge="backlink">Backlinks</button>
+        <button class="edge-chip" data-edge="depends-on">Deps</button>
+        <button class="edge-chip" data-edge="blocked-by">Blocked</button>
+        <button class="edge-chip" data-edge="agent-working-on">Agents</button>
+      </div>
       <button class="vault-mode-toggle" title="Vault mode: pure 3D visualization, no AI agent features. Reloads the view.">VAULT MODE &middot; OFF</button>
     `;
 
@@ -1227,18 +1311,19 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       this.applyFiltersAndRebuild();
     });
 
-    const linksToggle = panel.querySelector('.links-toggle') as HTMLButtonElement;
-    linksToggle.addEventListener('click', () => {
-      this.showLinks = !this.showLinks;
-      linksToggle.textContent = `NEURAL LINKS · ${this.showLinks ? 'ON' : 'OFF'}`;
-      linksToggle.classList.toggle('active', this.showLinks);
-      if (this.showLinks) {
-        this.sceneManager?.showLinkArcs(this.computeLinkEdges());
-      } else {
-        this.sceneManager?.clearLinkArcs();
-      }
-      this.updateConnectedPaths(this.interactionStore.getState().selectedPath);
-    });
+    // Edge-type toggle chips (EDG-006)
+    this.edgeChips = Array.from(panel.querySelectorAll<HTMLButtonElement>('.edge-chip'));
+    this.syncEdgeChips();
+    for (const chip of this.edgeChips) {
+      chip.addEventListener('click', () => {
+        const type = chip.dataset.edge as EdgeType;
+        if (this.edgeTypes.has(type)) this.edgeTypes.delete(type);
+        else this.edgeTypes.add(type);
+        this.syncEdgeChips();
+        this.sceneManager?.setEdgeVisibleTypes(this.edgeTypes);
+        this.updateConnectedPaths(this.interactionStore.getState().selectedPath);
+      });
+    }
 
     const vaultToggle = panel.querySelector('.vault-mode-toggle') as HTMLButtonElement;
     vaultToggle.textContent = `VAULT MODE · ${this.settings.vaultMode ? 'ON' : 'OFF'}`;
@@ -1273,19 +1358,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   }
 
   /**
-   * Backlink neighbors of the selection stay readable while the rest of the
-   * city dims. Recomputed on selection change, links toggle, and rebuild.
-   * (Typed edges extend this set in Phase 4.)
+   * Neighbors of the selection (across visible typed edges, EDG-008) stay
+   * readable while the rest of the city dims. Recomputed on selection change,
+   * edge-type toggle, fleet change, and rebuild.
    */
   private updateConnectedPaths(selectedPath: string | null): void {
     if (!this.sceneManager) return;
-    const connected = new Set<string>();
-    if (selectedPath && this.showLinks) {
-      for (const edge of this.computeLinkEdges()) {
-        if (edge.from === selectedPath) connected.add(edge.to);
-        else if (edge.to === selectedPath) connected.add(edge.from);
-      }
-    }
+    const connected = selectedPath ? this.sceneManager.edgeNeighborsOf(selectedPath) : new Set<string>();
     this.sceneManager.setConnectedPaths(connected);
   }
 
@@ -1388,7 +1467,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       priorityFilter: this.priorityFilter,
       categoryFilter: this.categoryFilter,
       searchQuery: this.searchQuery,
-      edgeTypes: this.showLinks ? ['backlink'] : [],
+      edgeTypes: [...this.edgeTypes],
     };
   }
 
@@ -1411,7 +1490,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.priorityFilter = s.priorityFilter;
     this.categoryFilter = catExists || s.categoryFilter === 'all' ? s.categoryFilter : 'all';
     this.searchQuery = s.searchQuery;
-    this.showLinks = s.edgeTypes.includes('backlink');
+    this.edgeTypes = new Set(s.edgeTypes as EdgeType[]);
+    this.syncEdgeChips();
 
     // Sync UI controls to the applied state.
     if (this.layerSelect) this.layerSelect.value = this.visualLayer;
@@ -1420,11 +1500,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (this.categorySelect) this.categorySelect.value = this.categoryFilter;
     if (this.searchInput) this.searchInput.value = this.searchQuery;
 
-    this.applyFiltersAndRebuild();
-    if (this.sceneManager) {
-      if (this.showLinks) this.sceneManager.showLinkArcs(this.computeLinkEdges());
-      else this.sceneManager.clearLinkArcs();
-    }
+    this.applyFiltersAndRebuild(); // recomputes + renders edges, applies edgeTypes
   }
 
   private saveCurrentLens(): void {
@@ -1858,6 +1934,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.recomputeWarnings();
     if (this.visualLayer === 'attention') {
       this.sceneManager.setAttentionLens(this.attentionLensColors());
+    }
+
+    // Refresh agent-working-on edges only when the live set actually changed.
+    if (this.agentEdgeSignature() !== this.lastAgentSig) {
+      this.refreshEdges();
+      if (this.interactionStore.getState().selectedPath) {
+        this.updateConnectedPaths(this.interactionStore.getState().selectedPath);
+      }
     }
 
     // Keep the inspector's Agents section in sync when a project is selected.
