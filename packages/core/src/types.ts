@@ -72,6 +72,7 @@ export interface Bounds {
 export type CityState = 'IDLE' | 'STREAMING' | 'BULK_UPDATE' | 'ERROR';
 
 /** An undirected knowledge link between two projects (from vault backlinks) */
+/** @deprecated Use {@link GraphEdge} with `type: 'backlink'`. Removal targeted for 0.5. */
 export interface LinkEdge {
   /** Project note path (endpoint A) */
   from: string;

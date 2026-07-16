@@ -454,15 +454,28 @@ export class SceneManager {
         toRemove.push(obj);
       }
     });
+    // Dispose the object AND all its descendants — building children (orbs, roof
+    // details, beacons, quest gems) and the grid group's Line children would
+    // otherwise leak their GPU geometry/material on every rebuild.
+    const disposeTree = (root: THREE.Object3D) => {
+      root.traverse((child) => {
+        const m = child as THREE.Mesh | THREE.Line | THREE.LineSegments;
+        if (m.geometry) m.geometry.dispose();
+        const mat = (m as THREE.Mesh).material;
+        if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+        else if (mat) (mat as THREE.Material).dispose();
+      });
+    };
     toRemove.forEach((obj) => {
-      if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
-        obj.geometry?.dispose();
-        const mat = obj.material;
-        if (Array.isArray(mat)) mat.forEach(m => m.dispose());
-        else if (mat) mat.dispose();
-      }
+      disposeTree(obj);
       this.scene.remove(obj);
     });
+    // Quest-burst rings are scene-level and untagged — dispose them explicitly so
+    // a rebuild mid-animation doesn't strand a frozen ring.
+    for (const burst of this.questBursts) {
+      disposeTree(burst.mesh);
+      this.scene.remove(burst.mesh);
+    }
     this.buildings = [];
     this.foundations = [];
     this.blockedEdgeGlows = [];
@@ -470,7 +483,7 @@ export class SceneManager {
     this.questMarkers = [];
     this.clearLinkArcs();
     this.questBursts = [];
-    this.agentOrbs.clear(); // orbs are building children — disposed with the city above
+    this.agentOrbs.clear(); // orb meshes disposed via their parent building above
     this.clearConflictRings();
     this.labels = [];
     this.blocks.clear();

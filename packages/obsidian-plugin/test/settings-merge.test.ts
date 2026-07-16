@@ -40,4 +40,37 @@ describe('settings default-merge', () => {
     const merged = Object.assign({}, PLUGIN_DEFAULTS, futureData) as Record<string, unknown>;
     expect(merged.someFutureKey).toBe(42);
   });
+
+  it('empty data.json loads full defaults (fresh install)', () => {
+    const merged = Object.assign({}, PLUGIN_DEFAULTS, {});
+    expect(merged.buildingStyle).toBe('classic');
+    expect(merged.vaultMode).toBe(false);
+    expect(merged.savedLenses).toEqual([]);
+    expect(merged.agentName).toBe('Claude Code');
+  });
+
+  it('mid-plan data.json (partial new keys) fills only the gaps', () => {
+    // A vault upgraded partway: has interactionHintShown but not savedLenses/buildingStyle.
+    const midData = {
+      interactionHintShown: true,
+      enableBloom: false,
+      vaultMode: true,
+    };
+    const merged = Object.assign({}, PLUGIN_DEFAULTS, midData);
+    expect(merged.interactionHintShown).toBe(true);   // preserved
+    expect(merged.vaultMode).toBe(true);              // preserved
+    expect(merged.buildingStyle).toBe('classic');     // filled
+    expect(merged.savedLenses).toEqual([]);           // filled
+  });
+
+  it('preserves a stored parametric style and saved lens presets', () => {
+    const data = {
+      buildingStyle: 'parametric',
+      savedLenses: [{ id: 'lens-1', name: 'Blocked', layer: 'attention', statusFilter: 'blocked', priorityFilter: 'all', categoryFilter: 'all', edgeTypes: ['blocked-by'] }],
+    };
+    const merged = Object.assign({}, PLUGIN_DEFAULTS, data);
+    expect(merged.buildingStyle).toBe('parametric');
+    expect(merged.savedLenses).toHaveLength(1);
+    expect(merged.savedLenses[0].edgeTypes).toEqual(['blocked-by']);
+  });
 });

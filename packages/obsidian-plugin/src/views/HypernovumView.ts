@@ -159,6 +159,8 @@ export class HypernovumView extends ItemView {
   private structuralEdges: GraphEdge[] = [];
   private depScanner = new DependencyScanner();
   private depScan = new Map<string, DependencyScanResult>();
+  /** allProjects with projectDir resolved to absolute — for conflict normalization */
+  private conflictProjects: ProjectData[] = [];
   private edgeChips: HTMLButtonElement[] = [];
   private sessionReader = new SessionReader();
   /** Active trace-impact overlay result (IMP-002), null when not tracing. */
@@ -439,11 +441,17 @@ category: default
       }
     });
 
+    // Resolve each project's absolute working dir once per rebuild. Used by the
+    // dependency scan and by conflict detection (which normalizes agent file
+    // paths against the *resolved* dir, not the raw frontmatter value).
+    const resolvedDir = new Map(this.allProjects.map((p) => [p.path, this.resolveProjectPath(p)]));
+    this.conflictProjects = this.allProjects.map((p) => ({ ...p, projectDir: resolvedDir.get(p.path) }));
+
     // Dependency scan (EDG-004): manifest + frontmatter depends_on → sibling edges.
     this.depScan = this.depScanner.scan(this.allProjects.map((p) => ({
       path: p.path,
       title: p.title,
-      projectDir: this.resolveProjectPath(p),
+      projectDir: resolvedDir.get(p.path)!,
       dependsOn: p.dependsOn,
       noDeps: p.noDeps,
     })));
@@ -2050,7 +2058,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const now = Date.now();
     if (now - this.lastConflictRun >= 2000) {
       this.lastConflictRun = now;
-      this.conflicts = detectConflicts(sessions, this.allProjects);
+      this.conflicts = detectConflicts(sessions, this.conflictProjects);
 
       // Only high/medium conflicts get a ring + material channel (info is
       // inspector-only). Collapse to top severity per building.

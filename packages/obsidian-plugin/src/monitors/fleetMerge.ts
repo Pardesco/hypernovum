@@ -139,5 +139,15 @@ export function mergeFleet(
   }
 
   merged.sort((a, b) => b.lastPing - a.lastPing);
-  return merged.slice(0, cap);
+
+  // Dedupe by id, keeping the freshest — guards against a duplicate sneaking in
+  // (e.g. a half-written snapshot momentarily visible under two names).
+  const seen = new Set<string>();
+  const deduped: AgentPresence[] = [];
+  for (const p of merged) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    deduped.push(p);
+  }
+  return deduped.slice(0, cap);
 }
