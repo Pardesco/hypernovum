@@ -36,6 +36,22 @@ describe('computeWarnings (§11 catalog)', () => {
     expect(w.find((x) => x.type === 'blocked')?.severity).toBe('high');
   });
 
+  it('blocked message names resolvable blockers (blocked_by)', () => {
+    const projects = [
+      proj('app.md', { title: 'App', status: 'blocked', blockedBy: ['[[Core Lib]]'] }),
+      proj('lib.md', { title: 'Core Lib' }),
+    ];
+    const w = computeWarnings(projects, [], []);
+    expect(w.find((x) => x.type === 'blocked')?.message).toBe('Blocked by Core Lib');
+  });
+
+  it('unresolved blocked_by → low broken-link warning', () => {
+    const w = computeWarnings([proj('app.md', { title: 'App', status: 'active', blockedBy: ['[[Ghost]]'] })], [], []);
+    const bl = w.find((x) => x.type === 'broken-link')!;
+    expect(bl.severity).toBe('low');
+    expect(bl.message).toContain('Ghost');
+  });
+
   it('uncommitted → medium, but suppressed when a working agent is on the project', () => {
     const git = { hasUncommittedChanges: true } as any;
     const withoutAgent = computeWarnings([proj('app.md', { gitActivity: git })], [], []);

@@ -11,6 +11,7 @@
 import type { ProjectData } from '@hypernovum/core';
 import type { AgentSession, AgentState } from './AgentRegistry';
 import type { ConflictRecord } from './ConflictDetector';
+import { resolveProjectRef } from './dependencyMatch';
 
 export type WarningType =
   | 'merge-conflict' | 'agents-same-file' | 'agent-failed' | 'blocked'
@@ -65,6 +66,7 @@ export function computeWarnings(
   const items: WarningItem[] = [];
   const byPath = new Map<string, ProjectData>();
   for (const p of projects) byPath.set(p.path, p);
+  const refList = projects.map((p) => ({ path: p.path, title: p.title }));
 
   // Projects that legitimately have a dirty tree because an agent is mid-work.
   const projectsWithWorkingAgent = new Set<string>();
@@ -84,10 +86,25 @@ export function computeWarnings(
       });
     }
 
+    // Resolve blocked_by refs → blocker titles; unresolved → broken-link (low).
+    const blockerTitles: string[] = [];
+    for (const ref of p.blockedBy ?? []) {
+      const targetPath = resolveProjectRef(ref, refList);
+      if (targetPath) {
+        blockerTitles.push(byPath.get(targetPath)?.title ?? targetPath);
+      } else {
+        items.push({
+          key: `broken-link|${p.path}|${ref}`, projectPath: p.path, type: 'broken-link', severity: 'low',
+          message: `blocked_by target not found: ${ref}`,
+          action: { label: 'Open note', kind: 'open-note' },
+        });
+      }
+    }
+
     if (p.status === 'blocked') {
       items.push({
         key: `blocked|${p.path}`, projectPath: p.path, type: 'blocked', severity: 'high',
-        message: 'Blocked',
+        message: blockerTitles.length ? `Blocked by ${blockerTitles.join(', ')}` : 'Blocked',
         action: { label: 'Focus', kind: 'focus' },
       });
     }

@@ -66,6 +66,10 @@ export class ProjectParser {
       questions: this.parseQuestions(fm.questions ?? fm.quests),
       answeredQuestions: this.parseQuestions(fm.answered ?? fm.quests_done),
       projectDir: typeof fm.projectDir === 'string' ? fm.projectDir : undefined,
+      // Typed-graph frontmatter (Phase 4). parseQuestions normalizes string|array.
+      blockedBy: this.parseQuestions(fm.blocked_by ?? fm.blockedBy),
+      dependsOn: this.parseQuestions(fm.depends_on ?? fm.dependsOn),
+      noDeps: fm.no_deps === true || fm.noDeps === true,
     };
   }
 

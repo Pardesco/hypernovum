@@ -34,6 +34,12 @@ export interface ProjectData {
   answeredQuestions?: string[];
   /** Absolute path to project directory (for terminal launch) */
   projectDir?: string;
+  /** Frontmatter blocked_by refs (wikilink/title/path) — directed blocked-by edges */
+  blockedBy?: string[];
+  /** Frontmatter depends_on refs — explicit cross-language dependency edges */
+  dependsOn?: string[];
+  /** Frontmatter no_deps: true — suppress package.json dependency scanning */
+  noDeps?: boolean;
   /** True when .hypernovum/MEMORY_CONTEXT.md exists for this project */
   hasMemoryContext?: boolean;
   /** Absolute path to memory context file when present */
