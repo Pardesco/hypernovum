@@ -101,6 +101,41 @@ describe('heartbeat.js v2', () => {
     }
   });
 
+  it('logs sampled session events to JSONL (session-start / ping-on-change / stop)', () => {
+    const vault = newVault();
+    const sessionsDir = join(vault, '.hypernovum', 'sessions');
+    const logFile = join(sessionsDir, 'sess-A.jsonl');
+
+    ping(vault, 'sess-A', ['--project=demo', '--state=editing', '--file=a.ts']); // session-start
+    ping(vault, 'sess-A', ['--project=demo', '--state=editing', '--file=a.ts']); // unchanged → no event
+    ping(vault, 'sess-A', ['--project=demo', '--state=editing', '--file=b.ts']); // file changed → ping
+    ping(vault, 'sess-A', ['--stop']);                                            // stop
+
+    const lines = readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines.map((e) => e.kind)).toEqual(['session-start', 'ping', 'stop']);
+    expect(lines[1].file).toBe('b.ts');
+    expect(typeof lines[0].t).toBe('number');
+  });
+
+  it('session-log appends stay intact under concurrent per-session writers', async () => {
+    const vault = newVault();
+    const ids = ['s1', 's2', 's3'];
+    await Promise.all(ids.map((id) =>
+      new Promise((res, rej) => {
+        try {
+          for (let i = 0; i < 15; i++) ping(vault, id, [`--project=${id}`, `--state=editing`, `--file=f${i}.ts`]);
+          res();
+        } catch (e) { rej(e); }
+      }),
+    ));
+    for (const id of ids) {
+      const lines = readFileSync(join(vault, '.hypernovum', 'sessions', `${id}.jsonl`), 'utf8').trim().split('\n');
+      // 1 session-start + 14 file-change pings = 15 parseable lines
+      expect(lines.length).toBe(15);
+      for (const l of lines) expect(() => JSON.parse(l)).not.toThrow();
+    }
+  });
+
   it('prunes sibling snapshots older than 24h, keeps fresh ones', () => {
     const vault = newVault();
     const dir = agentsDir(vault);

@@ -135,6 +135,70 @@ function pruneStale(agentsDir, selfFile, now) {
   }
 }
 
+const SESSION_LOG_PRUNE_MS = 7 * 24 * 60 * 60 * 1000; // JSONL logs older than 7d pruned
+
+/** Did any sampled field change between the prior snapshot and the new one? */
+function sampledChange(prior, snap) {
+  return !prior ||
+    prior.project !== snap.project ||
+    prior.tool !== snap.tool ||
+    prior.file !== snap.file ||
+    prior.state !== snap.state;
+}
+
+/**
+ * Append-only session event log (§7.5b). Events: session-start (first ping),
+ * ping (only when a sampled field changed), stop. Single writer per session, so
+ * fs.appendFileSync of a <4KB line is atomic enough.
+ */
+function logSessionEvent(vaultPath, snap, prior, isStop, now) {
+  const kind = isStop ? 'stop' : (!prior ? 'session-start' : (sampledChange(prior, snap) ? 'ping' : null));
+  if (!kind) return; // unchanged ping — sampled out
+
+  const sessionsDir = path.join(vaultPath, '.hypernovum', 'sessions');
+  try {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  } catch {
+    return;
+  }
+
+  const event = {
+    t: now,
+    sessionId: snap.sessionId,
+    kind,
+    project: snap.project ?? undefined,
+    state: snap.state,
+    tool: snap.tool ?? undefined,
+    file: snap.file ?? undefined,
+    objective: snap.objective,
+    plannedFiles: snap.plannedFiles,
+  };
+
+  try {
+    fs.appendFileSync(path.join(sessionsDir, `${snap.sessionId}.jsonl`), JSON.stringify(event) + '\n');
+  } catch { /* non-fatal */ }
+
+  pruneSessionLogs(sessionsDir, now);
+}
+
+/** Remove session JSONL files whose last line is older than 7 days. */
+function pruneSessionLogs(sessionsDir, now) {
+  let entries;
+  try {
+    entries = fs.readdirSync(sessionsDir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue;
+    const full = path.join(sessionsDir, name);
+    try {
+      const stat = fs.statSync(full);
+      if (now - stat.mtimeMs > SESSION_LOG_PRUNE_MS) fs.unlinkSync(full);
+    } catch { /* ignore */ }
+  }
+}
+
 function main() {
   const params = parseArgs(process.argv.slice(2));
 
@@ -167,14 +231,16 @@ function main() {
 
   const snapshotFile = path.join(agentsDir, `${sessionId}.json`);
 
-  // Preserve sessionStart across pings if a prior snapshot exists and the
-  // caller didn't pass --session-start explicitly.
+  // Read the prior snapshot once — used to preserve sessionStart and to sample
+  // session-log events (only log when something actually changed).
+  let prior = null;
+  try {
+    prior = JSON.parse(fs.readFileSync(snapshotFile, 'utf8'));
+  } catch { /* first ping */ }
+
   let effectiveStart = sessionStart;
-  if (!params['session-start']) {
-    try {
-      const prior = JSON.parse(fs.readFileSync(snapshotFile, 'utf8'));
-      if (Number(prior.sessionStart) > 0) effectiveStart = Number(prior.sessionStart);
-    } catch { /* first ping */ }
+  if (!params['session-start'] && prior && Number(prior.sessionStart) > 0) {
+    effectiveStart = Number(prior.sessionStart);
   }
 
   const state = params.stop
@@ -210,6 +276,9 @@ function main() {
   }
 
   pruneStale(agentsDir, snapshotFile, now);
+
+  // Append a sampled session-log event (SES-001).
+  logSessionEvent(vaultPath, snapshot, prior, !!params.stop, now);
 
   if (params.stop) {
     console.log(`Hypernovum: session ${sessionId} marked complete`);
