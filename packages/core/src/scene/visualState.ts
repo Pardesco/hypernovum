@@ -252,6 +252,12 @@ export function resolveVisualState(i: ResolveInput): VisualState {
     labelTier = 'always';
   }
 
+  // §8 single-writer: high-priority states hold a steady, brightened outline.
+  // animate()'s blocked-glow opacity pulse must not stomp them, so suppress it.
+  if (i.selected || i.hovered || i.moveMode || i.conflict || i.trace) {
+    edgeGlowPulse = false;
+  }
+
   return {
     baseColor,
     emissiveColor,

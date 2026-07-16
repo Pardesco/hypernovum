@@ -1,10 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtempSync, readFileSync, existsSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const SCRIPT = resolve(import.meta.dirname, '..', 'heartbeat.js');
+const execFileP = promisify(execFile);
+/** Async ping — lets multiple session-writers actually run concurrently. */
+function pingAsync(vault, id, extra = []) {
+  return execFileP('node', [SCRIPT, `--vault=${vault}`, `--id=${id}`, ...extra]);
+}
 
 function newVault() {
   return mkdtempSync(join(tmpdir(), 'hv-vault-'));
@@ -70,36 +76,29 @@ describe('heartbeat.js v2', () => {
     expect(second).toBe(first);
   });
 
-  it('4 concurrent writers × 25 pings → 4 parseable files, no torn JSON', async () => {
+  it('4 GENUINELY-concurrent writers × 20 pings → 4 parseable files, no torn JSON', async () => {
     const vault = newVault();
     const ids = ['w1', 'w2', 'w3', 'w4'];
+    const N = 20;
 
-    // Each "writer" fires 25 sequential pings; the 4 writers run concurrently.
-    await Promise.all(
-      ids.map((id) =>
-        new Promise((resolvePromise, reject) => {
-          try {
-            for (let i = 0; i < 25; i++) {
-              execFileSync('node', [SCRIPT, `--vault=${vault}`, `--id=${id}`, `--project=${id}`, `--action=ping ${i}`]);
-            }
-            resolvePromise();
-          } catch (err) {
-            reject(err);
-          }
-        }),
-      ),
-    );
+    // Each writer awaits its own pings in order; the 4 chains overlap (real
+    // concurrency), so writers prune each other's siblings while writing.
+    await Promise.all(ids.map(async (id) => {
+      for (let i = 0; i < N; i++) {
+        await pingAsync(vault, id, [`--project=${id}`, `--action=ping ${i}`]);
+      }
+    }));
 
     const files = readdirSync(agentsDir(vault)).filter((f) => f.endsWith('.json'));
+    // Only the 4 real snapshots — no phantom .tmp files leaking in as .json.
     expect(files.sort()).toEqual(['w1.json', 'w2.json', 'w3.json', 'w4.json']);
-    // Every file must be fully parseable (no torn writes) and hold its own id
     for (const id of ids) {
       const snap = JSON.parse(readFileSync(join(agentsDir(vault), `${id}.json`), 'utf8'));
       expect(snap.sessionId).toBe(id);
       expect(snap.project).toBe(id);
-      expect(snap.action).toBe('ping 24');
+      expect(snap.action).toBe(`ping ${N - 1}`);
     }
-  });
+  }, 30000);
 
   it('logs sampled session events to JSONL (session-start / ping-on-change / stop)', () => {
     const vault = newVault();
@@ -117,17 +116,12 @@ describe('heartbeat.js v2', () => {
     expect(typeof lines[0].t).toBe('number');
   });
 
-  it('session-log appends stay intact under concurrent per-session writers', async () => {
+  it('session-log appends stay intact under GENUINELY-concurrent per-session writers', async () => {
     const vault = newVault();
     const ids = ['s1', 's2', 's3'];
-    await Promise.all(ids.map((id) =>
-      new Promise((res, rej) => {
-        try {
-          for (let i = 0; i < 15; i++) ping(vault, id, [`--project=${id}`, `--state=editing`, `--file=f${i}.ts`]);
-          res();
-        } catch (e) { rej(e); }
-      }),
-    ));
+    await Promise.all(ids.map(async (id) => {
+      for (let i = 0; i < 15; i++) await pingAsync(vault, id, [`--project=${id}`, `--state=editing`, `--file=f${i}.ts`]);
+    }));
     for (const id of ids) {
       const lines = readFileSync(join(vault, '.hypernovum', 'sessions', `${id}.jsonl`), 'utf8').trim().split('\n');
       // 1 session-start + 14 file-change pings = 15 parseable lines

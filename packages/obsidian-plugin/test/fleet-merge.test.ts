@@ -100,6 +100,16 @@ describe('mergeFleet', () => {
     expect(out.map((a) => a.id).sort()).toEqual(['legacy', 's1']);
   });
 
+  it('dedupes by id, keeping the freshest (guards phantom duplicates)', () => {
+    const dup = [
+      parseSnapshotToPresence(snap({ sessionId: 's1', lastPing: 100, action: 'old' }))!,
+      parseSnapshotToPresence(snap({ sessionId: 's1', lastPing: 300, action: 'new' }))!,
+    ];
+    const out = mergeFleet(dup, null);
+    expect(out).toHaveLength(1);
+    expect(out[0].action).toBe('new');
+  });
+
   it('sorts freshest-first and caps at FLEET_CAP', () => {
     const many = Array.from({ length: FLEET_CAP + 5 }, (_, i) =>
       parseSnapshotToPresence(snap({ sessionId: `s${i}`, lastPing: i + 1 }))!,

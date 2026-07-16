@@ -98,7 +98,9 @@ function strOrUndef(v) {
 // --- Atomic write: tmp file in the same dir, then rename over the target ---
 function writeAtomic(targetPath, contents) {
   const dir = path.dirname(targetPath);
-  const tmp = path.join(dir, `.tmp-${process.pid}-${hashString(targetPath)}.json`);
+  // NB: the tmp name must NOT end in .json — the plugin lists *.json and would
+  // otherwise read this half-written file as a phantom duplicate agent.
+  const tmp = path.join(dir, `.tmp-${process.pid}-${hashString(targetPath)}.tmp`);
   fs.writeFileSync(tmp, contents);
   try {
     fs.renameSync(tmp, targetPath);
