@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — 3D-IDE overhaul (unreleased)
+## 0.4.0 — 3D-IDE overhaul (2026-07-19)
 
 Interaction foundation (click-focus, HighlightManager), multi-agent fleet
 visibility, needs-attention triage, typed project graph, trace impact + session
