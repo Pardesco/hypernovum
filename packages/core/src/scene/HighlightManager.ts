@@ -17,6 +17,8 @@ export interface BuildingParts {
   edgeGlow: THREE.LineSegments;
   foundation: THREE.Mesh;
   foundationWireframe: THREE.LineSegments;
+  /** Invisible hover/click hit pad — toggled with the building for PERF-002 */
+  foundationHitPad: THREE.Mesh;
   label: CSS2DObject | null;
   /** Last applied visual state — animate() reads baselines from here */
   state: VisualState | null;

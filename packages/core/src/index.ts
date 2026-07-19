@@ -35,6 +35,7 @@ export { VisualEncoder } from './renderers/VisualEncoder';
 // Interactions
 export { BuildingRaycaster } from './interactions/Raycaster';
 export type { RaycastHit } from './interactions/Raycaster';
+export { isSceneVisible } from './interactions/visibility';
 export { KeyboardNav } from './interactions/KeyboardNav';
 
 // Visuals

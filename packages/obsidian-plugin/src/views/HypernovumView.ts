@@ -8,6 +8,7 @@ import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
 import { SessionReader } from '../monitors/SessionReader';
+import { filterProjects } from '../utils/projectFilter';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
 import { ActivityMonitor, type ActivityStatus, type AgentPresence } from '../monitors/ActivityMonitor';
@@ -465,7 +466,7 @@ category: default
     }
 
     this.updateFilterOptions();
-    this.applyFiltersAndRebuild();
+    this.rebuildCity();
 
     // Emerald shockwave on every building whose quest count dropped
     for (const path of resolvedPaths) {
@@ -473,34 +474,36 @@ category: default
     }
   }
 
-  private applyFiltersAndRebuild(): void {
-    const query = this.searchQuery.toLowerCase().trim();
-    this.filteredProjects = this.allProjects.filter((project) => {
-      const fields = [
-        project.title,
-        project.path,
-        project.status,
-        project.priority,
-        project.category,
-        project.projectDir,
-        ...(project.stack ?? []),
-      ].filter(Boolean).join(' ').toLowerCase();
+  /**
+   * Full rebuild — repack the layout from ALL projects. Only on vault-data
+   * change (PERF-002): the layout is stable across filter/search/lens changes,
+   * so filtered-out buildings leave gaps instead of the city re-packing.
+   */
+  private rebuildCity(): void {
+    if (this.sceneManager) {
+      const districts = this.binPacker.packDistricts(this.allProjects);
+      this.sceneManager.clearAllWeather();
+      this.sceneManager.buildCity(this.allProjects, districts);
+    }
+    this.applyView();
+  }
 
-      return (!query || fields.includes(query))
-        && (this.statusFilter === 'all' || project.status === this.statusFilter)
-        && (this.priorityFilter === 'all' || project.priority === this.priorityFilter)
-        && (this.categoryFilter === 'all' || project.category === this.categoryFilter)
-        && (this.visualLayer !== 'memory' || project.hasMemoryContext);
+  /** Apply filters/search/lens as a visibility + retint pass — no repack. */
+  private applyView(): void {
+    this.filteredProjects = filterProjects(this.allProjects, {
+      query: this.searchQuery.toLowerCase().trim(),
+      status: this.statusFilter,
+      priority: this.priorityFilter,
+      category: this.categoryFilter,
+      memoryOnly: this.visualLayer === 'memory',
     });
 
     this.projects = this.filteredProjects;
-    // Run bin-packing layout
-    const districts = this.binPacker.packDistricts(this.filteredProjects);
 
-    // Create buildings in scene
     if (this.sceneManager) {
+      // Show the filtered set, hide the rest — no repack, layout stays put.
+      this.sceneManager.applyVisibility(new Set(this.filteredProjects.map((p) => p.path)));
       this.sceneManager.clearAllWeather();
-      this.sceneManager.buildCity(this.filteredProjects, districts);
 
       // Warnings drive the attention lens + badge; recompute before applying.
       this.recomputeWarnings();
@@ -1154,7 +1157,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (this.prioritySelect) this.prioritySelect.value = 'all';
     if (this.categorySelect) this.categorySelect.value = 'all';
     if (this.layerSelect) this.layerSelect.value = 'status';
-    this.applyFiltersAndRebuild();
+    this.applyView();
   }
 
   private addSaveButton(container: HTMLElement): void {
@@ -1285,7 +1288,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.attentionBadge.addEventListener('click', () => {
       this.visualLayer = 'attention';
       if (this.layerSelect) this.layerSelect.value = 'attention';
-      this.applyFiltersAndRebuild();
+      this.applyView();
     });
 
     // Lens presets (LENS-001)
@@ -1298,7 +1301,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.presetDeleteBtn.addEventListener('click', () => this.deleteSelectedPreset());
 
     // Debounce so a rebuild fires once per typing pause, not per keystroke (PERF-001).
-    const debouncedSearch = debounce(() => this.applyFiltersAndRebuild(), 200, false);
+    const debouncedSearch = debounce(() => this.applyView(), 200, false);
     searchInput.addEventListener('input', () => {
       this.searchQuery = searchInput.value;
       debouncedSearch();
@@ -1306,22 +1309,22 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     layerSelect.addEventListener('change', () => {
       this.visualLayer = layerSelect.value as VisualLayer;
-      this.applyFiltersAndRebuild();
+      this.applyView();
     });
 
     this.statusSelect.addEventListener('change', () => {
       this.statusFilter = this.statusSelect?.value ?? 'all';
-      this.applyFiltersAndRebuild();
+      this.applyView();
     });
 
     this.prioritySelect.addEventListener('change', () => {
       this.priorityFilter = this.prioritySelect?.value ?? 'all';
-      this.applyFiltersAndRebuild();
+      this.applyView();
     });
 
     this.categorySelect.addEventListener('change', () => {
       this.categoryFilter = this.categorySelect?.value ?? 'all';
-      this.applyFiltersAndRebuild();
+      this.applyView();
     });
 
     // Edge-type toggle chips (EDG-006)
@@ -1517,7 +1520,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (this.categorySelect) this.categorySelect.value = this.categoryFilter;
     if (this.searchInput) this.searchInput.value = this.searchQuery;
 
-    this.applyFiltersAndRebuild(); // recomputes + renders edges, applies edgeTypes
+    this.applyView(); // recomputes + renders edges, applies edgeTypes
   }
 
   private saveCurrentLens(): void {
