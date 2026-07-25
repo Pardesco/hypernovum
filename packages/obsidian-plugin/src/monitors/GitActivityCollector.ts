@@ -64,8 +64,47 @@ function heatFromCommitAge(lastCommitDate: number): number {
   return 5;
 }
 
+/** How long a collected snapshot stays fresh. Rebuilds fire far more often than commits. */
+const CACHE_TTL_MS = 30_000;
+
+interface CacheEntry {
+  at: number;
+  /** In-flight or settled result — sharing the promise dedupes concurrent callers. */
+  result: Promise<WeatherData | null>;
+}
+
 export class GitActivityCollector {
-  async collect(projectPath: string): Promise<WeatherData | null> {
+  /**
+   * Keyed by absolute directory. Each `collect` fans out 8 `git` child processes,
+   * and several project notes commonly resolve to the same repo — without this, a
+   * 100-project vault spawned 800 processes per city rebuild.
+   */
+  private cache = new Map<string, CacheEntry>();
+
+  /**
+   * Collect Git signals for a directory. Concurrent calls for the same directory
+   * share one scan, and repeated calls inside the TTL reuse the last result.
+   */
+  async collect(projectPath: string, now: number = Date.now()): Promise<WeatherData | null> {
+    const cached = this.cache.get(projectPath);
+    if (cached && now - cached.at < CACHE_TTL_MS) {
+      return cached.result;
+    }
+
+    const result = this.collectUncached(projectPath);
+    this.cache.set(projectPath, { at: now, result });
+    // A rejected promise must not poison the cache for the next 30s.
+    result.catch(() => this.cache.delete(projectPath));
+    return result;
+  }
+
+  /** Drop cached results — call after an action that changes a working tree. */
+  invalidate(projectPath?: string): void {
+    if (projectPath) this.cache.delete(projectPath);
+    else this.cache.clear();
+  }
+
+  private async collectUncached(projectPath: string): Promise<WeatherData | null> {
     if (!existsSync(projectPath)) return null;
     if (!existsSync(path.join(projectPath, '.git'))) return null;
 

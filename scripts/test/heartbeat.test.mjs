@@ -146,3 +146,199 @@ describe('heartbeat.js v2', () => {
     expect(files).not.toContain('old.json');
   });
 });
+
+/**
+ * `--hook` mode: Claude Code hooks deliver session_id / tool_name / cwd as JSON on
+ * stdin, and expose NO $CLAUDE_SESSION_ID or $TOOL_NAME env vars. Before this
+ * existed, the generated hook interpolated those non-existent variables, they
+ * expanded empty, and the script fell back to a pid-derived id — so every ping
+ * created a new orb and Stop could never close the real session.
+ */
+function hookPing(vault, payload, extra = []) {
+  return execFileSync('node', [SCRIPT, `--vault=${vault}`, '--hook', ...extra], {
+    input: JSON.stringify(payload),
+  });
+}
+
+describe('heartbeat.js --hook (stdin payload)', () => {
+  it('takes the session id from stdin so repeat pings share one snapshot', () => {
+    const vault = newVault();
+    const payload = {
+      session_id: 'hook-sess-1',
+      cwd: join(vault, 'my-app'),
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Edit',
+    };
+
+    hookPing(vault, payload, ['--name=Claude Code', '--agent-type=claude']);
+    hookPing(vault, payload, ['--name=Claude Code', '--agent-type=claude']);
+
+    const files = readdirSync(agentsDir(vault)).filter((f) => f.endsWith('.json'));
+    expect(files).toEqual(['hook-sess-1.json']);
+
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'hook-sess-1.json'), 'utf8'));
+    expect(snap.sessionId).toBe('hook-sess-1');
+    expect(snap.tool).toBe('Edit');
+    // project defaults to the basename of the agent's cwd
+    expect(snap.project).toBe('my-app');
+  });
+
+  it('treats a Stop event as session complete', () => {
+    const vault = newVault();
+    hookPing(vault, { session_id: 'hook-sess-2', cwd: vault, hook_event_name: 'PreToolUse', tool_name: 'Read' });
+    hookPing(vault, { session_id: 'hook-sess-2', cwd: vault, hook_event_name: 'Stop', reason: 'done' });
+
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'hook-sess-2.json'), 'utf8'));
+    expect(snap.state).toBe('complete');
+    expect(snap.stoppedAt).toBeGreaterThan(0);
+  });
+
+  it('lets explicit flags override the stdin payload', () => {
+    const vault = newVault();
+    hookPing(vault, { session_id: 'from-stdin', cwd: vault, tool_name: 'Bash' }, [
+      '--id=explicit',
+      '--project=chosen',
+    ]);
+
+    expect(existsSync(join(agentsDir(vault), 'explicit.json'))).toBe(true);
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'explicit.json'), 'utf8'));
+    expect(snap.project).toBe('chosen');
+    expect(snap.tool).toBe('Bash');
+  });
+
+  it('survives an empty or malformed stdin payload', () => {
+    const vault = newVault();
+    expect(() =>
+      execFileSync('node', [SCRIPT, `--vault=${vault}`, '--hook', '--id=fallback'], { input: '' }),
+    ).not.toThrow();
+    expect(() =>
+      execFileSync('node', [SCRIPT, `--vault=${vault}`, '--hook', '--id=fallback2'], { input: 'not json' }),
+    ).not.toThrow();
+    expect(existsSync(join(agentsDir(vault), 'fallback.json'))).toBe(true);
+    expect(existsSync(join(agentsDir(vault), 'fallback2.json'))).toBe(true);
+  });
+});
+
+describe('heartbeat.js --hook file extraction', () => {
+  it('pulls the edited file from tool_input.file_path, project-relative', () => {
+    // Same-file conflict detection compares project-relative paths; without this
+    // every hook ping reported file: null and conflicts could never fire.
+    const vault = newVault();
+    const cwd = join(vault, 'app');
+    hookPing(vault, {
+      session_id: 'file-sess',
+      cwd,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: join(cwd, 'src', 'cart.ts') },
+    });
+
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'file-sess.json'), 'utf8'));
+    expect(snap.file).toBe('src/cart.ts');
+  });
+
+  it('handles notebook_path and plain path too', () => {
+    const vault = newVault();
+    hookPing(vault, {
+      session_id: 'nb',
+      cwd: vault,
+      tool_name: 'NotebookEdit',
+      tool_input: { notebook_path: join(vault, 'analysis.ipynb') },
+    });
+    expect(JSON.parse(readFileSync(join(agentsDir(vault), 'nb.json'), 'utf8')).file)
+      .toBe('analysis.ipynb');
+  });
+
+  it('leaves a file outside the working directory absolute', () => {
+    const vault = newVault();
+    const outside = join(vault, '..', 'elsewhere.ts');
+    hookPing(vault, {
+      session_id: 'out',
+      cwd: join(vault, 'app'),
+      tool_name: 'Read',
+      tool_input: { file_path: outside },
+    });
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'out.json'), 'utf8'));
+    expect(snap.file).toContain('elsewhere.ts');
+  });
+
+  it('tolerates a missing or non-object tool_input', () => {
+    const vault = newVault();
+    hookPing(vault, { session_id: 'noinput', cwd: vault, tool_name: 'Bash' });
+    hookPing(vault, { session_id: 'badinput', cwd: vault, tool_name: 'Bash', tool_input: 'nope' });
+    expect(JSON.parse(readFileSync(join(agentsDir(vault), 'noinput.json'), 'utf8')).file).toBeNull();
+    expect(JSON.parse(readFileSync(join(agentsDir(vault), 'badinput.json'), 'utf8')).file).toBeNull();
+  });
+});
+
+describe('heartbeat.js session identity on stop', () => {
+  it('keeps name, type, project and last activity when the Stop hook fires', () => {
+    // The generated Stop hook runs `--hook --stop` with nothing else, and a Stop
+    // payload has no tool_name — so without inheritance the completed orb reverted
+    // to a nameless "Agent" with no recorded activity.
+    const vault = newVault();
+    const cwd = join(vault, 'app');
+
+    hookPing(vault, {
+      session_id: 'keep-me',
+      cwd,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: join(cwd, 'src', 'x.ts') },
+    }, ['--name=Claude Code', '--agent-type=claude', '--action=Editing x.ts']);
+
+    hookPing(vault, { session_id: 'keep-me', cwd, hook_event_name: 'Stop' });
+
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'keep-me.json'), 'utf8'));
+    expect(snap.state).toBe('complete');
+    expect(snap.name).toBe('Claude Code');
+    expect(snap.agentType).toBe('claude');
+    expect(snap.project).toBe('app');
+    expect(snap.action).toBe('Editing x.ts');
+    expect(snap.tool).toBe('Edit');
+    expect(snap.file).toBe('src/x.ts');
+    expect(snap.stoppedAt).toBeGreaterThan(0);
+  });
+
+  it('still lets an explicit flag override on stop', () => {
+    const vault = newVault();
+    ping(vault, 'ov', ['--name=First', '--action=one']);
+    ping(vault, 'ov', ['--stop', '--action=final']);
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'ov.json'), 'utf8'));
+    expect(snap.action).toBe('final');
+    expect(snap.name).toBe('First');
+  });
+
+  it('does not resurrect stale activity on an ordinary ping', () => {
+    // Only --stop inherits activity; a normal ping that omits --action clears it.
+    const vault = newVault();
+    ping(vault, 'clr', ['--action=one', '--file=a.ts']);
+    ping(vault, 'clr', ['--state=reading']);
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'clr.json'), 'utf8'));
+    expect(snap.action).toBeNull();
+    expect(snap.file).toBeNull();
+    expect(snap.state).toBe('reading');
+  });
+});
+
+describe('heartbeat.js records the working directory', () => {
+  it('stores cwd so the plugin can match by resolved project directory', () => {
+    // Matching on the cwd basename alone failed whenever a project's title differed
+    // from its folder name — no orb, no conflict detection, silently.
+    const vault = newVault();
+    const cwd = join(vault, 'kebab-case-folder');
+    hookPing(vault, { session_id: 'cwd-sess', cwd, tool_name: 'Read' });
+
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'cwd-sess.json'), 'utf8'));
+    expect(snap.cwd).toBe(cwd);
+    expect(snap.project).toBe('kebab-case-folder');
+  });
+
+  it('keeps cwd across a stop ping', () => {
+    const vault = newVault();
+    const cwd = join(vault, 'app');
+    hookPing(vault, { session_id: 'cwd-stop', cwd, tool_name: 'Edit' });
+    hookPing(vault, { session_id: 'cwd-stop', cwd, hook_event_name: 'Stop' });
+    expect(JSON.parse(readFileSync(join(agentsDir(vault), 'cwd-stop.json'), 'utf8')).cwd).toBe(cwd);
+  });
+});

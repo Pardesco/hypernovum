@@ -94,7 +94,11 @@ Dependency scanning matches only **sibling projects** (external packages like `r
 
 ### Agent activity (heartbeat v2)
 
-Agents make themselves visible by writing per-session snapshots to `<vault>/.hypernovum/agents/<sessionId>.json` (and an optional event log to `.hypernovum/sessions/<sessionId>.jsonl`) via `scripts/heartbeat.js`. Each session becomes a state-colored orb; two agents touching the same file surface a conflict. See the generated `AGENTS.md` / per-project `.hypernovum/SETUP.md` for the exact invocation. The `.hypernovum/` directory is auto-gitignored.
+Agents make themselves visible by writing per-session snapshots to `<vault>/.hypernovum/agents/<sessionId>.json` (and an optional event log to `.hypernovum/sessions/<sessionId>.jsonl`) via the heartbeat script.
+
+The script is installed into your vault at `<vault>/.hypernovum/heartbeat.js` by the command palette action **"Install agent heartbeat hooks"** (or by "Prepare vault for AI agents"), which also prints the hook JSON with every path already resolved. `scripts/heartbeat.js` in the repository is the source of truth; the plugin bundles an embedded copy, so an installed plugin never needs the repo checked out.
+
+Each session becomes a state-colored orb; two agents touching the same file surface a conflict. See the generated `AGENTS.md` / per-project `.hypernovum/SETUP.md` for the exact invocation for your machine.
 
 ---
 

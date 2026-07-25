@@ -35,6 +35,12 @@ export interface AgentPresence {
   name?: string;
   agentType?: string;
   project: string | null;
+  /**
+   * Agent working directory, when the heartbeat reported one. Matched against
+   * resolved project directories — more reliable than the project *name*, which
+   * only matches when a project's title equals its folder basename.
+   */
+  cwd?: string | null;
   action: string | null;
   state?: string;             // explicit snapshot state; undefined → registry infers
   tool?: string | null;
@@ -76,6 +82,7 @@ export function parseSnapshotToPresence(raw: any): AgentPresence | null {
     name: str(raw.name),
     agentType: str(raw.agentType),
     project: raw.project == null ? null : strOrNull(raw.project),
+    cwd: raw.cwd == null ? null : strOrNull(raw.cwd),
     action: strOrNull(raw.action),
     state,
     tool: raw.tool == null ? null : strOrNull(raw.tool),

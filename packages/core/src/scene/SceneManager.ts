@@ -21,7 +21,7 @@ import { RooftopFactory } from '../renderers/RooftopFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
 import { ArteryManager } from '../visuals/ArteryManager';
 import { debugLog } from '../utils/log';
-import { escapeHtml } from '../utils/html';
+import { appendDiv, appendSpan, appendTooltipRow } from '../utils/dom';
 import { orbVisualForState, stateTintsHost, type OrbVisual } from './agentOrbVisual';
 import type { InteractionStore } from '../stores/interactionStore';
 
@@ -165,6 +165,16 @@ export class SceneManager {
   // Launch effect tracking
   private launchEffects: Map<THREE.Mesh, { startTime: number; duration: number }> = new Map();
 
+  /** Gate for the requestAnimationFrame loop — see setRenderingEnabled. */
+  private renderingEnabled = true;
+
+  /**
+   * True when the OS asks for reduced motion. Damps the continuous idle motion
+   * (core rotation, glow breathing, orb orbits) — the CSS media query only covered
+   * CSS animations, never the WebGL scene.
+   */
+  private reducedMotion = false;
+
   constructor(container: HTMLElement, options?: SceneManagerOptions) {
     this.container = container;
     this.scene = new THREE.Scene();
@@ -199,6 +209,14 @@ export class SceneManager {
       this.showLabels = options.settings.showLabels;
       this.useShadows = options.settings.enableShadows;
       this.buildingStyle = options.settings.buildingStyle;
+    }
+
+    // Honour the OS reduced-motion preference for the WebGL scene too — the
+    // stylesheet's media query only ever covered CSS animations.
+    try {
+      this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      this.reducedMotion = false;
     }
 
     this.initScene();
@@ -253,6 +271,23 @@ export class SceneManager {
     this.camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
     this.camera.position.set(40, 80, 100);
     this.camera.lookAt(40, 0, 30);
+  }
+
+  /**
+   * True when WebGL is actually usable. Checked before constructing the scene so
+   * the plugin can show an explanation instead of a black rectangle when hardware
+   * acceleration is off or the GPU is blocklisted.
+   */
+  static isWebGLAvailable(): boolean {
+    try {
+      const canvas = document.createElement('canvas');
+      return !!(
+        window.WebGLRenderingContext &&
+        (canvas.getContext('webgl2') || canvas.getContext('webgl'))
+      );
+    } catch {
+      return false;
+    }
   }
 
   private initRenderer(): void {
@@ -2064,21 +2099,6 @@ export class SceneManager {
     const fileBase = info.file ? info.file.split(/[\\/]/).pop() : null;
     const age = info.lastPing ? this.formatRelativeTime(info.lastPing) : null;
 
-    const rows: string[] = [];
-    rows.push(`<div class="tooltip-row"><span>State:</span> <span class="agent-state agent-state-${this.escapeHtml(state)}">${this.escapeHtml(state)}</span></div>`);
-    if (project) rows.push(`<div class="tooltip-row"><span>Project:</span> ${this.escapeHtml(project.title)}</div>`);
-    if (info.action) rows.push(`<div class="tooltip-row"><span>Action:</span> ${this.escapeHtml(info.action)}</div>`);
-    if (info.tool) rows.push(`<div class="tooltip-row"><span>Tool:</span> ${this.escapeHtml(info.tool)}</div>`);
-    if (fileBase) rows.push(`<div class="tooltip-row"><span>File:</span> ${this.escapeHtml(fileBase)}</div>`);
-    if (age) rows.push(`<div class="tooltip-row"><span>Ping:</span> ${this.escapeHtml(age)}</div>`);
-
-    const typeLabel = info.agentType ? ` · ${this.escapeHtml(info.agentType.toUpperCase())}` : '';
-    const html = `
-      <div class="tooltip-agent-kicker">AGENT${typeLabel}</div>
-      <strong>${this.escapeHtml(info.name ?? 'Agent')}</strong>
-      ${rows.join('')}
-    `;
-
     // Anchor beside the orb's current world position.
     const world = entry.orb.getWorldPosition(new THREE.Vector3());
     const screenPos = world.clone().project(this.camera);
@@ -2089,7 +2109,25 @@ export class SceneManager {
     anchor.className = 'hypernovum-tooltip-anchor';
     const div = document.createElement('div');
     div.className = 'hypernovum-tooltip hypernovum-agent-tooltip';
-    div.innerHTML = html;
+
+    // Built with DOM APIs: every value here is agent- or vault-authored text.
+    const typeLabel = info.agentType ? ` · ${info.agentType.toUpperCase()}` : '';
+    appendDiv(div, 'tooltip-agent-kicker', `AGENT${typeLabel}`);
+    const name = document.createElement('strong');
+    name.textContent = info.name ?? 'Agent';
+    div.appendChild(name);
+
+    const stateRow = appendDiv(div, 'tooltip-row');
+    appendSpan(stateRow, undefined, 'State:');
+    stateRow.appendChild(document.createTextNode(' '));
+    appendSpan(stateRow, `agent-state agent-state-${state}`, state);
+
+    if (project) appendTooltipRow(div, 'Project:', project.title);
+    if (info.action) appendTooltipRow(div, 'Action:', info.action);
+    if (info.tool) appendTooltipRow(div, 'Tool:', info.tool);
+    if (fileBase) appendTooltipRow(div, 'File:', fileBase);
+    if (age) appendTooltipRow(div, 'Ping:', age);
+
     if (onLeft) div.style.left = '10px';
     else div.style.right = '10px';
     anchor.appendChild(div);
@@ -2105,55 +2143,69 @@ export class SceneManager {
     height: number,
     variant: 'building' | 'foundation' = 'building',
   ): void {
-    let html: string;
+    // Built entirely with DOM APIs. This previously interpolated project.status,
+    // .priority and .category into innerHTML WITHOUT escaping, so frontmatter like
+    // `status: '"><img src=x onerror=…>'` executed in the tooltip.
+    const body = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = project.title;
+    body.appendChild(title);
 
     if (variant === 'foundation') {
       // Foundation plinth = the tech-stack layer. Compact panel.
-      const chips = project.stack && project.stack.length > 0
-        ? project.stack.map(tech => `<span class="tooltip-stack-item">${this.escapeHtml(tech)}</span>`).join('')
-        : '<span class="tooltip-stack-none">No stack declared</span>';
-      html = `
-        <strong>${this.escapeHtml(project.title)}</strong>
-        <div class="tooltip-stack-section tooltip-stack-solo">
-          <div class="tooltip-stack-header">FOUNDATION · TECH STACK</div>
-          <div class="tooltip-stack-list">${chips}</div>
-        </div>
-        <div class="tooltip-row tooltip-enriched"><span>Files:</span> ${project.noteCount}</div>
-      `;
+      const section = appendDiv(body, 'tooltip-stack-section tooltip-stack-solo');
+      appendDiv(section, 'tooltip-stack-header', 'FOUNDATION · TECH STACK');
+      const list = appendDiv(section, 'tooltip-stack-list');
+      if (project.stack && project.stack.length > 0) {
+        for (const tech of project.stack) appendSpan(list, 'tooltip-stack-item', tech);
+      } else {
+        appendSpan(list, 'tooltip-stack-none', 'No stack declared');
+      }
+      appendTooltipRow(body, 'Files:', String(project.noteCount), 'tooltip-row tooltip-enriched');
     } else {
       // Building = project vitals (stack lives on the foundation panel)
-      html = `
-        <strong>${this.escapeHtml(project.title)}</strong>
-        <div class="tooltip-row"><span>Status:</span> <span class="status-${project.status}">${project.status}</span></div>
-        <div class="tooltip-row"><span>Priority:</span> ${project.priority}</div>
-        <div class="tooltip-row"><span>Category:</span> ${project.category}</div>
-        <div class="tooltip-row"><span>Health:</span> ${project.health}%</div>
-        <div class="tooltip-row"><span>Files:</span> ${project.noteCount}</div>
-      `;
+      const statusRow = appendDiv(body, 'tooltip-row');
+      appendSpan(statusRow, undefined, 'Status:');
+      statusRow.appendChild(document.createTextNode(' '));
+      appendSpan(statusRow, `status-${project.status}`, project.status);
+
+      appendTooltipRow(body, 'Priority:', project.priority);
+      appendTooltipRow(body, 'Category:', project.category);
+      appendTooltipRow(body, 'Health:', `${project.health}%`);
+      appendTooltipRow(body, 'Files:', String(project.noteCount));
 
       if (project.gitActivity) {
         const lastCommit = project.gitActivity.lastCommitDate
           ? this.formatRelativeTime(project.gitActivity.lastCommitDate)
           : 'none';
-        html += `
-          <div class="tooltip-enriched-section">
-            <div class="tooltip-row tooltip-enriched"><span>Git:</span> ${lastCommit}</div>
-            <div class="tooltip-row tooltip-enriched"><span>Branch:</span> ${this.escapeHtml(project.gitActivity.activeBranch || 'unknown')}</div>
-            <div class="tooltip-row tooltip-enriched"><span>30d commits:</span> ${project.gitActivity.commitsLast30d}</div>
-          </div>
-        `;
+        const section = appendDiv(body, 'tooltip-enriched-section');
+        appendTooltipRow(section, 'Git:', lastCommit, 'tooltip-row tooltip-enriched');
+        appendTooltipRow(
+          section,
+          'Branch:',
+          project.gitActivity.activeBranch || 'unknown',
+          'tooltip-row tooltip-enriched',
+        );
+        appendTooltipRow(
+          section,
+          '30d commits:',
+          String(project.gitActivity.commitsLast30d),
+          'tooltip-row tooltip-enriched',
+        );
       }
 
       if (project.hasMemoryContext) {
-        html += `
-          <div class="tooltip-row tooltip-enriched"><span>Memory:</span> <span class="tooltip-memory">Context ready</span></div>
-        `;
+        const row = appendDiv(body, 'tooltip-row tooltip-enriched');
+        appendSpan(row, undefined, 'Memory:');
+        row.appendChild(document.createTextNode(' '));
+        appendSpan(row, 'tooltip-memory', 'Context ready');
       }
 
       if (project.questions && project.questions.length > 0) {
-        html += `
-          <div class="tooltip-row tooltip-enriched"><span>Quests:</span> <span class="tooltip-quest">${project.questions.length} open</span></div>
-        `;
+        const row = appendDiv(body, 'tooltip-row tooltip-enriched');
+        appendSpan(row, undefined, 'Quests:');
+        row.appendChild(document.createTextNode(' '));
+        appendSpan(row, 'tooltip-quest', `${project.questions.length} open`);
       }
     }
 
@@ -2176,7 +2228,7 @@ export class SceneManager {
     anchor.className = 'hypernovum-tooltip-anchor';
     const div = document.createElement('div');
     div.className = 'hypernovum-tooltip';
-    div.innerHTML = html;
+    while (body.firstChild) div.appendChild(body.firstChild);
     if (buildingOnLeft) {
       div.style.left = '10px';
     } else {
@@ -2225,10 +2277,6 @@ export class SceneManager {
     this.scene.add(leaderGroup);
   }
 
-  private escapeHtml(str: string): string {
-    return escapeHtml(str);
-  }
-
   private formatRelativeTime(epochMs: number): string {
     const diff = Date.now() - epochMs;
     if (diff < 60_000) return 'just now';
@@ -2240,15 +2288,57 @@ export class SceneManager {
     return `${days}d ago`;
   }
 
+  /**
+   * Suspend or resume the render loop.
+   *
+   * Without this the loop ran for the lifetime of the view: open the city once,
+   * collapse the sidebar or switch to another tab, and a 60fps WebGL scene with
+   * bloom kept rendering invisibly until Obsidian restarted. The plugin calls this
+   * from an IntersectionObserver plus `visibilitychange`.
+   */
+  setRenderingEnabled(enabled: boolean): void {
+    if (enabled === this.renderingEnabled) return;
+    this.renderingEnabled = enabled;
+
+    if (!enabled) {
+      if (this.animationId !== null) {
+        cancelAnimationFrame(this.animationId);
+        this.animationId = null;
+      }
+      return;
+    }
+
+    // getDelta() would otherwise return the whole paused interval and make every
+    // time-based animation jump on resume.
+    this.clock.getDelta();
+    if (this.animationId === null) this.animate();
+  }
+
+  /** True while the render loop is running. */
+  isRenderingEnabled(): boolean {
+    return this.renderingEnabled;
+  }
+
   private animate = (): void => {
+    if (!this.renderingEnabled) {
+      this.animationId = null;
+      return;
+    }
     this.animationId = requestAnimationFrame(this.animate);
 
     const elapsed = this.clock.getElapsedTime();
     const delta = this.clock.getDelta();
 
+    // Phase driver for continuous idle motion (core rotation, glow breathing, orb
+    // orbits, quest-gem bob). Frozen at 0 under prefers-reduced-motion, which
+    // parks every oscillation at its base value. `elapsed` itself keeps advancing,
+    // so transient effects — launch pulses, quest bursts, the completed-orb fade —
+    // still run to completion.
+    const motion = this.reducedMotion ? 0 : elapsed;
+
     // Update Neural Core and Data Arteries
     if (this.neuralCore) {
-      this.neuralCore.animate(elapsed);
+      this.neuralCore.animate(motion);
     }
     if (this.arteryManager) {
       this.arteryManager.update(delta, elapsed);
@@ -2276,7 +2366,7 @@ export class SceneManager {
 
       const s = entry.state;
       if (s && s.glitch > 0) {
-        material.uniforms.uGlitch.value = s.glitch + Math.sin(elapsed * s.glitchSpeed) * 0.3;
+        material.uniforms.uGlitch.value = s.glitch + Math.sin(motion * s.glitchSpeed) * 0.3;
       } else {
         // Smoothly decay glitch back to 0 after a state change
         const current = material.uniforms.uGlitch.value as number;
@@ -2293,7 +2383,7 @@ export class SceneManager {
       const weather = this.highlight.getWeather(entry.path);
       if (weather && weather.churnScore > 60 && !weather.hasMergeConflicts) {
         const overheatIntensity = (weather.churnScore - 60) / 40; // 0-1 for scores 60-100
-        const overheatPulse = Math.sin(elapsed * 4 + entry.building.position.x) * 0.15 * overheatIntensity;
+        const overheatPulse = Math.sin(motion * 4 + entry.building.position.x) * 0.15 * overheatIntensity;
         material.uniforms.uPulse.value = Math.max(
           material.uniforms.uPulse.value as number,
           overheatIntensity * 0.6 + overheatPulse
@@ -2321,19 +2411,19 @@ export class SceneManager {
 
       // Position: orbit while working; park at the top (subtle bob) otherwise.
       if (v.orbit) {
-        const t = elapsed * 1.6 + entry.phase;
+        const t = motion * 1.6 + entry.phase;
         entry.orb.position.set(
           Math.cos(t) * 0.9,
-          entry.baseY + Math.sin(elapsed * 2.3 + entry.phase) * 0.12,
+          entry.baseY + Math.sin(motion * 2.3 + entry.phase) * 0.12,
           Math.sin(t) * 0.9,
         );
       } else {
-        entry.orb.position.set(0, entry.baseY + Math.sin(elapsed * 1.5 + entry.phase) * 0.06, 0);
+        entry.orb.position.set(0, entry.baseY + Math.sin(motion * 1.5 + entry.phase) * 0.06, 0);
       }
 
       // Pulse: modulate emissive around the published baseline.
       if (v.pulseSpeed > 0) {
-        mat.emissiveIntensity = v.emissiveBase + Math.sin(elapsed * v.pulseSpeed + entry.phase) * v.pulseAmplitude;
+        mat.emissiveIntensity = v.emissiveBase + Math.sin(motion * v.pulseSpeed + entry.phase) * v.pulseAmplitude;
       }
 
       // Complete fade: ramp opacity 1→0 over 60s, then hide the orb.
@@ -2353,7 +2443,7 @@ export class SceneManager {
     for (const entry of this.conflictRings.values()) {
       const rm = entry.mesh.material as THREE.MeshBasicMaterial;
       const speed = entry.severity === 'high' ? 5 : 2.5;
-      rm.opacity = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(elapsed * speed));
+      rm.opacity = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(motion * speed));
     }
 
     // Label visibility policy (INT-006) — 4Hz throttled distance culling.
@@ -2363,7 +2453,7 @@ export class SceneManager {
     }
 
     // Typed graph edges breathe + hovered-neighborhood boost (EdgeManager).
-    this.edges.update(elapsed);
+    this.edges.update(motion);
 
     // Quest-resolved shockwaves: expand and fade, then self-dispose
     if (this.questBursts.length > 0) {
@@ -2386,14 +2476,14 @@ export class SceneManager {
 
     // Quest gems: slow spin + gentle bob
     for (const gem of this.questMarkers) {
-      gem.rotation.y = elapsed * 1.2;
+      gem.rotation.y = motion * 1.2;
       gem.position.y = (gem.userData.baseY as number) +
-        Math.sin(elapsed * 2 + (gem.userData.bobPhase as number)) * 0.15;
+        Math.sin(motion * 2 + (gem.userData.bobPhase as number)) * 0.15;
     }
 
     // Pulse critical-priority warning beacons (slow aircraft-light blink)
     if (this.roofBeacons.length > 0) {
-      const blink = (Math.sin(elapsed * 2.4) + 1) / 2;
+      const blink = (Math.sin(motion * 2.4) + 1) / 2;
       const intensity = 0.3 + blink * 2.0;
       for (const beacon of this.roofBeacons) {
         (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
@@ -2409,7 +2499,7 @@ export class SceneManager {
       if (!s) continue;
       const mat = entry.building.material as THREE.MeshStandardMaterial;
       mat.emissiveIntensity = s.pulseAmplitude > 0
-        ? s.emissiveBase + Math.sin(elapsed * s.pulseSpeed) * s.pulseAmplitude
+        ? s.emissiveBase + Math.sin(motion * s.pulseSpeed) * s.pulseAmplitude
         : s.emissiveBase;
     }
 
@@ -2442,7 +2532,7 @@ export class SceneManager {
     for (const handle of this.dragHandles) {
       if (handle === this.hoveredHandle) continue; // Keep hover bright
       const mat = handle.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 0.25 + Math.sin(elapsed * 2 + handle.position.x * 0.5) * 0.15;
+      mat.emissiveIntensity = 0.25 + Math.sin(motion * 2 + handle.position.x * 0.5) * 0.15;
     }
 
     // Animate edge glow for blocked buildings — tracked array, NOT a
@@ -2453,7 +2543,7 @@ export class SceneManager {
       const s = path ? this.parts.get(path)?.state : undefined;
       if (s && !s.edgeGlowPulse) continue;
       const mat = glow.material as THREE.LineBasicMaterial;
-      mat.opacity = 0.4 + Math.sin(elapsed * 4) * 0.25;
+      mat.opacity = 0.4 + Math.sin(motion * 4) * 0.25;
     }
 
     // Clamp pan target so camera can't drift into the void

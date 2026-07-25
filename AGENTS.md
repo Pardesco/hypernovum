@@ -113,21 +113,54 @@ Never run `npm run build` or `tsc` without first committing your source changes.
 
 ### Rule 3: Check CORE_BUILD_VERSION after any rebuild
 
-The core exports a version constant:
+The core exports a version constant. **It is stamped automatically — do NOT hand-edit it.**
 
 ```typescript
-// packages/core/src/index.ts
-export const CORE_BUILD_VERSION = '2026-02-26-5efc807';
+// packages/core/src/index.ts — SOURCE always holds the placeholder
+export const CORE_BUILD_VERSION = 'dev';
 ```
+
+`packages/core/scripts/stamp-build.mjs` runs as part of `npm run build:core` and
+rewrites `'dev'` in `dist/index.js` + `dist/index.d.ts` to
+`<pkg version>+<git short hash>.<date>`, e.g. `0.4.0+d85c9c4.2026-07-25`.
 
 The Pro app logs it at startup:
 ```
-[Hypernovum] Core version: 2026-02-26-5efc807
+[Hypernovum] Core version: 0.4.0+d85c9c4.2026-07-25
 ```
 
-After rebuilding core, verify this version is what you expect. If it shows an old version, something went wrong with the sync.
+After rebuilding core, verify this version is what you expect. If it shows an old
+version, something went wrong with the sync.
 
-**When you modify core, update this constant** with the current date and commit hash.
+**Editing the constant in source breaks the build**: the stamper matches the literal
+`'dev'`, and exits non-zero with `WARNING: CORE_BUILD_VERSION placeholder not found`
+if it's missing.
+
+**What you must do when you modify core: commit first, then rebuild.** The stamp
+embeds the git hash, so building with uncommitted core changes produces an artifact
+labelled with the *previous* commit — which is exactly the silent-drift case this
+constant exists to catch.
+
+### Rule 3b: Never commit dev-vault artifacts into this repo
+
+**This repo doubles as the development Obsidian vault**, so the plugin writes its
+own output here. Two of those land on tracked files:
+
+- **`AGENTS.md`** — "Prepare vault for AI agents" appends a
+  `<!-- hypernovum:start -->…<!-- hypernovum:end -->` section containing a table of
+  every project in the dev vault **with absolute local paths**. This repo is public.
+  Committing it publishes that inventory. Strip the block before committing; it
+  regenerates from the command palette any time.
+- **Snapshots and briefings** — `Hypernovum Snapshot *.png` and
+  `Hypernovum Briefing *.md` at the repo root (now gitignored).
+
+Before committing, run `git diff AGENTS.md` and confirm it contains no project
+table — the generated block is ~100 lines of `| title | status | … | local path |`
+rows. If it's there, delete everything between the markers (inclusive) first.
+
+This is also why QA has to run in a **separate, fresh vault** — the dev vault has
+files a real install never has, which is exactly how `scripts/heartbeat.js` shipped
+for months while being unreachable for every actual user.
 
 ### Rule 4: Use the sync script for Pro app
 

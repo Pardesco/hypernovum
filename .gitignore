@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 packages/core/dist/
+packages/obsidian-plugin/dist/
 *.tsbuildinfo
 
 # IDE
@@ -34,6 +35,11 @@ nul
 /Untitled*.base
 /Untitled*.canvas
 /20??-??-??.md
+
+# Plugin output generated into the dev vault (snapshots, briefings, agent plumbing)
+/Hypernovum Snapshot *.png
+/Hypernovum Briefing *.md
+/.hypernovum/
 
 # Plugin build output (attached to GitHub releases by CI, not tracked)
 packages/obsidian-plugin/main.js

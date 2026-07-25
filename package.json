@@ -6,10 +6,13 @@
     "packages/obsidian-plugin"
   ],
   "scripts": {
-    "build": "npm run build:core && npm run build:plugin",
+    "build": "npm run check:versions && npm run build:core && npm run build:plugin",
     "build:core": "npm run build -w packages/core",
-    "build:plugin": "npm run build -w packages/obsidian-plugin",
-    "dev": "npm run dev -w packages/obsidian-plugin",
+    "build:plugin": "npm run gen:heartbeat && npm run build -w packages/obsidian-plugin",
+    "dev": "npm run gen:heartbeat && npm run dev -w packages/obsidian-plugin",
+    "gen:heartbeat": "node scripts/gen-heartbeat-source.mjs",
+    "typecheck": "tsc --build",
+    "check:versions": "node scripts/check-versions.mjs",
     "test": "vitest run"
   },
   "author": "Randall Morgan",

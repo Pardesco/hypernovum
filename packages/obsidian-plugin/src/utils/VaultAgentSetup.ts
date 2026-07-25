@@ -1,6 +1,7 @@
-import type { App } from 'obsidian';
+import { normalizePath, TFile, type App } from 'obsidian';
 import type { ProjectData } from '@hypernovum/core';
 import type { AgentSkill } from './SkillsScanner';
+import { buildPingExample, buildStopExample, type HeartbeatPaths } from './heartbeatDocs';
 
 const START_MARKER = '<!-- hypernovum:start -->';
 const END_MARKER = '<!-- hypernovum:end -->';
@@ -25,38 +26,44 @@ export async function prepareVaultForAgents(
   app: App,
   projects: ProjectData[],
   skills: AgentSkill[] = [],
+  heartbeat: HeartbeatPaths | null = null,
 ): Promise<PrepareVaultResult> {
-  const section = buildSection(projects, skills);
-  const adapter = app.vault.adapter;
-  const exists = await adapter.exists(AGENTS_FILE);
+  const section = buildSection(projects, skills, heartbeat);
+  const filePath = normalizePath(AGENTS_FILE);
 
-  if (!exists) {
-    await adapter.write(AGENTS_FILE, `# AGENTS.md\n\nInstructions for AI coding agents working in this Obsidian vault.\n\n${section}\n`);
+  // Vault API, not the adapter: AGENTS.md is user-visible content, so it needs to
+  // land in Obsidian's file index and fire the usual create/modify events.
+  const existing = app.vault.getAbstractFileByPath(filePath);
+
+  if (!(existing instanceof TFile)) {
+    await app.vault.create(
+      filePath,
+      `# AGENTS.md\n\nInstructions for AI coding agents working in this Obsidian vault.\n\n${section}\n`,
+    );
     return { created: true, projectCount: projects.length };
   }
 
-  const current = await adapter.read(AGENTS_FILE);
-  const startIdx = current.indexOf(START_MARKER);
-  const endIdx = current.indexOf(END_MARKER);
+  await app.vault.process(existing, (current) => {
+    const startIdx = current.indexOf(START_MARKER);
+    const endIdx = current.indexOf(END_MARKER);
 
-  let next: string;
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    // Replace the existing marked section in place
-    next = current.slice(0, startIdx) + section + current.slice(endIdx + END_MARKER.length);
-  } else {
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      // Replace the existing marked section in place
+      return current.slice(0, startIdx) + section + current.slice(endIdx + END_MARKER.length);
+    }
     // Append the section, preserving everything the user already wrote
-    next = `${current.replace(/\s*$/, '')}\n\n${section}\n`;
-  }
+    return `${current.replace(/\s*$/, '')}\n\n${section}\n`;
+  });
 
-  await adapter.write(AGENTS_FILE, next);
   return { created: false, projectCount: projects.length };
 }
 
-function buildSection(projects: ProjectData[], skills: AgentSkill[]): string {
+function buildSection(projects: ProjectData[], skills: AgentSkill[], heartbeat: HeartbeatPaths | null): string {
   const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const inventory = buildInventory(projects);
   const questBoard = buildQuestBoard(projects);
   const skillsRoster = buildSkillsRoster(skills);
+  const heartbeatSection = buildHeartbeatSection(heartbeat);
 
   return `${START_MARKER}
 ## Hypernovum project city
@@ -103,28 +110,47 @@ ${skillsRoster}
 
 When Hypernovum launches an agent for a project it writes \`.hypernovum/SETUP.md\` (gitignored) into the project directory with fresh metadata and Git signals — read it first if present. If a project directory contains \`.hypernovum/MEMORY_CONTEXT.md\`, treat it as persistent memory: read it before starting and consider updating it when you finish significant work.
 
-### Make your activity visible (Heartbeat v2)
+${heartbeatSection}
+${END_MARKER}`;
+}
 
-While working, emit a v2 heartbeat so your session appears as a named, stateful orb. Each session owns its own snapshot file, so concurrent agents never clobber each other:
+/**
+ * The heartbeat instructions, pointing at the script Hypernovum installed into
+ * this vault. Paths are fully resolved — earlier versions emitted
+ * `<vault-root>/scripts/heartbeat.js`, a repo path that does not exist in an
+ * installed plugin, so no agent could ever ping successfully.
+ */
+function buildHeartbeatSection(heartbeat: HeartbeatPaths | null): string {
+  if (!heartbeat) {
+    return `### Make your activity visible (Heartbeat v2)
+
+The heartbeat script is not installed in this vault yet. In Obsidian, run the
+command palette action **"Install agent heartbeat hooks"** — it writes the script
+to \`.hypernovum/heartbeat.js\` and prints ready-to-paste hook JSON. Re-run
+**"Prepare vault for AI agents"** afterwards and this section will contain the
+exact commands for this machine.`;
+  }
+
+  return `### Make your activity visible (Heartbeat v2)
+
+While working, emit a v2 heartbeat so your session appears as a named, stateful orb. Each session owns its own snapshot file, so concurrent agents never clobber each other. These commands are already resolved for this vault — run them as-is:
 
 \`\`\`bash
-node "<vault-root>/scripts/heartbeat.js" \\
-  --vault="<vault-root>" --id="$CLAUDE_SESSION_ID" \\
-  --name="Claude Code" --agent-type=claude \\
-  --project="My Project" --state=editing --tool=Edit --file=src/x.ts
+${buildPingExample(heartbeat, 'My Project')}
 
 # when done:
-node "<vault-root>/scripts/heartbeat.js" --vault="<vault-root>" --id="$CLAUDE_SESSION_ID" --stop
+${buildStopExample(heartbeat)}
 \`\`\`
 
-- Pass \`--id "$CLAUDE_SESSION_ID"\` so every ping updates the same orb.
+- Reuse one \`--id\` for every ping in a session so they all update the same orb — pick any stable string. (From a Claude Code hook, pass \`--hook\` instead: the script then reads the real \`session_id\` from the hook's stdin JSON. There is no \`$CLAUDE_SESSION_ID\` environment variable.)
 - \`--state\`: starting | planning | reading | editing | running | testing | reviewing | waiting | blocked | complete | failed (inferred from \`--tool\`/\`--action\` if omitted).
 - \`--file\` (project-relative) enables same-file conflict detection between agents.
 - \`--project\` should match the project note's title.
-- Snapshots land in \`.hypernovum/agents/<sessionId>.json\` (auto-gitignored); the plugin treats pings older than 10s as idle, then stale.
+- Snapshots land in \`<vault>/.hypernovum/agents/<sessionId>.json\`; the plugin treats pings older than 10s as idle, then stale.
 
-A legacy single-file \`.hypernovum-status.json\` is still read for one release (renders as an anonymous agent), but v2 gives you identity, state, and conflict detection. When Hypernovum launches an agent it writes the full per-project invocation into \`.hypernovum/SETUP.md\`.
-${END_MARKER}`;
+The script itself lives at \`${heartbeat.scriptPath}\` — Hypernovum installs and updates it, so don't edit it by hand.
+
+A legacy single-file \`.hypernovum-status.json\` is still read for one release (renders as an anonymous agent), but v2 gives you identity, state, and conflict detection. When Hypernovum launches an agent it writes the full per-project invocation into that project's \`.hypernovum/SETUP.md\`.`;
 }
 
 function buildInventory(projects: ProjectData[]): string {

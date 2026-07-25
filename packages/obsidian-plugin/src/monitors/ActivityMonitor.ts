@@ -49,18 +49,27 @@ export class ActivityMonitor {
   private statusFilePath = '.hypernovum-status.json';
   private agentsDirPath = '.hypernovum/agents';
 
+  /**
+   * Hands the interval id to the owning Component so Obsidian clears it even if
+   * stop() is somehow missed — `registerInterval` is the documented lifecycle hook.
+   */
+  private registerInterval?: (id: number) => void;
+
   constructor(
     app: App,
     callbacks: ActivityCallbacks,
     options?: {
       pollInterval?: number;  // How often to check file (ms)
       idleTimeout?: number;   // How long before considering idle (ms)
+      /** Usually `(id) => view.registerInterval(id)`. */
+      registerInterval?: (id: number) => void;
     }
   ) {
     this.app = app;
     this.callbacks = callbacks;
     this.pollInterval = options?.pollInterval ?? 500;  // Check every 500ms
     this.idleTimeout = options?.idleTimeout ?? 10000;  // Idle after 10s of no updates (Claude thinks between tool calls)
+    this.registerInterval = options?.registerInterval;
   }
 
   /** Start monitoring for activity */
@@ -68,6 +77,7 @@ export class ActivityMonitor {
     if (this.pollTimer !== null) return;
 
     this.pollTimer = window.setInterval(() => this.poll(), this.pollInterval);
+    this.registerInterval?.(this.pollTimer);
 
     // Initial poll
     this.poll();

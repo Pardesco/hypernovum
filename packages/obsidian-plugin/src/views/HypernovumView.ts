@@ -1,13 +1,14 @@
-import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Platform, debounce } from 'obsidian';
-import { existsSync } from 'fs';
-import { exec } from 'child_process';
+import { ItemView, WorkspaceLeaf, App, Notice, TFile, TFolder, Menu, Modal, Setting, Platform, debounce } from 'obsidian';
+import { existsSync, statSync } from 'fs';
+import { execFile } from 'child_process';
 import * as path from 'path';
-import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, escapeHtml, createInteractionStore } from '@hypernovum/core';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, createInteractionStore } from '@hypernovum/core';
 import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult } from '@hypernovum/core';
 import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
 import { SessionReader } from '../monitors/SessionReader';
+import type { SessionDigest } from '../monitors/sessionDigest';
 import { filterProjects } from '../utils/projectFilter';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
@@ -35,6 +36,14 @@ import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { mapLimit } from '../utils/concurrency';
 import { generateAgentContext } from '../utils/AgentContext';
 import { scanSkills } from '../utils/SkillsScanner';
+import { getVaultBasePath, heartbeatPaths } from '../utils/HeartbeatInstaller';
+import {
+  DIR_SOURCE_LABEL,
+  resolveProjectDir,
+  samePath,
+  type ResolvedProjectDir,
+} from '../utils/projectPaths';
+import { createBinaryVaultFile } from '../utils/vaultFiles';
 import type { HypernovumSettings } from '../settings/SettingsTab';
 import type HypernovumPlugin from '../main';
 
@@ -110,6 +119,52 @@ function hexCss(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0')}`;
 }
 
+/** Colored legend swatch. The glow colour is data-derived, so it stays in JS. */
+function appendLegendChip(parent: HTMLElement, color: string): HTMLElement {
+  const chip = parent.createSpan({ cls: 'legend-chip' });
+  chip.style.background = color;
+  chip.style.boxShadow = `0 0 6px ${color}88`;
+  return chip;
+}
+
+/**
+ * True when the path exists AND is a directory. `existsSync` alone matched files
+ * too, so a note called `Thing` next to `Thing.md` could be handed back as a
+ * project "directory".
+ */
+function isDirectory(absolutePath: string): boolean {
+  try {
+    return statSync(absolutePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Markers that make a directory a project root in its own right. */
+const PROJECT_ROOT_MARKERS = [
+  '.git',
+  'package.json',
+  'pyproject.toml',
+  'Cargo.toml',
+  'go.mod',
+  'pom.xml',
+  'build.gradle',
+  'Gemfile',
+  'composer.json',
+  '.hypernovum',
+];
+
+/**
+ * True when the directory looks like a project of its own.
+ *
+ * Used to reject a plain notes folder as a project directory: without it, every
+ * note in `Projects/` resolved to `Projects/` itself and unrelated projects shared
+ * one repo's Git data and one agent working directory.
+ */
+function isProjectRoot(absolutePath: string): boolean {
+  return PROJECT_ROOT_MARKERS.some((marker) => existsSync(path.join(absolutePath, marker)));
+}
+
 export class HypernovumView extends ItemView {
   private plugin: HypernovumPlugin;
   private sceneManager: SceneManager | null = null;
@@ -121,9 +176,7 @@ export class HypernovumView extends ItemView {
   private activityMonitor: ActivityMonitor | null = null;
   private activityIndicator: HTMLElement | null = null;
   /** Live agent session registry (§10 lifecycle), fed by the fleet monitor */
-  private agentRegistry = new AgentRegistry((p) =>
-    p.project ? this.sceneManager?.findProjectByName(p.project)?.path ?? null : null,
-  );
+  private agentRegistry = new AgentRegistry((p) => this.resolveAgentProjectPath(p));
   /** Latest registry snapshot — drives orbs, inspector Agents section, conflicts */
   private fleetSessions: AgentSession[] = [];
   /** Latest deterministic conflicts (recomputed, throttled) */
@@ -176,6 +229,28 @@ export class HypernovumView extends ItemView {
   private hudTopLeft: HTMLElement | null = null;
   private legendEl: HTMLElement | null = null;
   private lastQuestCounts = new Map<string, number>();
+  /** Absolute vault path, or null when the vault isn't on a local filesystem. */
+  private vaultBase: string | null = null;
+  /**
+   * Resolved working directory per project note path, recomputed each rebuild.
+   * `null` means "couldn't determine one" — previously this silently became the
+   * vault root, which handed every project the vault's Git stats.
+   */
+  private projectDirs = new Map<string, ResolvedProjectDir | null>();
+  /**
+   * Hash of the last inspector render. The fleet poller ticks every 500ms and
+   * used to rebuild the whole panel unconditionally, which dropped clicks and
+   * killed text selection.
+   */
+  private inspectorSignature: string | null = null;
+  /**
+   * Cached last-session digests. Reading them walks a directory and parses JSONL,
+   * which must not happen on every inspector render.
+   */
+  private sessionDigestCache = new Map<string, { at: number; digest: SessionDigest | null }>();
+  private static readonly SESSION_DIGEST_TTL_MS = 10_000;
+  /** Observes whether the leaf is on screen — gates the render loop. */
+  private visibilityObserver: IntersectionObserver | null = null;
 
   constructor(leaf: WorkspaceLeaf, app: App, plugin: HypernovumPlugin) {
     super(leaf);
@@ -201,6 +276,11 @@ export class HypernovumView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    // A leaf restored at startup arrives here without going through
+    // activateView(), so this is the backstop that guarantees a consent choice
+    // exists before anything below can touch the filesystem or spawn a process.
+    await this.plugin.ensureConsent();
+
     // Add CSS class for vault mode styling
     if (this.settings.vaultMode) {
       this.containerEl.addClass('vault-mode');
@@ -210,6 +290,13 @@ export class HypernovumView extends ItemView {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass('hypernovum-container');
+
+    // Fail visibly rather than showing a black rectangle when WebGL is off
+    // (hardware acceleration disabled, blocklisted GPU, remote session).
+    if (!SceneManager.isWebGLAvailable()) {
+      this.renderWebGLUnavailable(container);
+      return;
+    }
 
     // Initialize 3D scene with save callback and settings
     this.sceneManager = new SceneManager(container, {
@@ -225,8 +312,9 @@ export class HypernovumView extends ItemView {
     this.addInspectorPanel(container);
     this.addEmptyState(container);
 
-    // Add agent switcher overlay if not in Vault Mode
-    if (!this.settings.vaultMode) {
+    // Add agent switcher overlay only when the agent layer is actually enabled
+    // (vault mode off AND first-run consent granted).
+    if (this.plugin.agentFeaturesEnabled) {
       // Top-left overlays stack in a flex column so the agents panel and
       // activity indicator never overlap each other.
       this.hudTopLeft = document.createElement('div');
@@ -235,56 +323,9 @@ export class HypernovumView extends ItemView {
       this.addAgentSwitcher(this.hudTopLeft);
     } else {
       container.addClass('vault-mode-active');
-
-      // In Vault Mode, let users right-click the background to create a new project district
-      const canvas = this.sceneManager.getCanvas();
-      canvas.addEventListener('contextmenu', (e: MouseEvent) => {
-        if (e.defaultPrevented) return; // Raycaster hit a building or orb
-        e.preventDefault();
-        const menu = new Menu();
-        menu.addItem((item) => {
-          item
-            .setTitle('Create New Project')
-            .setIcon('folder-plus')
-            .onClick(() => {
-              new FolderInputModal(this.app, async (folderPath) => {
-                try {
-                  // Attempt to create the folder if it doesn't exist
-                  let folderCreated = false;
-                  if (!this.app.vault.getAbstractFileByPath(folderPath)) {
-                    await this.app.vault.createFolder(folderPath);
-                    folderCreated = true;
-                  }
-                  // Ensure we have a markdown note acting as the district center
-                  const folderName = folderPath.split('/').pop() || 'New Project';
-                  const notePath = `${folderPath}/${folderName}.md`;
-                  if (!this.app.vault.getAbstractFileByPath(notePath)) {
-                    const newNote = await this.app.vault.create(notePath, `---
-type: project
-title: ${folderName}
-status: active
-priority: medium
-category: default
----
-# ${folderName}
-`);
-                    this.app.workspace.openLinkText(newNote.path, '', false);
-                    new Notice(`Created new project: ${folderName}`);
-                  } else if (folderCreated) {
-                     new Notice(`Created project folder: ${folderPath}`);
-                  } else {
-                     new Notice(`Project folder already exists: ${folderPath}`);
-                  }
-                } catch (error: any) {
-                  new Notice(`Failed to create project: ${error?.message ?? error}`);
-                }
-              }).open();
-            });
-        });
-        menu.showAtMouseEvent(e);
-      });
+      // The background context menu is registered AFTER the raycaster (below), so
+      // its `defaultPrevented` check can actually see a building/orb hit.
     }
-
 
     // Add controls hint
     this.addControlsHint(container);
@@ -320,6 +361,18 @@ category: default
     this.raycaster.setOrbRightClickHandler((event) => {
       this.showOrbContextMenu(event);
     });
+
+    // Vault-mode background menu. Registered AFTER the raycaster on purpose:
+    // contextmenu listeners fire in registration order, so registering it earlier
+    // meant `defaultPrevented` was always false and right-clicking a building
+    // opened BOTH this menu and the building menu.
+    if (!this.plugin.agentFeaturesEnabled) {
+      this.registerDomEvent(this.sceneManager.getCanvas(), 'contextmenu', (e: MouseEvent) => {
+        if (e.defaultPrevented) return; // Raycaster hit a building or orb
+        e.preventDefault();
+        this.showCreateProjectMenu(e);
+      });
+    }
 
     // Set up focus-safe keyboard navigation
     this.keyboardNav = new KeyboardNav(this.sceneManager.getCanvas());
@@ -358,16 +411,18 @@ category: default
       })
     );
 
-    // Initialize Claude Code activity monitor only if not in Vault Mode
-    if (!this.settings.vaultMode) {
+    // Poll for agent presence only when the agent layer is enabled. Gating on
+    // consent too matters because Obsidian can restore this leaf on startup
+    // without going through activateView(), so the prompt may not have run yet.
+    if (this.plugin.agentFeaturesEnabled) {
       this.activityMonitor = new ActivityMonitor(this.app, {
         onActivityStart: (status) => this.onClaudeActivityStart(status),
         onActivityUpdate: (status) => this.onClaudeActivityUpdate(status),
         onActivityStop: () => this.onClaudeActivityStop(),
-        onProjectChange: (newProject, oldProject) => {
-        },
         onFleetUpdate: (agents) => this.onFleetUpdate(agents),
         onDegradedData: (n) => { this.degradedCount = n; },
+      }, {
+        registerInterval: (id) => this.registerInterval(id),
       });
       this.activityMonitor.start();
 
@@ -377,6 +432,9 @@ category: default
 
     // Add HUD title
     this.addHudTitle(container);
+
+    // Stop rendering when the view isn't on screen (P1-2).
+    this.setupRenderGating(container);
 
     // One-time notice for the 0.4 interaction-model change
     if (!this.settings.interactionHintShown) {
@@ -393,6 +451,8 @@ category: default
     this.agentRegistry.clear();
     this.storeUnsubscribe?.();
     this.storeUnsubscribe = null;
+    this.visibilityObserver?.disconnect();
+    this.visibilityObserver = null;
 
     if (this.sceneManager) {
       this.sceneManager.dispose();
@@ -400,9 +460,167 @@ category: default
     }
   }
 
+  /** Vault-mode background menu: create a new project district from empty ground. */
+  private showCreateProjectMenu(event: MouseEvent): void {
+    const menu = new Menu();
+    menu.addItem((item) => {
+      item
+        .setTitle('Create new project')
+        .setIcon('folder-plus')
+        .onClick(() => {
+          new FolderInputModal(this.app, async (folderPath) => {
+            try {
+              // Attempt to create the folder if it doesn't exist
+              let folderCreated = false;
+              if (!this.app.vault.getAbstractFileByPath(folderPath)) {
+                await this.app.vault.createFolder(folderPath);
+                folderCreated = true;
+              }
+              // Ensure we have a markdown note acting as the district center
+              const folderName = folderPath.split('/').pop() || 'New Project';
+              const notePath = `${folderPath}/${folderName}.md`;
+              if (!this.app.vault.getAbstractFileByPath(notePath)) {
+                const newNote = await this.app.vault.create(notePath, `---
+type: project
+title: ${folderName}
+status: active
+priority: medium
+category: default
+---
+# ${folderName}
+`);
+                this.app.workspace.openLinkText(newNote.path, '', false);
+                new Notice(`Created new project: ${folderName}`);
+              } else if (folderCreated) {
+                new Notice(`Created project folder: ${folderPath}`);
+              } else {
+                new Notice(`Project folder already exists: ${folderPath}`);
+              }
+            } catch (error: any) {
+              new Notice(`Failed to create project: ${error?.message ?? error}`);
+            }
+          }).open();
+        });
+    });
+    menu.showAtMouseEvent(event);
+  }
+
+  /** Explain a missing WebGL context instead of leaving an empty black panel. */
+  private renderWebGLUnavailable(container: HTMLElement): void {
+    const panel = container.createDiv({ cls: 'hypernovum-webgl-missing' });
+    panel.createDiv({ cls: 'empty-kicker', text: 'NO SIGNAL' });
+    panel.createEl('h3', { text: 'WebGL is unavailable' });
+    panel.createEl('p', {
+      text:
+        'Hypernovum renders with WebGL, which this Obsidian window cannot start. ' +
+        'This is almost always hardware acceleration being switched off.',
+    });
+    const steps = panel.createEl('ul');
+    steps.createEl('li', { text: 'Settings → Appearance → turn on hardware acceleration, then restart Obsidian.' });
+    steps.createEl('li', { text: 'On a remote/virtual desktop, GPU access may not be available at all.' });
+    steps.createEl('li', { text: 'Otherwise, update your graphics drivers.' });
+
+    const retry = panel.createEl('button', { text: 'Try again' });
+    retry.addEventListener('click', () => this.plugin.reloadOpenViews());
+  }
+
+  /**
+   * Pause the render loop whenever the view isn't actually on screen.
+   *
+   * An IntersectionObserver covers a collapsed sidebar or a background tab (the
+   * leaf stays in the DOM, so rAF keeps firing); `visibilitychange` covers a
+   * minimised or hidden window. Without this, opening the city once left a 60fps
+   * WebGL scene rendering invisibly until Obsidian restarted.
+   */
+  private setupRenderGating(container: HTMLElement): void {
+    const sync = (visible: boolean) => {
+      this.sceneManager?.setRenderingEnabled(visible && !document.hidden);
+    };
+
+    this.visibilityObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) sync(entry.isIntersecting);
+      },
+      { threshold: 0 },
+    );
+    this.visibilityObserver.observe(container);
+
+    // The observer's first callback can land while the container still has zero
+    // area during initial layout, which would report "not visible" and park the
+    // loop before it ever started. Seed the state explicitly.
+    sync(container.isShown());
+
+    // registerDomEvent so Obsidian removes the listener with the view.
+    this.registerDomEvent(document, 'visibilitychange', () => {
+      const onScreen = container.isShown();
+      sync(onScreen);
+    });
+
+    // Obsidian moves leaves between sidebar and main area without unmounting.
+    this.registerEvent(
+      this.app.workspace.on('layout-change', () => sync(container.isShown())),
+    );
+  }
+
   private static readonly PRIORITY_RANK: Record<string, number> = {
     critical: 4, high: 3, medium: 2, low: 1,
   };
+
+  // --- Command surface (F5) -------------------------------------------------
+  // HUD-only actions are also commands so they're hotkey-bindable, which is what
+  // Obsidian users expect of any panel action.
+
+  /** Save the current district layout (same path as the HUD button). */
+  commandSaveLayout(): void {
+    this.sceneManager?.triggerSave();
+  }
+
+  /** Write a cinematic PNG snapshot of the city into the vault. */
+  async commandSnapshot(): Promise<void> {
+    await this.captureSnapshot();
+  }
+
+  /** Clear search + every filter. */
+  commandClearFilters(): void {
+    this.clearFilters();
+  }
+
+  /** Switch the active scan lens. */
+  commandSetLayer(layer: VisualLayer): void {
+    this.visualLayer = layer;
+    if (this.layerSelect) this.layerSelect.value = layer;
+    this.applyView();
+  }
+
+  /** Reset the camera to the default overview framing. */
+  commandResetCamera(): void {
+    this.sceneManager?.resetCamera();
+  }
+
+  /** Cycle the camera through projects with a given status. */
+  commandCycleStatus(status: string): void {
+    this.cycleByStatus(status);
+  }
+
+  /** Trace impact for the current selection. */
+  commandTraceSelection(): void {
+    const project = this.selectedProject;
+    if (!project) {
+      new Notice('Select a project first');
+      return;
+    }
+    this.enterTraceImpact(project);
+  }
+
+  /** Set the project folder for the current selection. */
+  async commandSetProjectFolder(): Promise<void> {
+    const project = this.selectedProject;
+    if (!project) {
+      new Notice('Select a project first');
+      return;
+    }
+    await this.promptForProjectDir(project);
+  }
 
   private async buildCity(): Promise<void> {
     // Parse vault metadata into project data
@@ -422,36 +640,66 @@ category: default
       new Notice(`Hypernovum: showing ${cap} of ${total} projects — raise "Max buildings" in settings`, 8000);
     }
 
-    // Cap simultaneous git scans (each spawns several `git` processes) so a
-    // large vault doesn't fork hundreds at once.
-    await mapLimit(this.allProjects, 8, async (project) => {
-      const projectPath = this.resolveProjectPath(project);
-      const memoryContextPath = path.join(projectPath, '.hypernovum', 'MEMORY_CONTEXT.md');
+    // Resolve every project's working directory once per rebuild. Cleared first so
+    // frontmatter edits (or a newly created folder) are picked up.
+    this.projectDirs.clear();
+    this.vaultBase = getVaultBasePath(this.app);
+    const resolvedDir = new Map<string, string | null>(
+      this.allProjects.map((p) => [p.path, this.projectDirOf(p)]),
+    );
 
-      if (existsSync(memoryContextPath)) {
-        project.hasMemoryContext = true;
-        project.memoryContextPath = memoryContextPath;
-      }
-
-      if (this.settings.enableGitActivity) {
-        const gitActivity = await this.gitCollector.collect(projectPath);
-        if (gitActivity) {
-          project.gitActivity = gitActivity;
+    // Memory context is per directory, and several notes can share one. Reading it
+    // touches files outside the vault, so it belongs to the agent layer the
+    // first-run prompt gates.
+    if (this.plugin.agentFeaturesEnabled) {
+      for (const project of this.allProjects) {
+        const dir = resolvedDir.get(project.path);
+        if (!dir) continue;
+        const memoryContextPath = path.join(dir, '.hypernovum', 'MEMORY_CONTEXT.md');
+        if (existsSync(memoryContextPath)) {
+          project.hasMemoryContext = true;
+          project.memoryContextPath = memoryContextPath;
         }
       }
-    });
+    }
 
-    // Resolve each project's absolute working dir once per rebuild. Used by the
-    // dependency scan and by conflict detection (which normalizes agent file
-    // paths against the *resolved* dir, not the raw frontmatter value).
-    const resolvedDir = new Map(this.allProjects.map((p) => [p.path, this.resolveProjectPath(p)]));
-    this.conflictProjects = this.allProjects.map((p) => ({ ...p, projectDir: resolvedDir.get(p.path) }));
+    // Git scans are per DIRECTORY, not per project: each scan forks 8 `git`
+    // processes and many notes resolve to the same repo, so scanning per project
+    // meant hundreds of redundant spawns per rebuild. mapLimit still caps how
+    // many repos are scanned at once.
+    // Gated on consent as well as the setting: spawning `git` is local process
+    // execution, and a restored leaf can reach here before the first-run prompt.
+    if (this.settings.enableGitActivity && this.plugin.agentFeaturesEnabled) {
+      const uniqueDirs = [...new Set([...resolvedDir.values()].filter((d): d is string => !!d))];
+      const byDir = new Map<string, Awaited<ReturnType<GitActivityCollector['collect']>>>();
+      await mapLimit(uniqueDirs, 8, async (dir) => {
+        byDir.set(dir, await this.gitCollector.collect(dir));
+      });
+      for (const project of this.allProjects) {
+        const dir = resolvedDir.get(project.path);
+        const gitActivity = dir ? byDir.get(dir) : null;
+        if (gitActivity) project.gitActivity = gitActivity;
+      }
+    }
+
+    // Conflict detection normalizes agent file paths against the *resolved* dir,
+    // not the raw frontmatter value.
+    this.conflictProjects = this.allProjects.map((p) => ({
+      ...p,
+      projectDir: resolvedDir.get(p.path) ?? undefined,
+    }));
 
     // Dependency scan (EDG-004): manifest + frontmatter depends_on → sibling edges.
+    // Projects without a resolved directory can still declare deps in frontmatter.
+    //
+    // With the agent layer disabled we withhold the directory, which makes the
+    // scanner skip every package.json read (it no-ops on an empty projectDir) while
+    // frontmatter-declared dependencies — pure vault data — still produce edges.
+    const scanDirs = this.plugin.agentFeaturesEnabled;
     this.depScan = this.depScanner.scan(this.allProjects.map((p) => ({
       path: p.path,
       title: p.title,
-      projectDir: resolvedDir.get(p.path)!,
+      projectDir: scanDirs ? resolvedDir.get(p.path) ?? '' : '',
       dependsOn: p.dependsOn,
       noDeps: p.noDeps,
     })));
@@ -755,16 +1003,24 @@ category: default
     let showNotInstalled = false;
     toggleBtn.addEventListener('click', () => {
       showNotInstalled = !showNotInstalled;
-      notInstalledList.style.display = showNotInstalled ? 'block' : 'none';
-      toggleBtn.innerHTML = `${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (<span class="not-installed-count">${countSpan.textContent}</span>)`;
+      notInstalledList.toggle(showNotInstalled);
+      const count = countSpan.textContent ?? '0';
+      toggleBtn.empty();
+      toggleBtn.appendText(`${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (`);
+      toggleBtn.createSpan({ cls: 'not-installed-count', text: count });
+      toggleBtn.appendText(')');
     });
 
     const detectedMap: Record<string, boolean> = {};
 
+    // Probe with execFile, not exec: exec spawns a shell, and a shell isn't needed
+    // to ask where a binary lives. Skipped entirely unless the agent layer is
+    // enabled — no local process should run before the user has opted in.
     const checkCommand = (cmd: string): Promise<boolean> => {
+      if (!this.plugin.agentFeaturesEnabled) return Promise.resolve(false);
       return new Promise((resolve) => {
-        const check = Platform.isWin ? `where ${cmd}` : `which ${cmd}`;
-        exec(check, { timeout: 2000 }, (error) => {
+        const probe = Platform.isWin ? 'where' : 'which';
+        execFile(probe, [cmd], { timeout: 2000, windowsHide: true }, (error: unknown) => {
           resolve(!error);
         });
       });
@@ -879,8 +1135,8 @@ category: default
     const count = panel.querySelector('.abilities-count') as HTMLElement;
     if (!section || !list || !count) return;
 
-    const vaultPath = (this.app.vault.adapter as any).basePath as string;
-    const skills = scanSkills(vaultPath);
+    const vaultPath = getVaultBasePath(this.app);
+    const skills = vaultPath ? scanSkills(vaultPath) : [];
     if (skills.length === 0) {
       section.style.display = 'none';
       return;
@@ -1013,24 +1269,35 @@ category: default
         break;
 
       case 'stack': {
+        // Stack names come from note frontmatter, so this legend is built with DOM
+        // APIs rather than an interpolated template.
         const counts = new Map<string, number>();
         for (const p of this.allProjects) {
           const primary = p.stack?.[0]?.trim();
           if (primary) counts.set(primary, (counts.get(primary) ?? 0) + 1);
         }
         const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-        const rows = top.map(([name, count]) =>
-          `<div class="legend-item">${chip(hexCss(stackColor(name)))}${this.escapeHtml(name)} · ${count}</div>`
-        ).join('');
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Primary Stack &middot; Color</div>
-            <div class="legend-list">
-              ${rows || `<div class="legend-item">${chip(hexCss(NO_DATA_COLOR))}No stacks declared</div>`}
-            </div>
-            ${rows ? `<div class="legend-list legend-footnote"><div class="legend-item">${chip(hexCss(NO_DATA_COLOR))}No stack declared</div></div>` : ''}
-          </div>
-        `;
+
+        body.empty();
+        const section = body.createDiv({ cls: 'legend-section' });
+        section.createDiv({ cls: 'legend-label', text: 'Primary Stack · Color' });
+        const list = section.createDiv({ cls: 'legend-list' });
+
+        if (top.length === 0) {
+          const item = list.createDiv({ cls: 'legend-item' });
+          appendLegendChip(item, hexCss(NO_DATA_COLOR));
+          item.appendText('No stacks declared');
+        } else {
+          for (const [name, count] of top) {
+            const item = list.createDiv({ cls: 'legend-item' });
+            appendLegendChip(item, hexCss(stackColor(name)));
+            item.appendText(`${name} · ${count}`);
+          }
+          const footnote = section.createDiv({ cls: 'legend-list legend-footnote' });
+          const item = footnote.createDiv({ cls: 'legend-item' });
+          appendLegendChip(item, hexCss(NO_DATA_COLOR));
+          item.appendText('No stack declared');
+        }
         break;
       }
 
@@ -1222,9 +1489,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('encode failed');
-      const notePath = `Hypernovum Snapshot ${date}.png`;
-      await this.app.vault.adapter.writeBinary(notePath, await blob.arrayBuffer());
-      new Notice(`Snapshot saved: ${notePath}`);
+
+      // Vault API + a configurable folder + de-duplicated name: this used to
+      // writeBinary straight to the vault root under a fixed per-day filename,
+      // which skipped Obsidian's index and silently replaced the previous shot.
+      const savedPath = await createBinaryVaultFile(
+        this.app,
+        this.settings.outputFolder,
+        `Hypernovum Snapshot ${date}`,
+        '.png',
+        await blob.arrayBuffer(),
+      );
+      new Notice(`Snapshot saved: ${savedPath}`);
     } catch (error: any) {
       new Notice(`Snapshot failed: ${error?.message ?? error}`);
     }
@@ -1355,7 +1631,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   private addInspectorPanel(container: HTMLElement): void {
     const panel = document.createElement('div');
     panel.className = 'hypernovum-project-inspector';
-    panel.innerHTML = '<div class="inspector-empty">Select a project</div>';
+    panel.createDiv({ cls: 'inspector-empty', text: 'Select a project' });
     this.inspectorPanel = panel;
     container.appendChild(panel);
   }
@@ -1413,24 +1689,59 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.attentionBadge.classList.toggle('attention-high', this.warnings.some((w) => w.severity === 'high'));
   }
 
-  /** Render actionable warning rows (TRI-003). `showProject` prefixes the project title. */
-  private renderWarningRows(items: WarningItem[], showProject: boolean): string {
-    return items.map((w) => {
-      const proj = w.projectPath ? this.allProjects.find((p) => p.path === w.projectPath)?.title ?? '' : '';
-      const prefix = showProject && proj ? `<span class="warning-proj">${this.escapeHtml(proj)}</span>` : '';
-      return `<div class="warning-row warning-${w.severity}">
-        <span class="warning-dot"></span>
-        <div class="warning-body">${prefix}<span class="warning-msg">${this.escapeHtml(w.message)}</span></div>
-        <button class="warning-action" data-w-kind="${w.action.kind}" data-w-path="${this.escapeHtml(w.projectPath ?? '')}">${this.escapeHtml(w.action.label)}</button>
-      </div>`;
-    }).join('');
+  /**
+   * Actionable warning rows (TRI-003), built with DOM APIs and wired inline.
+   * `showProject` prefixes the project title.
+   *
+   * These carry vault-authored text (project titles, warning messages) — exactly
+   * the input Obsidian's guidelines say must not reach `innerHTML`.
+   * `createSpan({ text })` can't be coaxed into markup at all, escaped or not.
+   */
+  private appendWarningRows(parent: HTMLElement, items: WarningItem[], showProject: boolean): void {
+    for (const w of items) {
+      const row = parent.createDiv({ cls: `warning-row warning-${w.severity}` });
+      row.createSpan({ cls: 'warning-dot' });
+      const body = row.createDiv({ cls: 'warning-body' });
+      if (showProject) {
+        const proj = w.projectPath
+          ? this.allProjects.find((p) => p.path === w.projectPath)?.title ?? ''
+          : '';
+        if (proj) body.createSpan({ cls: 'warning-proj', text: proj });
+      }
+      body.createSpan({ cls: 'warning-msg', text: w.message });
+
+      const btn = row.createEl('button', { cls: 'warning-action', text: w.action.label });
+      const kind = w.action.kind;
+      const projectPath = w.projectPath ?? null;
+      btn.addEventListener('click', () => this.runWarningAction(kind, projectPath));
+    }
   }
 
-  /** Attach click handlers to warning-action buttons within a container. */
-  private wireWarningActions(root: HTMLElement): void {
-    root.querySelectorAll<HTMLButtonElement>('.warning-action').forEach((btn) => {
-      btn.addEventListener('click', () => this.runWarningAction(btn.dataset.wKind ?? '', btn.dataset.wPath || null));
+  /** `<span>label</span><strong>value</strong>` row used throughout the inspector. */
+  private appendSignalRow(parent: HTMLElement, label: string, value: string): void {
+    const row = parent.createDiv({ cls: 'signal-row' });
+    row.createSpan({ text: label });
+    row.createEl('strong', { text: value });
+  }
+
+  /** Titled inspector section; returns the section element for further children. */
+  private createSection(parent: HTMLElement, label: string, cls = ''): HTMLElement {
+    const section = parent.createDiv({
+      cls: cls ? `inspector-section ${cls}` : 'inspector-section',
     });
+    section.createSpan({ cls: 'section-label', text: label });
+    return section;
+  }
+
+  /** Clickable row that focuses another project when clicked. */
+  private appendFocusRow(
+    parent: HTMLElement,
+    targetPath: string,
+    decorate: (row: HTMLElement) => void,
+  ): void {
+    const row = parent.createDiv({ cls: 'dep-row' });
+    decorate(row);
+    row.addEventListener('click', () => this.runWarningAction('focus', targetPath));
   }
 
   private runWarningAction(kind: string, path: string | null): void {
@@ -1449,12 +1760,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       case 'open-note':
         if (project) this.app.workspace.openLinkText(project.path, '', false);
         break;
-      case 'launch-agent':
-        if (project) this.launchAgentForProject(project, this.resolveProjectPath(project));
+      case 'launch-agent': {
+        if (!project || !this.plugin.agentFeaturesEnabled) break;
+        const dir = this.requireProjectDir(project);
+        if (dir) this.launchAgentForProject(project, dir);
         break;
-      case 'open-terminal':
-        if (project) this.openTerminalForProject(project, this.resolveProjectPath(project));
+      }
+      case 'open-terminal': {
+        if (!project || !this.plugin.agentFeaturesEnabled) break;
+        const dir = this.requireProjectDir(project);
+        if (dir) this.openTerminalForProject(project, dir);
         break;
+      }
     }
   }
 
@@ -1466,17 +1783,27 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   private renderPresetOptions(): void {
     if (!this.presetSelect) return;
-    const opts = ['<option value="">Presets…</option>'];
-    opts.push('<optgroup label="Defaults">');
-    for (const p of BUILT_IN_LENSES) opts.push(`<option value="${this.escapeHtml(p.id)}">${this.escapeHtml(p.name)}</option>`);
-    opts.push('</optgroup>');
-    if (this.settings.savedLenses.length > 0) {
-      opts.push('<optgroup label="Saved">');
-      for (const p of this.settings.savedLenses) opts.push(`<option value="${this.escapeHtml(p.id)}">${this.escapeHtml(p.name)}</option>`);
-      opts.push('</optgroup>');
+
+    // Saved preset names are user input, so these options are built as elements.
+    const select = this.presetSelect;
+    select.empty();
+    select.createEl('option', { value: '', text: 'Presets…' });
+
+    const defaults = select.createEl('optgroup');
+    defaults.label = 'Defaults';
+    for (const p of BUILT_IN_LENSES) {
+      defaults.createEl('option', { value: p.id, text: p.name });
     }
-    this.presetSelect.innerHTML = opts.join('');
-    this.presetSelect.value = '';
+
+    if (this.settings.savedLenses.length > 0) {
+      const saved = select.createEl('optgroup');
+      saved.label = 'Saved';
+      for (const p of this.settings.savedLenses) {
+        saved.createEl('option', { value: p.id, text: p.name });
+      }
+    }
+
+    select.value = '';
     if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = true;
   }
 
@@ -1569,44 +1896,50 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory${questPart}`;
   }
 
-  /** State chip markup reusing the agent-state CSS classes. */
-  private agentStateChip(state: string): string {
-    return `<span class="agent-state agent-state-${this.escapeHtml(state)}">${this.escapeHtml(state)}</span>`;
+  /** State chip reusing the agent-state CSS classes. */
+  private appendAgentStateChip(parent: HTMLElement, state: string): void {
+    parent.createSpan({ cls: `agent-state agent-state-${state}`, text: state });
   }
 
   /** Inspector "Agents" section for one project (AGT-009). */
-  private renderAgentsSection(projectPath: string): string {
+  private appendAgentsSection(parent: HTMLElement, projectPath: string): void {
     const sessions = this.agentRegistry.sessionsForProject(projectPath);
+    const section = this.createSection(parent, 'Agents');
+
     if (sessions.length === 0) {
-      return `<div class="inspector-section">
-        <span class="section-label">Agents</span>
-        <div class="inspector-empty-inline">No agent activity</div>
-      </div>`;
+      section.createDiv({ cls: 'inspector-empty-inline', text: 'No agent activity' });
+      return;
     }
 
     const active = sessions.filter((s) => s.state !== 'complete');
     const completed = sessions.filter((s) => s.state === 'complete');
 
-    const rows = active.map((s) => {
+    if (active.length === 0) {
+      section.createDiv({ cls: 'inspector-empty-inline', text: 'No active agents' });
+    }
+
+    for (const s of active) {
+      const row = section.createDiv({ cls: 'agent-row' });
+      const head = row.createDiv({ cls: 'agent-row-head' });
+      head.createEl('strong', { text: s.name });
+      this.appendAgentStateChip(head, s.state);
+
       const file = s.file ? (s.file.split(/[\\/]/).pop() ?? '') : '';
-      const ago = this.formatRelativeTime(s.sessionStart);
-      const sub = [s.action ?? '', file].filter(Boolean).map((t) => this.escapeHtml(t)).join(' · ');
-      return `<div class="agent-row">
-        <div class="agent-row-head"><strong>${this.escapeHtml(s.name)}</strong>${this.agentStateChip(s.state)}</div>
-        ${sub ? `<div class="agent-row-sub">${sub}</div>` : ''}
-        <div class="agent-row-meta">started ${this.escapeHtml(ago)}</div>
-      </div>`;
-    }).join('');
+      const sub = [s.action ?? '', file].filter(Boolean).join(' · ');
+      if (sub) row.createDiv({ cls: 'agent-row-sub', text: sub });
 
-    const completedLine = completed.length
-      ? `<div class="agent-completed">${completed.length} completed session${completed.length > 1 ? 's' : ''} · last 24h</div>`
-      : '';
+      row.createDiv({
+        cls: 'agent-row-meta',
+        text: `started ${this.formatRelativeTime(s.sessionStart)}`,
+      });
+    }
 
-    return `<div class="inspector-section">
-      <span class="section-label">Agents</span>
-      ${rows || '<div class="inspector-empty-inline">No active agents</div>'}
-      ${completedLine}
-    </div>`;
+    if (completed.length > 0) {
+      section.createDiv({
+        cls: 'agent-completed',
+        text: `${completed.length} completed session${completed.length > 1 ? 's' : ''} · last 24h`,
+      });
+    }
   }
 
   private titleOf(path: string): string {
@@ -1640,23 +1973,45 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   }
 
   /** Trace-impact result list for the origin's inspector (grouped by direction). */
-  private renderTraceImpact(projectPath: string): string {
+  private appendTraceImpact(parent: HTMLElement, projectPath: string): void {
     const r = this.traceResult;
-    if (!r || r.origin !== projectPath) return '';
-    const liveAgents = new Set(this.fleetSessions.filter((s) => s.projectPath).map((s) => s.projectPath!));
-    const row = (n: { path: string; depth: number }): string => {
-      const agentChip = liveAgents.has(n.path) ? '<span class="trace-agent">●</span>' : '';
-      return `<div class="dep-row" data-focus-path="${this.escapeHtml(n.path)}"><span class="trace-depth">${n.depth}</span>${this.escapeHtml(this.titleOf(n.path))}${agentChip}</div>`;
+    if (!r || r.origin !== projectPath) return;
+
+    const liveAgents = new Set(
+      this.fleetSessions.filter((s) => s.projectPath).map((s) => s.projectPath!),
+    );
+
+    const section = parent.createDiv({ cls: 'inspector-section trace-section' });
+    const label = section.createSpan({ cls: 'section-label', text: 'Trace Impact ' });
+    const exit = label.createEl('button', { cls: 'trace-exit', text: '✕' });
+    exit.setAttribute('title', 'Exit trace (Esc)');
+    exit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.exitTrace();
+    });
+
+    const group = (groupLabel: string, nodes: { path: string; depth: number }[]): void => {
+      if (nodes.length === 0) return;
+      const wrap = section.createDiv({ cls: 'trace-group' });
+      wrap.createDiv({ cls: 'trace-group-label', text: groupLabel });
+      for (const n of nodes) {
+        this.appendFocusRow(wrap, n.path, (row) => {
+          row.createSpan({ cls: 'trace-depth', text: String(n.depth) });
+          row.appendText(this.titleOf(n.path));
+          if (liveAgents.has(n.path)) row.createSpan({ cls: 'trace-agent', text: '●' });
+        });
+      }
     };
-    const group = (label: string, nodes: { path: string; depth: number }[]): string =>
-      nodes.length === 0 ? '' : `<div class="trace-group"><div class="trace-group-label">${label}</div>${nodes.map(row).join('')}</div>`;
-    const truncNote = r.truncated ? '<div class="inspector-empty-inline">Results truncated (depth/size cap)</div>' : '';
-    return `<div class="inspector-section trace-section">
-      <span class="section-label">Trace Impact <button class="trace-exit" title="Exit trace (Esc)">✕</button></span>
-      ${group('Upstream · dependencies', r.upstream)}
-      ${group('Downstream · dependents', r.downstream)}
-      ${truncNote}
-    </div>`;
+
+    group('Upstream · dependencies', r.upstream);
+    group('Downstream · dependents', r.downstream);
+
+    if (r.truncated) {
+      section.createDiv({
+        cls: 'inspector-empty-inline',
+        text: 'Results truncated (depth/size cap)',
+      });
+    }
   }
 
   private formatDuration(ms: number): string {
@@ -1667,36 +2022,64 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     return m ? `${h}h ${m}m` : `${h}h`;
   }
 
-  /** Last-session digest for a project (SES-002/003), lazily read from JSONL. */
-  private renderSessionDigest(project: ProjectData): string {
-    const vaultBase = (this.app.vault.adapter as any).basePath as string;
-    if (!vaultBase) return '';
+  /**
+   * Last-session digest for a project (SES-002/003), read from JSONL and cached.
+   *
+   * The read walks a directory and parses files, so it must not happen on every
+   * inspector render — the fleet poller calls that twice a second.
+   */
+  private sessionDigestFor(project: ProjectData, now: number): SessionDigest | null {
+    const cached = this.sessionDigestCache.get(project.path);
+    if (cached && now - cached.at < HypernovumView.SESSION_DIGEST_TTL_MS) {
+      return cached.digest;
+    }
+
+    const vaultBase = this.vaultBase ?? getVaultBasePath(this.app);
+    if (!vaultBase) return null;
+
     const sessionsDir = path.join(vaultBase, '.hypernovum', 'sessions');
-    const dirBase = this.resolveProjectPath(project).split(/[\\/]/).pop()?.toLowerCase();
+    const dirBase = this.projectDirOf(project)?.split(/[\\/]/).pop()?.toLowerCase();
     const digest = this.sessionReader.readLatestForProject(sessionsDir, (proj) => {
       if (!proj) return false;
       const p = proj.toLowerCase();
       return p === project.title.toLowerCase() || p === dirBase;
-    });
-    if (!digest) return '';
+    }) ?? null;
+
+    this.sessionDigestCache.set(project.path, { at: now, digest });
+    return digest;
+  }
+
+  /** Session section for the project inspector. */
+  private appendSessionDigest(parent: HTMLElement, project: ProjectData, now: number): void {
+    const digest = this.sessionDigestFor(project, now);
+    if (!digest) return;
 
     const files = digest.filesTouched.length;
     // Commits that landed inside the session window (from cached recentCommits).
     const commits = (project.gitActivity?.recentCommits ?? [])
       .filter((c) => c.ts >= digest.startT && c.ts <= digest.endT + 60_000).length;
-    const parts = [digest.name ?? 'Session', this.formatDuration(digest.durationMs), `${files} file${files === 1 ? '' : 's'}`];
+    const parts = [
+      digest.name ?? 'Session',
+      this.formatDuration(digest.durationMs),
+      `${files} file${files === 1 ? '' : 's'}`,
+    ];
     if (commits > 0) parts.push(`${commits} commit${commits === 1 ? '' : 's'}`);
 
-    let rows = `<div class="signal-row"><span>Last session</span><strong>${this.escapeHtml(parts.join(' · '))}</strong></div>`;
+    const section = this.createSection(parent, 'Session');
+    this.appendSignalRow(section, 'Last session', parts.join(' · '));
+
     // Plan-vs-action lite (SES-003): only when the agent declared plannedFiles.
     if (digest.plannedFiles && digest.plannedFiles.length) {
-      rows += `<div class="signal-row"><span>Plan vs action</span><strong>planned ${digest.plannedFiles.length} · touched ${files}</strong></div>`;
+      this.appendSignalRow(
+        section,
+        'Plan vs action',
+        `planned ${digest.plannedFiles.length} · touched ${files}`,
+      );
     }
-    return `<div class="inspector-section"><span class="section-label">Session</span>${rows}</div>`;
   }
 
   /** Depends on / Used by / Blocked by / Blocks sections for one project (EDG-007). */
-  private renderDependencySections(projectPath: string): string {
+  private appendDependencySections(parent: HTMLElement, projectPath: string): void {
     const deps: string[] = [], usedBy: string[] = [], blockedBy: string[] = [], blocks: string[] = [];
     for (const e of this.structuralEdges) {
       if (e.type === 'depends-on') {
@@ -1707,144 +2090,301 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         else if (e.from === projectPath) blocks.push(e.to);
       }
     }
-    const section = (label: string, paths: string[]): string => {
+
+    const group = (label: string, paths: string[]): void => {
       const uniq = [...new Set(paths)];
-      if (uniq.length === 0) return '';
-      return `<div class="inspector-section">
-        <span class="section-label">${label}</span>
-        ${uniq.map((p) => `<div class="dep-row" data-focus-path="${this.escapeHtml(p)}"><span class="dep-arrow">→</span>${this.escapeHtml(this.titleOf(p))}</div>`).join('')}
-      </div>`;
+      if (uniq.length === 0) return;
+      const section = this.createSection(parent, label);
+      for (const p of uniq) {
+        this.appendFocusRow(section, p, (row) => {
+          row.createSpan({ cls: 'dep-arrow', text: '→' });
+          row.appendText(this.titleOf(p));
+        });
+      }
     };
-    return section('Depends on', deps) + section('Used by', usedBy) + section('Blocked by', blockedBy) + section('Blocks', blocks);
+
+    group('Depends on', deps);
+    group('Used by', usedBy);
+    group('Blocked by', blockedBy);
+    group('Blocks', blocks);
   }
 
   /** A project's full warning list (TRI-003), actionable, severity-ordered. */
-  private renderProjectWarnings(projectPath: string): string {
+  private appendProjectWarnings(parent: HTMLElement, projectPath: string): void {
     const relevant = this.warnings.filter((w) => w.projectPath === projectPath);
-    if (relevant.length === 0) return '';
-    return `<div class="inspector-section">
-      <span class="section-label">Attention</span>
-      ${this.renderWarningRows(relevant, false)}
-    </div>`;
+    if (relevant.length === 0) return;
+    const section = this.createSection(parent, 'Attention');
+    this.appendWarningRows(section, relevant, false);
   }
 
-  private updateInspector(): void {
+  /**
+   * Fingerprint of everything the inspector displays.
+   *
+   * The fleet poller fires every 500ms and used to call updateInspector()
+   * unconditionally, which tore down and rebuilt the whole panel twice a second:
+   * mousedown and mouseup landed on different nodes so buttons dropped clicks,
+   * text could never be selected, and scroll position reset constantly. Now a
+   * render only happens when this string changes.
+   *
+   * The minute bucket is deliberate: relative timestamps ("2 days ago") need to
+   * refresh, but at most once a minute rather than 120 times.
+   */
+  private inspectorSignatureFor(project: ProjectData | null, now: number): string {
+    const minuteBucket = Math.floor(now / 60_000);
+    if (!project) {
+      const warnKey = topWarningPerProject(this.warnings)
+        .map((w) => `${w.projectPath}:${w.severity}:${w.message}`)
+        .join('|');
+      const feedKey = this.fleetSessions.map((s) => `${s.sessionId}:${s.state}:${s.lastPing}`).join('|');
+      // Every number the overview prints has to be in here. Fingerprinting only
+      // path/status/category left the quest total, the 30-day commit count and the
+      // recent-activity feed stale until the minute bucket happened to roll over.
+      const projectKey = this.filteredProjects
+        .map((p) => {
+          const g = p.gitActivity;
+          return [
+            p.path,
+            p.status,
+            p.category,
+            p.questions?.length ?? 0,
+            g ? `${g.commitsLast30d}:${g.commitsLast7d}:${g.lastCommitDate}:${g.recentCommits?.[0]?.hash ?? ''}` : '-',
+          ].join(':');
+        })
+        .join(',');
+
+      // The activity feed reads ALL projects, not just the filtered set, so a
+      // commit on a filtered-out project still has to invalidate the render.
+      const allCommitsKey = this.allProjects
+        .map((p) => p.gitActivity?.lastCommitDate ?? 0)
+        .join('.');
+
+      return [
+        'overview',
+        minuteBucket,
+        this.filteredProjects.length,
+        projectKey,
+        allCommitsKey,
+        this.conflicts.filter((c) => c.severity !== 'info').length,
+        warnKey,
+        feedKey,
+      ].join('~');
+    }
+
+    const git = project.gitActivity;
+    const sessions = this.agentRegistry.sessionsForProject(project.path);
+    const digest = this.sessionDigestFor(project, now);
+    const edges = this.structuralEdges
+      .filter((e) => e.from === project.path || e.to === project.path)
+      .map((e) => `${e.type}:${e.from}>${e.to}`)
+      .join(',');
+
+    return [
+      'project',
+      minuteBucket,
+      project.path,
+      project.title,
+      project.status,
+      project.priority,
+      project.category,
+      project.hasMemoryContext ? '1' : '0',
+      this.projectDirOf(project) ?? '-',
+      git
+        ? [
+            git.activeBranch ?? '',
+            git.lastCommitDate,
+            git.commitsLast30d,
+            git.hasUncommittedChanges ? 'd' : 'c',
+            git.ahead ?? '-',
+            git.behind ?? '-',
+            (git.recentCommits ?? []).map((c) => c.hash).join('.'),
+          ].join(':')
+        : '-',
+      (project.questions ?? []).join('¦'),
+      project.answeredQuestions?.length ?? 0,
+      this.traceResult && this.traceResult.origin === project.path
+        ? `trace:${this.traceResult.upstream.length}:${this.traceResult.downstream.length}:${this.traceResult.truncated}`
+        : '-',
+      this.warnings
+        .filter((w) => w.projectPath === project.path)
+        .map((w) => `${w.severity}:${w.message}`)
+        .join('|'),
+      edges,
+      sessions.map((s) => `${s.sessionId}:${s.state}:${s.action ?? ''}:${s.file ?? ''}`).join('|'),
+      digest ? `${digest.startT}:${digest.endT}:${digest.filesTouched.length}` : '-',
+    ].join('~');
+  }
+
+  private updateInspector(force = false): void {
     if (!this.inspectorPanel) return;
 
-    if (!this.selectedProject) {
+    const now = Date.now();
+    const project = this.selectedProject;
+    const signature = this.inspectorSignatureFor(project, now);
+    if (!force && signature === this.inspectorSignature) return;
+    this.inspectorSignature = signature;
+
+    if (!project) {
       this.renderCityOverview();
       return;
     }
 
-    const project = this.selectedProject;
-    const projectPath = this.resolveProjectPath(project);
+    const panel = this.inspectorPanel;
+    panel.empty();
+
+    const projectPath = this.projectDirOf(project);
+    const dirSource = this.resolveProjectDirFor(project)?.source;
     const git = project.gitActivity;
-    const memoryState = project.hasMemoryContext ? 'Ready' : 'Not found';
 
-    this.inspectorPanel.innerHTML = `
-      <div class="inspector-header">
-        <span class="inspector-kicker">PROJECT</span>
-        <button class="inspector-close" title="Back to city overview">✕</button>
-        <h3>${this.escapeHtml(project.title)}</h3>
-      </div>
-      <div class="inspector-grid">
-        <div><span>Status</span><strong>${this.escapeHtml(project.status)}</strong></div>
-        <div><span>Priority</span><strong>${this.escapeHtml(project.priority)}</strong></div>
-        <div><span>Category</span><strong>${this.escapeHtml(project.category)}</strong></div>
-        <div><span>Memory</span><strong>${memoryState}</strong></div>
-      </div>
-      <div class="inspector-section">
-        <span class="section-label">Git Signals</span>
-        <div class="signal-row"><span>Branch</span><strong>${this.escapeHtml(git?.activeBranch ?? 'n/a')}</strong></div>
-        <div class="signal-row"><span>Last commit</span><strong>${git?.lastCommitDate ? this.formatRelativeTime(git.lastCommitDate) : 'n/a'}</strong></div>
-        <div class="signal-row"><span>30d commits</span><strong>${git?.commitsLast30d ?? 0}</strong></div>
-        <div class="signal-row"><span>Working tree</span><strong>${git?.hasUncommittedChanges ? 'Changed' : 'Clean'}</strong></div>
-        ${git && (git.ahead != null || git.behind != null) ? `<div class="signal-row"><span>Upstream</span><strong>${git.ahead ?? 0} ahead · ${git.behind ?? 0} behind</strong></div>` : ''}
-      </div>
-      ${git?.recentCommits && git.recentCommits.length > 0 ? `
-      <div class="inspector-section">
-        <span class="section-label">Recent Commits</span>
-        ${git.recentCommits.map((c) => `<div class="commit-row"><code>${this.escapeHtml(c.hash)}</code><span class="commit-subject">${this.escapeHtml(c.subject)}</span><span class="commit-time">${this.escapeHtml(this.formatRelativeTime(c.ts))}</span></div>`).join('')}
-      </div>` : ''}
-      ${project.questions && project.questions.length > 0 ? `
-      <div class="inspector-section">
-        <span class="section-label">Open Quests${project.answeredQuestions?.length ? ` · ${project.answeredQuestions.length} resolved` : ''}</span>
-        ${project.questions.map((q) => `<div class="quest-row"><span class="quest-gem">◆</span>${this.escapeHtml(q)}</div>`).join('')}
-      </div>` : ''}
-      ${this.renderTraceImpact(project.path)}
-      ${this.renderProjectWarnings(project.path)}
-      ${this.renderDependencySections(project.path)}
-      ${this.renderAgentsSection(project.path)}
-      ${this.renderSessionDigest(project)}
-      <div class="inspector-path">${this.escapeHtml(projectPath)}</div>
-      <div class="inspector-actions">
-        <button data-action="note">Open Note</button>
-        <button data-action="folder">Folder</button>
-        <button data-action="terminal">Terminal</button>
-        <button data-action="agent">Launch Agent</button>
-        <button data-action="context">Context</button>
-        <button data-action="copy-path">Copy Path</button>
-        <button data-action="quest">Add Quest</button>
-        <button data-action="focus">Focus</button>
-      </div>
-    `;
+    const header = panel.createDiv({ cls: 'inspector-header' });
+    header.createSpan({ cls: 'inspector-kicker', text: 'PROJECT' });
+    const close = header.createEl('button', { cls: 'inspector-close', text: '✕' });
+    close.setAttribute('title', 'Back to city overview');
+    close.addEventListener('click', () => this.interactionStore.getState().clearSelection());
+    header.createEl('h3', { text: project.title });
 
-    this.inspectorPanel.querySelector('.inspector-close')?.addEventListener('click', () => {
-      this.interactionStore.getState().clearSelection();
-    });
+    const grid = panel.createDiv({ cls: 'inspector-grid' });
+    const cell = (label: string, value: string) => {
+      const div = grid.createDiv();
+      div.createSpan({ text: label });
+      div.createEl('strong', { text: value });
+    };
+    cell('Status', project.status);
+    cell('Priority', project.priority);
+    cell('Category', project.category);
+    cell('Memory', project.hasMemoryContext ? 'Ready' : 'Not found');
 
-    this.inspectorPanel.querySelector('[data-action="note"]')?.addEventListener('click', () => {
-      this.app.workspace.openLinkText(project.path, '', false);
-    });
+    const gitSection = this.createSection(panel, 'Git Signals');
+    if (!this.plugin.agentFeaturesEnabled) {
+      // Don't offer to "set a project folder" here — nothing would read it while
+      // the agent layer is off.
+      gitSection.createDiv({
+        cls: 'inspector-empty-inline',
+        text: 'Vault mode — Git signals are off',
+      });
+    } else if (!projectPath) {
+      // Being explicit beats showing the vault's Git data as if it were this
+      // project's, which is what the old vault-root fallback did.
+      gitSection.createDiv({
+        cls: 'inspector-empty-inline',
+        text: 'No project folder set — Git signals unavailable',
+      });
+      const setBtn = gitSection.createEl('button', {
+        cls: 'inspector-inline-action',
+        text: 'Set project folder…',
+      });
+      setBtn.addEventListener('click', () => this.promptForProjectDir(project));
+    } else if (!git) {
+      gitSection.createDiv({ cls: 'inspector-empty-inline', text: 'Not a Git repository' });
+    } else {
+      this.appendSignalRow(gitSection, 'Branch', git.activeBranch ?? 'n/a');
+      this.appendSignalRow(
+        gitSection,
+        'Last commit',
+        git.lastCommitDate ? this.formatRelativeTime(git.lastCommitDate) : 'n/a',
+      );
+      this.appendSignalRow(gitSection, '30d commits', String(git.commitsLast30d ?? 0));
+      this.appendSignalRow(gitSection, 'Working tree', git.hasUncommittedChanges ? 'Changed' : 'Clean');
+      if (git.ahead != null || git.behind != null) {
+        this.appendSignalRow(
+          gitSection,
+          'Upstream',
+          `${git.ahead ?? 0} ahead · ${git.behind ?? 0} behind`,
+        );
+      }
+    }
 
-    this.inspectorPanel.querySelector('[data-action="folder"]')?.addEventListener('click', async () => {
-      const result = await TerminalLauncher.openInExplorer(projectPath);
-      new Notice(result.success ? `Opened ${project.title} folder` : `Failed to open folder: ${result.message}`);
-    });
+    if (git?.recentCommits && git.recentCommits.length > 0) {
+      const commits = this.createSection(panel, 'Recent Commits');
+      for (const c of git.recentCommits) {
+        const row = commits.createDiv({ cls: 'commit-row' });
+        row.createEl('code', { text: c.hash });
+        row.createSpan({ cls: 'commit-subject', text: c.subject });
+        row.createSpan({ cls: 'commit-time', text: this.formatRelativeTime(c.ts) });
+      }
+    }
 
-    this.inspectorPanel.querySelector('[data-action="agent"]')?.addEventListener('click', async () => {
-      await this.launchAgentForProject(project, projectPath);
-    });
+    if (project.questions && project.questions.length > 0) {
+      const resolved = project.answeredQuestions?.length
+        ? ` · ${project.answeredQuestions.length} resolved`
+        : '';
+      const quests = this.createSection(panel, `Open Quests${resolved}`);
+      for (const q of project.questions) {
+        const row = quests.createDiv({ cls: 'quest-row' });
+        row.createSpan({ cls: 'quest-gem', text: '◆' });
+        row.appendText(q);
+      }
+    }
 
-    this.inspectorPanel.querySelector('[data-action="context"]')?.addEventListener('click', () => {
-      this.copyAgentContext(project, projectPath);
-    });
+    this.appendTraceImpact(panel, project.path);
+    this.appendProjectWarnings(panel, project.path);
+    this.appendDependencySections(panel, project.path);
+    this.appendAgentsSection(panel, project.path);
+    this.appendSessionDigest(panel, project, now);
 
-    this.inspectorPanel.querySelector('[data-action="terminal"]')?.addEventListener('click', () => {
-      this.openTerminalForProject(project, projectPath);
-    });
+    const pathRow = panel.createDiv({ cls: 'inspector-path' });
+    if (projectPath) {
+      pathRow.setAttribute('title', dirSource ? DIR_SOURCE_LABEL[dirSource] : '');
+      pathRow.setText(projectPath);
+    } else {
+      pathRow.setText(project.path);
+    }
 
-    this.inspectorPanel.querySelector('[data-action="copy-path"]')?.addEventListener('click', () => {
-      this.copyProjectPath(projectPath);
-    });
+    const actions = panel.createDiv({ cls: 'inspector-actions' });
+    // Same rule as the context menu: with the agent layer off, the buttons that
+    // spawn a process or write outside the vault aren't rendered at all.
+    const agentsOn = this.plugin.agentFeaturesEnabled;
+    const action = (label: string, handler: () => void, needsDir = false) => {
+      const btn = actions.createEl('button', { text: label });
+      if (needsDir && !projectPath) {
+        btn.disabled = true;
+        btn.setAttribute('title', 'Set a project folder first');
+      }
+      btn.addEventListener('click', handler);
+      return btn;
+    };
 
-    this.inspectorPanel.querySelector('[data-action="quest"]')?.addEventListener('click', () => {
-      this.addQuestForProject(project);
-    });
+    action('Open Note', () => this.app.workspace.openLinkText(project.path, '', false));
 
-    this.inspectorPanel.querySelector('[data-action="focus"]')?.addEventListener('click', () => {
+    if (agentsOn) {
+      action('Folder', async () => {
+        const dir = this.requireProjectDir(project);
+        if (!dir) return;
+        const result = await TerminalLauncher.openInExplorer(dir);
+        new Notice(
+          result.success ? `Opened ${project.title} folder` : `Failed to open folder: ${result.message}`,
+        );
+      }, true);
+      action('Terminal', () => {
+        const dir = this.requireProjectDir(project);
+        if (dir) this.openTerminalForProject(project, dir);
+      }, true);
+      action('Launch Agent', async () => {
+        const dir = this.requireProjectDir(project);
+        if (dir) await this.launchAgentForProject(project, dir);
+      }, true);
+      action('Context', () => {
+        const dir = this.requireProjectDir(project);
+        if (dir) this.copyAgentContext(project, dir);
+      }, true);
+    }
+
+    if (agentsOn) {
+      action('Copy Path', () => {
+        const dir = this.requireProjectDir(project);
+        if (dir) this.copyProjectPath(dir);
+      }, true);
+    }
+    action('Add Quest', () => this.addQuestForProject(project));
+    action('Focus', () => {
       if (project.position && this.sceneManager) {
         this.sceneManager.focusOnPosition(project.position);
         this.sceneManager.setFocusedProject(project);
       }
     });
-
-    this.wireWarningActions(this.inspectorPanel);
-
-    // Dependency + trace rows focus the referenced project (EDG-007 / IMP-002).
-    this.inspectorPanel.querySelectorAll<HTMLElement>('.dep-row').forEach((row) => {
-      row.addEventListener('click', () => this.runWarningAction('focus', row.dataset.focusPath || null));
-    });
-
-    // Trace-impact exit button (IMP-002).
-    this.inspectorPanel.querySelector('.trace-exit')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.exitTrace();
-    });
   }
 
   /** Recent-activity feed (TRI-005): recent commits + just-completed sessions. */
-  private renderActivityFeed(): string {
+  private appendActivityFeed(parent: HTMLElement): void {
     const now = Date.now();
     const WEEK = 7 * 24 * 3600 * 1000;
     const DAY = 24 * 3600 * 1000;
@@ -1866,20 +2406,26 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     rows.sort((a, b) => b.ts - a.ts);
     const top = rows.slice(0, 5);
-    if (top.length === 0) return '';
-    return `<div class="inspector-section">
-      <span class="section-label">Recent Activity</span>
-      ${top.map((r) => `<div class="activity-row"><span class="activity-label">${this.escapeHtml(r.label)}</span><span class="activity-time">${this.escapeHtml(this.formatRelativeTime(r.ts))}</span></div>`).join('')}
-    </div>`;
+    if (top.length === 0) return;
+
+    const section = this.createSection(parent, 'Recent Activity');
+    for (const r of top) {
+      const row = section.createDiv({ cls: 'activity-row' });
+      row.createSpan({ cls: 'activity-label', text: r.label });
+      row.createSpan({ cls: 'activity-time', text: this.formatRelativeTime(r.ts) });
+    }
   }
 
   /** District analytics readout shown when no building is selected */
   private renderCityOverview(): void {
     if (!this.inspectorPanel) return;
+    const panel = this.inspectorPanel;
     const projects = this.filteredProjects;
 
+    panel.empty();
+
     if (projects.length === 0) {
-      this.inspectorPanel.innerHTML = '<div class="inspector-empty">No projects in view</div>';
+      panel.createDiv({ cls: 'inspector-empty', text: 'No projects in view' });
       return;
     }
 
@@ -1888,31 +2434,53 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const quests = projects.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
     const commits30d = projects.reduce((sum, p) => sum + (p.gitActivity?.commitsLast30d ?? 0), 0);
 
+    const header = panel.createDiv({ cls: 'inspector-header' });
+    header.createSpan({ cls: 'inspector-kicker', text: 'CITY OVERVIEW' });
+    header.createEl('h3', { text: `${projects.length} projects` });
+
+    const grid = panel.createDiv({ cls: 'inspector-grid' });
+    const cell = (label: string, value: number) => {
+      const div = grid.createDiv();
+      div.createSpan({ text: label });
+      div.createEl('strong', { text: String(value) });
+    };
+    cell('Active', active);
+    cell('Blocked', blocked);
+    cell('Open quests', quests);
+    cell('30d commits', commits30d);
+
     // Fleet summary (AGT-009)
     const sessions = this.fleetSessions;
-    const waitingAgents = sessions.filter((s) => s.state === 'waiting').length;
-    const activeAgents = sessions.filter(
-      (s) => !['complete', 'stale', 'disconnected', 'waiting'].includes(s.state),
-    ).length;
-    const conflictCount = this.conflicts.filter((c) => c.severity !== 'info').length;
-    const fleetLine = sessions.length > 0
-      ? `<div class="fleet-summary">${activeAgents} active · ${waitingAgents} waiting · ${conflictCount} conflict${conflictCount === 1 ? '' : 's'}</div>`
-      : '';
+    if (sessions.length > 0) {
+      const waitingAgents = sessions.filter((s) => s.state === 'waiting').length;
+      const activeAgents = sessions.filter(
+        (s) => !['complete', 'stale', 'disconnected', 'waiting'].includes(s.state),
+      ).length;
+      const conflictCount = this.conflicts.filter((c) => c.severity !== 'info').length;
+      panel.createDiv({
+        cls: 'fleet-summary',
+        text: `${activeAgents} active · ${waitingAgents} waiting · ${conflictCount} conflict${conflictCount === 1 ? '' : 's'}`,
+      });
+    }
 
     // Attention section (TRI-003): one row per project (highest severity), top 8.
     const topWarnings = topWarningPerProject(this.warnings);
-    const shown = topWarnings.slice(0, 8);
-    const moreCount = topWarnings.length - shown.length;
-    const attentionSection = topWarnings.length > 0
-      ? `<div class="inspector-section">
-          <span class="section-label">Attention</span>
-          ${this.renderWarningRows(shown, true)}
-          ${moreCount > 0 ? `<div class="inspector-empty-inline">+${moreCount} more</div>` : ''}
-        </div>`
-      : `<div class="inspector-section">
-          <span class="section-label">Attention</span>
-          <div class="inspector-empty-inline">City is healthy — nothing needs you</div>
-        </div>`;
+    const attention = this.createSection(panel, 'Attention');
+    if (topWarnings.length === 0) {
+      attention.createDiv({
+        cls: 'inspector-empty-inline',
+        text: 'City is healthy — nothing needs you',
+      });
+    } else {
+      const shown = topWarnings.slice(0, 8);
+      this.appendWarningRows(attention, shown, true);
+      const moreCount = topWarnings.length - shown.length;
+      if (moreCount > 0) {
+        attention.createDiv({ cls: 'inspector-empty-inline', text: `+${moreCount} more` });
+      }
+    }
+
+    this.appendActivityFeed(panel);
 
     const districts = new Map<string, ProjectData[]>();
     for (const p of projects) {
@@ -1920,46 +2488,28 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       list.push(p);
       districts.set(p.category, list);
     }
-    const districtRows = [...districts.entries()]
-      .sort((a, b) => b[1].length - a[1].length)
-      .map(([category, list]) => {
-        const activeCount = list.filter((p) => p.status === 'active').length;
-        const questCount = list.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
-        const questPart = questCount > 0 ? ` · ◆${questCount}` : '';
-        return `<div class="signal-row"><span>${this.escapeHtml(category)}</span><strong>${list.length} · ${activeCount} active${questPart}</strong></div>`;
-      })
-      .join('');
+    const districtSection = this.createSection(panel, 'Districts');
+    for (const [category, list] of [...districts.entries()].sort((a, b) => b[1].length - a[1].length)) {
+      const activeCount = list.filter((p) => p.status === 'active').length;
+      const questCount = list.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
+      const questPart = questCount > 0 ? ` · ◆${questCount}` : '';
+      this.appendSignalRow(districtSection, category, `${list.length} · ${activeCount} active${questPart}`);
+    }
 
-    this.inspectorPanel.innerHTML = `
-      <div class="inspector-header">
-        <span class="inspector-kicker">CITY OVERVIEW</span>
-        <h3>${projects.length} projects</h3>
-      </div>
-      <div class="inspector-grid">
-        <div><span>Active</span><strong>${active}</strong></div>
-        <div><span>Blocked</span><strong>${blocked}</strong></div>
-        <div><span>Open quests</span><strong>${quests}</strong></div>
-        <div><span>30d commits</span><strong>${commits30d}</strong></div>
-      </div>
-      ${fleetLine}
-      ${attentionSection}
-      ${this.renderActivityFeed()}
-      <div class="inspector-section">
-        <span class="section-label">Districts</span>
-        ${districtRows}
-      </div>
-      <div class="inspector-empty">Select a building for details</div>
-    `;
-
-    this.wireWarningActions(this.inspectorPanel);
+    panel.createDiv({ cls: 'inspector-empty', text: 'Select a building for details' });
   }
 
   private copyAgentContext(project: ProjectData, projectPath: string): void {
-    const vaultPath = (this.app.vault.adapter as any).basePath as string;
+    const vaultPath = this.vaultBase ?? getVaultBasePath(this.app);
+    if (!vaultPath) {
+      new Notice('Agent context needs a local vault folder.');
+      return;
+    }
     generateAgentContext(projectPath, vaultPath, {
       project,
       weather: project.gitActivity ?? null,
       memoryContextPath: project.memoryContextPath ?? null,
+      heartbeat: heartbeatPaths(this.app),
     });
 
     const setupPath = path.join(projectPath, '.hypernovum', 'SETUP.md');
@@ -1977,9 +2527,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     return months === 1 ? '1 month ago' : `${months} months ago`;
   }
 
-  private escapeHtml(value: string): string {
-    return escapeHtml(value);
-  }
 
   private async saveLayout(positions: BlockPosition[]): Promise<void> {
     this.plugin.settings.blockPositions = positions;
@@ -2093,7 +2640,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   /** Handle Claude Code activity start */
   private onClaudeActivityStart(status: ActivityStatus): void {
-
     this.updateActivityIndicator(status, true);
 
     if (!this.sceneManager || !status.project) return;
@@ -2102,7 +2648,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const project = this.sceneManager.findProjectByName(status.project);
     if (project) {
       this.sceneManager.startStreaming(project.path);
-    } else {
     }
   }
 
@@ -2113,7 +2658,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     // Check if project changed
     if (!this.sceneManager || !status.project) return;
 
-    const currentStreamPath = this.sceneManager.isStreaming();
     const project = this.sceneManager.findProjectByName(status.project);
 
     if (project && !this.sceneManager.isStreaming()) {
@@ -2212,17 +2756,31 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const menu = new Menu();
     const project = hit.project;
 
-    // Resolve the project directory path
-    const projectPath = this.resolveProjectPath(project);
+    // May be null — the folder-dependent items handle that rather than silently
+    // acting on the vault root.
+    const projectPath = this.projectDirOf(project);
+    // Vault mode / withheld consent promises "no local processes", so the items
+    // that spawn one are omitted entirely rather than left to fail.
+    const agentsOn = this.plugin.agentFeaturesEnabled;
 
     const agentName = this.settings.agentName || 'Claude Code';
+    if (agentsOn) {
+      menu.addItem((item) => {
+        item
+          .setTitle(`Launch ${agentName}`)
+          .setIcon('terminal')
+          .onClick(async () => {
+            const dir = this.requireProjectDir(project);
+            if (dir) await this.launchAgentForProject(project, dir);
+          });
+      });
+    }
+
     menu.addItem((item) => {
       item
-        .setTitle(`Launch ${agentName}`)
-        .setIcon('terminal')
-        .onClick(async () => {
-          await this.launchAgentForProject(project, projectPath);
-        });
+        .setTitle(projectPath ? 'Change project folder' : 'Set project folder…')
+        .setIcon('folder-symlink')
+        .onClick(() => this.promptForProjectDir(project));
     });
 
     menu.addItem((item) => {
@@ -2243,32 +2801,42 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         });
     });
 
-    menu.addItem((item) => {
-      item
-        .setTitle('Open folder')
-        .setIcon('folder-open')
-        .onClick(async () => {
-          const result = await TerminalLauncher.openInExplorer(projectPath);
-          if (result.success) {
-            new Notice(`Opened ${project.title} folder`);
-          } else {
-            new Notice(`Failed to open folder: ${result.message}`);
-          }
-        });
-    });
+    if (agentsOn) {
+      menu.addItem((item) => {
+        item
+          .setTitle('Open folder')
+          .setIcon('folder-open')
+          .onClick(async () => {
+            const dir = this.requireProjectDir(project);
+            if (!dir) return;
+            const result = await TerminalLauncher.openInExplorer(dir);
+            if (result.success) {
+              new Notice(`Opened ${project.title} folder`);
+            } else {
+              new Notice(`Failed to open folder: ${result.message}`);
+            }
+          });
+      });
 
-    menu.addItem((item) => {
-      item
-        .setTitle('Open terminal')
-        .setIcon('square-terminal')
-        .onClick(() => this.openTerminalForProject(project, projectPath));
-    });
+      menu.addItem((item) => {
+        item
+          .setTitle('Open terminal')
+          .setIcon('square-terminal')
+          .onClick(() => {
+            const dir = this.requireProjectDir(project);
+            if (dir) this.openTerminalForProject(project, dir);
+          });
+      });
+    }
 
     menu.addItem((item) => {
       item
         .setTitle('Copy path')
         .setIcon('copy')
-        .onClick(() => this.copyProjectPath(projectPath));
+        .onClick(() => {
+          const dir = this.requireProjectDir(project);
+          if (dir) this.copyProjectPath(dir);
+        });
     });
 
     menu.addItem((item) => {
@@ -2311,40 +2879,149 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     menu.showAtMouseEvent(event);
   }
 
-  /** Resolve the best path for a project's working directory */
-  private resolveProjectPath(project: ProjectData): string {
-    const vaultBasePath = (this.app.vault.adapter as any).basePath as string;
+  /**
+   * Resolve a project's working directory, memoised per rebuild.
+   *
+   * Returns null when there isn't one. The old version ended with "…otherwise the
+   * vault root", so a project note with no `projectDir` silently reported the
+   * *vault's* Git branch/commits/dirty state, opened terminals in the vault, and
+   * had agent context written into the vault itself. Rules live in
+   * utils/projectPaths.ts.
+   */
+  private resolveProjectDirFor(project: ProjectData): ResolvedProjectDir | null {
+    const cached = this.projectDirs.get(project.path);
+    if (cached !== undefined) return cached;
 
-    // Priority 1: Explicit projectDir from frontmatter
-    if (project.projectDir) {
-      // If it's an absolute path, use it directly
-      if (path.isAbsolute(project.projectDir)) {
-        if (existsSync(project.projectDir)) {
-          return project.projectDir;
-        }
-      } else {
-        // Relative to vault
-        const resolved = path.join(vaultBasePath, project.projectDir);
-        if (existsSync(resolved)) {
-          return resolved;
-        }
+    // Resolution itself stats directories outside the vault, so it belongs behind
+    // the same consent gate as everything else that touches the wider filesystem.
+    const base = this.plugin.agentFeaturesEnabled
+      ? this.vaultBase ?? getVaultBasePath(this.app)
+      : null;
+    if (!base) {
+      this.projectDirs.set(project.path, null);
+      return null;
+    }
+    this.vaultBase = base;
+
+    const resolved = resolveProjectDir(
+      { notePath: project.path, projectDir: project.projectDir },
+      {
+        vaultBase: base,
+        dirExists: isDirectory,
+        isProjectRoot,
+        isAbsolute: path.isAbsolute,
+        join: path.join,
+        dirname: path.dirname,
+      },
+    );
+
+    this.projectDirs.set(project.path, resolved);
+    return resolved;
+  }
+
+  /** Resolved directory path, or null when the project has none. */
+  private projectDirOf(project: ProjectData): string | null {
+    return this.resolveProjectDirFor(project)?.path ?? null;
+  }
+
+  /**
+   * Map a heartbeat session onto a building.
+   *
+   * Directory match first: a hook only knows its working directory, and matching
+   * that against each project's resolved dir works even when the project's *title*
+   * differs from its folder name. Name matching alone silently failed for those —
+   * no orb, no conflict detection — which is most projects with a human-readable
+   * title over a kebab-case folder.
+   */
+  private resolveAgentProjectPath(presence: AgentPresence): string | null {
+    if (presence.cwd) {
+      for (const project of this.allProjects) {
+        const dir = this.projectDirOf(project);
+        if (dir && samePath(dir, presence.cwd)) return project.path;
       }
     }
+    if (presence.project) {
+      return this.sceneManager?.findProjectByName(presence.project)?.path ?? null;
+    }
+    return null;
+  }
 
-    // Priority 2: Folder with same name as note (without .md)
-    const noteFolderPath = path.join(vaultBasePath, project.path.replace(/\.md$/, ''));
-    if (existsSync(noteFolderPath)) {
-      return noteFolderPath;
+  /**
+   * Directory for an action that genuinely needs one (launch agent, open
+   * terminal, open folder). Explains the problem and offers to fix it rather than
+   * quietly acting on the vault root.
+   */
+  private requireProjectDir(project: ProjectData): string | null {
+    const dir = this.projectDirOf(project);
+    if (dir) return dir;
+
+    const notice = new Notice('', 12000);
+    notice.messageEl.createSpan({
+      text: `${project.title} has no project folder. `,
+    });
+    const link = notice.messageEl.createEl('a', { text: 'Set one now' });
+    link.addEventListener('click', () => {
+      notice.hide();
+      void this.promptForProjectDir(project);
+    });
+    return null;
+  }
+
+  /**
+   * Ask for a project folder and write it to the note's `projectDir` frontmatter.
+   *
+   * Without this the only way to link a repo was to hand-author frontmatter, which
+   * meant most projects never got Git data or a usable agent launch directory.
+   */
+  private async promptForProjectDir(project: ProjectData): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(project.path);
+    if (!(file instanceof TFile)) {
+      new Notice('Could not find the project note.');
+      return;
     }
 
-    // Priority 3: Parent folder of the note
-    const noteParentPath = path.join(vaultBasePath, path.dirname(project.path));
-    if (existsSync(noteParentPath) && noteParentPath !== vaultBasePath) {
-      return noteParentPath;
-    }
+    const suggestion = this.suggestProjectDir(project);
 
-    // Priority 4: Vault root
-    return vaultBasePath;
+    new ProjectDirModal(this.app, project.title, suggestion, async (value) => {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+
+      const base = this.vaultBase ?? getVaultBasePath(this.app);
+      const absolute = base && !path.isAbsolute(trimmed) ? path.join(base, trimmed) : trimmed;
+      if (!isDirectory(absolute)) {
+        new Notice(`Not a folder: ${absolute}`);
+        return;
+      }
+
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        fm.projectDir = trimmed;
+      });
+
+      // Drop the memoised resolution + Git snapshot so the next rebuild sees it.
+      this.projectDirs.delete(project.path);
+      this.gitCollector.invalidate();
+      new Notice(`${project.title} → ${trimmed}`);
+      await this.buildCity();
+    }).open();
+  }
+
+  /**
+   * Best guess for a project folder: the nearest Git repo at or above the note's
+   * own folder, else the note's folder. Only used to prefill the prompt.
+   */
+  private suggestProjectDir(project: ProjectData): string {
+    const base = this.vaultBase ?? getVaultBasePath(this.app);
+    if (!base) return '';
+
+    let cursor = path.join(base, path.dirname(project.path));
+    for (let depth = 0; depth < 8; depth++) {
+      if (isDirectory(cursor) && existsSync(path.join(cursor, '.git'))) return cursor;
+      const next = path.dirname(cursor);
+      if (next === cursor) break;
+      cursor = next;
+    }
+    const noteFolder = path.join(base, path.dirname(project.path));
+    return isDirectory(noteFolder) ? noteFolder : '';
   }
 
   /** Launch the configured agent for a project */
@@ -2359,12 +3036,15 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     }
 
     // Write agent context before launching
-    const vaultPath = (this.app.vault.adapter as any).basePath as string;
-    generateAgentContext(projectPath, vaultPath, {
-      project,
-      weather: project.gitActivity ?? null,
-      memoryContextPath: project.memoryContextPath ?? null,
-    });
+    const vaultPath = this.vaultBase ?? getVaultBasePath(this.app);
+    if (vaultPath) {
+      generateAgentContext(projectPath, vaultPath, {
+        project,
+        weather: project.gitActivity ?? null,
+        memoryContextPath: project.memoryContextPath ?? null,
+        heartbeat: heartbeatPaths(this.app),
+      });
+    }
 
     const result = await TerminalLauncher.launch({
       projectPath,
@@ -2398,6 +3078,10 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   /** Show context menu for right-clicked Neural Core orb */
   private showOrbContextMenu(event: MouseEvent): void {
+    // Its only item launches a process, so there's nothing to show when the agent
+    // layer is off.
+    if (!this.plugin.agentFeaturesEnabled) return;
+
     const menu = new Menu();
     const agentName = this.settings.agentName || 'Claude Code';
 
@@ -2469,8 +3153,10 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     new Notice(`Launching ${agentName} in ${projectName}...`);
 
     // Write agent context before launching
-    const vaultPath = (this.app.vault.adapter as any).basePath as string;
-    generateAgentContext(folderPath, vaultPath);
+    const vaultPath = this.vaultBase ?? getVaultBasePath(this.app);
+    if (vaultPath) {
+      generateAgentContext(folderPath, vaultPath, { heartbeat: heartbeatPaths(this.app) });
+    }
 
     const launchResult = await TerminalLauncher.launch({
       projectPath: folderPath,
@@ -2490,6 +3176,75 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
  * Simple modal that prompts the user for a folder path.
  * Used as fallback when Electron's native folder picker is unavailable.
  */
+/**
+ * Prompt for a project folder, prefilled with a best guess. Writes to the note's
+ * `projectDir` frontmatter — the field that unlocks Git signals, terminal launches,
+ * and dependency scanning for that project.
+ */
+class ProjectDirModal extends Modal {
+  private value: string;
+  private projectTitle: string;
+  private onSubmit: (value: string) => void | Promise<void>;
+
+  constructor(
+    app: App,
+    projectTitle: string,
+    suggestion: string,
+    onSubmit: (value: string) => void | Promise<void>,
+  ) {
+    super(app);
+    this.projectTitle = projectTitle;
+    this.value = suggestion;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl('h3', { text: 'Set project folder' });
+    contentEl.createEl('p', {
+      text:
+        `Which folder on disk does "${this.projectTitle}" live in? ` +
+        'This is written to the note as projectDir, and enables Git signals, ' +
+        'agent launches, and dependency detection.',
+    });
+
+    new Setting(contentEl)
+      .setName('Folder path')
+      .setDesc('Absolute, or relative to the vault.')
+      .addText((text) => {
+        text.setPlaceholder('C:/code/my-project');
+        text.setValue(this.value);
+        text.onChange((v) => { this.value = v; });
+        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.submit();
+          }
+        });
+        window.setTimeout(() => text.inputEl.focus(), 0);
+      });
+
+    new Setting(contentEl).addButton((btn) =>
+      btn.setButtonText('Save').setCta().onClick(() => this.submit()),
+    );
+  }
+
+  private submit(): void {
+    const trimmed = this.value.trim();
+    if (!trimmed) {
+      new Notice('Enter a folder path');
+      return;
+    }
+    this.close();
+    void this.onSubmit(trimmed);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 class FolderInputModal extends Modal {
   private onSubmit: (path: string) => void;
   private inputValue = '';

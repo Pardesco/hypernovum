@@ -58,9 +58,45 @@ open `questions:`, and backlinks between at least two projects. Reference screen
       shifts; agent orb orbits the building.
       Orbs only render while pings are fresher than 10s — simulate one from the vault root (PowerShell,
       replace the project name with a real building title):
-      `while($true){ node scripts\heartbeat.js --vault="$PWD" --project="Sample Project" --action="editing"; Start-Sleep 5 }`
+      `while($true){ node .hypernovum\heartbeat.js --vault="$PWD" --project="Sample Project" --action="editing"; Start-Sleep 5 }`
       Ctrl+C to stop; the orb disappears ~10s later.
 - [ ] Agent switcher panel lists installed agents; Prepare vault writes AGENTS.md.
+
+## Fresh-install path (MUST run in a NEW vault, not this repo)
+
+This repo doubles as the dev vault, which is exactly what hid the fact that the heartbeat script
+never reached real users. Copy `main.js` / `manifest.json` / `styles.css` into a **brand new vault's**
+`.obsidian/plugins/hypernovum/` and run these there.
+
+- [ ] First open shows the consent modal; "Visualization only" starts in vault mode with no agent UI;
+      "Enable agent features" enables the agent layer.
+- [ ] City opens in a main workspace tab (not the right sidebar).
+- [ ] Shaders, bloom, and fog are ON — the city looks like the README screenshots.
+- [ ] Command palette → "Install agent heartbeat hooks": writes `<vault>/.hypernovum/heartbeat.js`,
+      modal shows a test command and hook JSON with **absolute paths already filled in** (no
+      `<vault-root>` placeholder, no `scripts/heartbeat.js`).
+- [ ] Paste the test command into a terminal → an orb appears on the matching building.
+- [ ] "Prepare vault for AI agents": AGENTS.md heartbeat section shows the same resolved paths.
+- [ ] Re-running "Install agent heartbeat hooks" reports "already up to date".
+
+## Project folder resolution
+
+- [ ] A project note at the vault root with no `projectDir`: inspector Git section says
+      "No project folder set", Folder/Terminal/Launch/Context/Copy-path buttons are disabled, and the
+      city does NOT show the vault's Git stats on it.
+- [ ] Right-click → "Set project folder…": prefilled with a sensible guess, saving writes `projectDir`
+      to the note's frontmatter and Git signals appear on the next rebuild.
+- [ ] A note inside a project folder resolves without any frontmatter.
+- [ ] An explicitly wrong `projectDir` reports no folder rather than falling back somewhere plausible.
+
+## Performance gating
+
+- [ ] Open the city, then switch to another tab: CPU/GPU use drops (loop paused). Switch back: resumes
+      smoothly with no visual jump.
+- [ ] Same for collapsing the sidebar (if using the sidebar location) and minimising Obsidian.
+- [ ] Select a project and leave the inspector open: buttons stay clickable, text stays selectable, and
+      scroll position holds (previously it rebuilt twice a second).
+- [ ] A vault where many projects share one repo scans that repo once per rebuild, not once per project.
 
 ## Vault mode
 

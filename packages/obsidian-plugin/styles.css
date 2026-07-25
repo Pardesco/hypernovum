@@ -1539,3 +1539,101 @@
   }
 }
 
+
+/* ---------------------------------------------------------------------------
+   0.4 publish-readiness additions
+   --------------------------------------------------------------------------- */
+
+/* WebGL-unavailable panel (replaces a silent black canvas) */
+.hypernovum-webgl-missing {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 24px 28px;
+  border: 1px solid rgba(255, 90, 120, 0.35);
+  border-radius: 4px;
+  background: rgba(14, 10, 18, 0.6);
+}
+
+.hypernovum-webgl-missing h3 {
+  margin: 0;
+}
+
+.hypernovum-webgl-missing p,
+.hypernovum-webgl-missing li {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hypernovum-webgl-missing ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* Inline "Set project folder…" action inside an inspector section */
+.inspector-inline-action {
+  margin-top: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* Disabled inspector actions (no project folder resolved) */
+.inspector-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* First-run consent modal */
+.hypernovum-firstrun-list {
+  margin: 4px 0 12px;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hypernovum-firstrun-note {
+  color: var(--text-accent);
+  font-size: 13px;
+}
+
+/* Heartbeat hooks modal */
+.hypernovum-hooks-modal h3 {
+  margin: 18px 0 4px;
+}
+
+.hypernovum-hooks-path code {
+  word-break: break-all;
+}
+
+.hypernovum-hooks-block {
+  position: relative;
+  margin: 8px 0 4px;
+}
+
+.hypernovum-hooks-block pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--background-primary-alt);
+  font-size: 12px;
+}
+
+.hypernovum-hooks-copy {
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.hypernovum-hooks-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}

@@ -1,5 +1,6 @@
 import { moment, type App } from 'obsidian';
 import type { ProjectData } from '@hypernovum/core';
+import { resolveOutputPath, writeVaultFile } from './vaultFiles';
 
 /**
  * Generate a daily briefing note from the current project data: status
@@ -7,9 +8,12 @@ import type { ProjectData } from '@hypernovum/core';
  * Pure data digest — no AI involved; agents (or the user) act on it.
  * Returns the vault path of the written note.
  */
-export async function generateDailyBriefing(app: App, projects: ProjectData[]): Promise<string> {
+export async function generateDailyBriefing(
+  app: App,
+  projects: ProjectData[],
+  outputFolder = '',
+): Promise<string> {
   const date = moment().format('YYYY-MM-DD');
-  const notePath = `Hypernovum Briefing ${date}.md`;
 
   const byStatus = (status: string) => projects.filter((p) => p.status === status);
   const stale = projects
@@ -74,6 +78,11 @@ export async function generateDailyBriefing(app: App, projects: ProjectData[]): 
   }
 
   lines.push('');
-  await app.vault.adapter.write(notePath, lines.join('\n'));
+
+  // Vault API via writeVaultFile: the briefing is user content, so it has to be
+  // indexed and linkable. Re-running the same day overwrites that day's note
+  // rather than piling up duplicates.
+  const notePath = await resolveOutputPath(app, outputFolder, `Hypernovum Briefing ${date}.md`);
+  await writeVaultFile(app, notePath, lines.join('\n'));
   return notePath;
 }

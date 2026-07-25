@@ -2,8 +2,11 @@
 # requires (main.js, manifest.json, styles.css) to the tagged GitHub release.
 #
 # Release flow:
-#   1. Bump version in packages/obsidian-plugin/manifest.json + package.json,
-#      mirror to root manifest.json, and add the entry to versions.json.
+#   1. Bump "version" (and "minAppVersion" if it changed) in the ROOT manifest.json
+#      — it is the single source of truth — then run:
+#          node scripts/check-versions.mjs --fix
+#      which mirrors it into the plugin manifest, both package.json files, and
+#      versions.json.
 #   2. git tag <version> (tag must EXACTLY match manifest "version", no "v" prefix)
 #   3. git push origin <version>
 name: Release Obsidian plugin
@@ -29,14 +32,32 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # Guards the 0.4.0 failure mode: the plugin manifest was left on 0.3.0
+      # while the root manifest said 0.4.0. Checks every version site AND the tag.
+      - name: Verify versions agree (root + plugin manifest, package.json, versions.json, tag)
+        run: node scripts/check-versions.mjs --tag="${GITHUB_REF_NAME}"
+
+      # esbuild does no type checking, so without this the plugin package ships
+      # unchecked. Runs core + plugin through tsc via project references.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
       - name: Build core + plugin
         run: npm run build
 
-      - name: Verify tag matches manifest version
+      # The embedded heartbeat source is generated from scripts/heartbeat.js and
+      # committed; anything modified OR untracked here after the build means the
+      # generator output drifted from what was committed.
+      - name: Verify generated sources are current
         run: |
-          MANIFEST_VERSION=$(node -p "require('./packages/obsidian-plugin/manifest.json').version")
-          if [ "$MANIFEST_VERSION" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match manifest version ${MANIFEST_VERSION}" >&2
+          DIRTY=$(git status --porcelain -- packages/obsidian-plugin/src/generated)
+          if [ -n "$DIRTY" ]; then
+            echo "Generated sources are stale or uncommitted:" >&2
+            echo "$DIRTY" >&2
+            echo "Run 'npm run gen:heartbeat' and commit the result." >&2
             exit 1
           fi
 

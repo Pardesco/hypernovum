@@ -25,6 +25,15 @@ export interface LensPreset {
   edgeTypes: string[];
 }
 
+/** Where `activateView` puts the city when nothing is open yet. */
+export type ViewLocation = 'tab' | 'right';
+
+/**
+ * Whether the user has accepted the agent layer (local process execution, reads
+ * outside the vault). 'unset' triggers the first-run prompt.
+ */
+export type AgentFeaturesConsent = 'unset' | 'granted' | 'denied';
+
 /** Plugin-level settings extend core settings with agent configuration */
 export interface HypernovumSettings extends CoreSettings {
   vaultMode: boolean;
@@ -34,6 +43,12 @@ export interface HypernovumSettings extends CoreSettings {
   interactionHintShown: boolean;
   /** User-saved lens presets (per vault) */
   savedLenses: LensPreset[];
+  /** Where the city opens: a main workspace tab (default) or the right sidebar */
+  viewLocation: ViewLocation;
+  /** First-run consent for the agent layer */
+  agentFeaturesConsent: AgentFeaturesConsent;
+  /** Vault folder for generated briefings and snapshots ('' = vault root) */
+  outputFolder: string;
 }
 
 export const DEFAULT_SETTINGS: HypernovumSettings = {
@@ -43,6 +58,9 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   vaultMode: false,
   interactionHintShown: false,
   savedLenses: [],
+  viewLocation: 'tab',
+  agentFeaturesConsent: 'unset',
+  outputFolder: '',
 };
 
 export type { BlockPosition };
@@ -71,6 +89,20 @@ export class SettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    new Setting(containerEl)
+      .setName('Open the city in')
+      .setDesc('A main workspace tab gives the 3D view room to breathe. The right sidebar is cramped but stays docked.')
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption('tab', 'Main workspace tab')
+          .addOption('right', 'Right sidebar')
+          .setValue(this.plugin.settings.viewLocation)
+          .onChange(async (value) => {
+            this.plugin.settings.viewLocation = value as ViewLocation;
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(containerEl)
       .setName('Show labels')
@@ -107,8 +139,21 @@ export class SettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Output folder')
+      .setDesc('Vault folder for generated briefings and snapshots. Leave empty for the vault root.')
+      .addText((text) =>
+        text
+          .setPlaceholder('Hypernovum')
+          .setValue(this.plugin.settings.outputFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.outputFolder = value.trim();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName('Git activity layer')
-      .setDesc('Read local Git metadata from projectDir folders to show stale, hot, dirty, and branch status.')
+      .setDesc('Read local Git metadata from projectDir folders to show stale, hot, dirty, and branch status. Runs read-only git commands on your machine.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.enableGitActivity).onChange(async (value) => {
           this.plugin.settings.enableGitActivity = value;
@@ -131,12 +176,12 @@ export class SettingsTab extends PluginSettingTab {
         dropdown.onChange(async (value) => {
           if (value === '__custom__') {
             // Show custom command input — don't clear existing custom command
-            customSetting.settingEl.style.display = '';
+            customSetting.settingEl.toggle(true);
           } else {
             const agent = KNOWN_AGENTS.find(a => a.command === value);
             this.plugin.settings.agentName = agent?.name || value;
             this.plugin.settings.agentCommand = value;
-            customSetting.settingEl.style.display = 'none';
+            customSetting.settingEl.toggle(false);
             await this.plugin.saveSettings();
           }
         });
@@ -162,11 +207,11 @@ export class SettingsTab extends PluginSettingTab {
 
     // Hide custom input unless "Custom..." is selected
     const isCustom = !KNOWN_AGENTS.some(a => a.command && a.command === this.plugin.settings.agentCommand);
-    customSetting.settingEl.style.display = isCustom ? '' : 'none';
+    customSetting.settingEl.toggle(isCustom);
 
     new Setting(containerEl)
       .setName('Prepare vault for AI agents')
-      .setDesc('Write an AGENTS.md file at the vault root with the project schema and a live project inventory, so any CLI agent understands this vault. Safe to re-run; only the Hypernovum section is updated.')
+      .setDesc('Write an AGENTS.md file at the vault root with the project schema and a live project inventory, so any CLI agent understands this vault. Also installs the heartbeat script. Safe to re-run; only the Hypernovum section is updated.')
       .addButton((btn) =>
         btn
           .setButtonText('Write AGENTS.md')
@@ -175,11 +220,22 @@ export class SettingsTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(containerEl)
+      .setName('Agent heartbeat hooks')
+      .setDesc('Install the heartbeat script into this vault and show the hook JSON that makes agent sessions appear as live orbs in the city.')
+      .addButton((btn) =>
+        btn
+          .setButtonText('Install and show hooks')
+          .onClick(async () => {
+            await this.plugin.installHeartbeatHooks();
+          }),
+      );
+
     new Setting(containerEl).setName('Vault mode').setHeading();
 
     new Setting(containerEl)
       .setName('Enable vault mode')
-      .setDesc('Disable AI agent features and use Hypernovum as a pure 3D visualization and navigation tool. Applies immediately — open city views reload.')
+      .setDesc('Disable AI agent features and use Hypernovum as a pure 3D visualization and navigation tool. No local processes are run in this mode. Applies immediately — open city views reload.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.vaultMode).onChange(async (value) => {
           await this.plugin.setVaultMode(value);
@@ -203,23 +259,47 @@ export class SettingsTab extends PluginSettingTab {
           });
       });
 
+    // Derived from the three effect flags rather than stored separately, so it can
+    // never disagree with them.
+    const performanceMode =
+      !this.plugin.settings.enableShaders &&
+      !this.plugin.settings.enableBloom &&
+      !this.plugin.settings.enableAtmosphere;
+
+    new Setting(containerEl)
+      .setName('Performance mode')
+      .setDesc('Turn off procedural shaders, bloom, and fog together. Use this on integrated graphics or very large vaults.')
+      .addToggle((toggle) =>
+        toggle.setValue(performanceMode).onChange(async (value) => {
+          const enabled = !value;
+          this.plugin.settings.enableShaders = enabled;
+          this.plugin.settings.enableBloom = enabled;
+          this.plugin.settings.enableAtmosphere = enabled;
+          await this.plugin.saveSettings();
+          this.display(); // reflect the three toggles below
+          await this.plugin.reloadOpenViews();
+        }),
+      );
+
     new Setting(containerEl)
       .setName('Procedural shaders')
-      .setDesc('Enable GPU shaders for procedural windows and glitch effects. Reload view after changing.')
+      .setDesc('GPU shaders for procedural windows and glitch effects. Applies immediately to open city views.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.enableShaders).onChange(async (value) => {
           this.plugin.settings.enableShaders = value;
           await this.plugin.saveSettings();
+          await this.plugin.reloadOpenViews();
         }),
       );
 
     new Setting(containerEl)
       .setName('Bloom glow')
-      .setDesc('Enable post-processing neon glow effect. Reload view after changing.')
+      .setDesc('Post-processing neon glow. Applies immediately to open city views.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.enableBloom).onChange(async (value) => {
           this.plugin.settings.enableBloom = value;
           await this.plugin.saveSettings();
+          await this.plugin.reloadOpenViews();
         }),
       );
 
@@ -239,11 +319,12 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Atmospheric fog')
-      .setDesc('Enable depth fog and enhanced grid for cyberpunk aesthetic. Reload view after changing.')
+      .setDesc('Depth fog and enhanced grid for the cyberpunk look. Applies immediately to open city views.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.enableAtmosphere).onChange(async (value) => {
           this.plugin.settings.enableAtmosphere = value;
           await this.plugin.saveSettings();
+          await this.plugin.reloadOpenViews();
         }),
       );
   }

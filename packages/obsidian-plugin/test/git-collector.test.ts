@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { parseRecentCommits, parseAheadBehind } from '../src/monitors/GitActivityCollector';
+import {
+  GitActivityCollector,
+  parseRecentCommits,
+  parseAheadBehind,
+} from '../src/monitors/GitActivityCollector';
 import { mapLimit } from '../src/utils/concurrency';
+
+/** Collector with the process-spawning half stubbed, so we can count real scans. */
+function countingCollector() {
+  const collector = new GitActivityCollector();
+  const state = { scans: 0 };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (collector as any).collectUncached = async (dir: string) => {
+    state.scans++;
+    return { projectPath: dir } as never;
+  };
+  return { collector, state };
+}
 
 describe('parseRecentCommits', () => {
   it('parses tab-separated hash/ts/subject lines (ms timestamps)', () => {
@@ -35,6 +51,62 @@ describe('parseAheadBehind', () => {
 
   it('returns null/null on malformed output', () => {
     expect(parseAheadBehind('nope')).toEqual({ ahead: null, behind: null });
+  });
+});
+
+describe('GitActivityCollector caching', () => {
+  it('scans a directory once for concurrent callers', async () => {
+    // Several project notes commonly resolve to the same repo; each scan forks 8
+    // git processes, so a shared in-flight promise is the whole point.
+    const { collector, state } = countingCollector();
+    await Promise.all([
+      collector.collect('/repo', 1000),
+      collector.collect('/repo', 1000),
+      collector.collect('/repo', 1000),
+    ]);
+    expect(state.scans).toBe(1);
+  });
+
+  it('reuses the result inside the TTL and rescans after it', async () => {
+    const { collector, state } = countingCollector();
+    await collector.collect('/repo', 0);
+    await collector.collect('/repo', 29_000);
+    expect(state.scans).toBe(1);
+    await collector.collect('/repo', 31_000);
+    expect(state.scans).toBe(2);
+  });
+
+  it('keys the cache per directory', async () => {
+    const { collector, state } = countingCollector();
+    await collector.collect('/a', 0);
+    await collector.collect('/b', 0);
+    expect(state.scans).toBe(2);
+  });
+
+  it('invalidate() forces a rescan', async () => {
+    const { collector, state } = countingCollector();
+    await collector.collect('/repo', 0);
+    collector.invalidate('/repo');
+    await collector.collect('/repo', 1);
+    expect(state.scans).toBe(2);
+
+    collector.invalidate();
+    await collector.collect('/repo', 2);
+    expect(state.scans).toBe(3);
+  });
+
+  it('does not cache a rejection', async () => {
+    const collector = new GitActivityCollector();
+    let calls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (collector as any).collectUncached = async () => {
+      calls++;
+      throw new Error('git exploded');
+    };
+
+    await expect(collector.collect('/repo', 0)).rejects.toThrow('git exploded');
+    await expect(collector.collect('/repo', 1)).rejects.toThrow('git exploded');
+    expect(calls).toBe(2);
   });
 });
 

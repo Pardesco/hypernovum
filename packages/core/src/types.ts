@@ -196,10 +196,15 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   enableShadows: true,
   maxBuildings: 300,
   blockPositions: [],
-  enableShaders: false,
-  enableBloom: false,
+  // On by default as of 0.4: procedural windows, neon bloom, and fog ARE the
+  // product's look. Shipping them off meant a first run looked nothing like the
+  // screenshots, and most users never found the three toggles. Existing installs
+  // keep whatever their data.json already stored; "Performance mode" in settings
+  // turns all three off together.
+  enableShaders: true,
+  enableBloom: true,
   bloomIntensity: 0.8,
-  enableAtmosphere: false,
+  enableAtmosphere: true,
   enableGitActivity: true,
   buildingStyle: 'classic',
 };

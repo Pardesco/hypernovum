@@ -1,4 +1,15 @@
-#!/usr/bin/env node
+// GENERATED FILE — DO NOT EDIT.
+// Source: scripts/heartbeat.js
+// Regenerate: npm run gen:heartbeat
+//
+// Embedded so the plugin can write a working heartbeat script into the user's
+// vault. See scripts/gen-heartbeat-source.mjs for why.
+
+/** Short content hash of scripts/heartbeat.js — used to detect a stale copy in a vault. */
+export const HEARTBEAT_SOURCE_SHA = 'd11620ef7df1';
+
+/** Verbatim contents of scripts/heartbeat.js. */
+export const HEARTBEAT_SOURCE = `#!/usr/bin/env node
 /**
  * Hypernovum Heartbeat Script — v2 (fleet-safe)
  *
@@ -9,17 +20,17 @@
  *
  * Because every session writes only its own file (tmp + atomic rename), any
  * number of concurrent agents coexist without clobbering each other — the bug
- * the old single-file `.hypernovum-status.json` format had. The plugin reads
+ * the old single-file \`.hypernovum-status.json\` format had. The plugin reads
  * this directory (and still reads the legacy file, so old hooks keep working).
  *
- * Usage — from a Claude Code hook (preferred). `--hook` reads the hook's stdin
+ * Usage — from a Claude Code hook (preferred). \`--hook\` reads the hook's stdin
  * JSON for session_id / tool_name / cwd, so nothing needs interpolating:
  *
  *   node heartbeat.js --vault="/path/to/vault" --hook --name="Claude Code" --agent-type=claude
  *
  * Usage — by hand or from a wrapper, passing values explicitly:
- *   node heartbeat.js --vault="/path/to/vault" --id="my-session" \
- *        --name="Claude Code" --agent-type=claude --project="my-app" \
+ *   node heartbeat.js --vault="/path/to/vault" --id="my-session" \\
+ *        --name="Claude Code" --agent-type=claude --project="my-app" \\
  *        --state=editing --action="Edit src/x.ts" --tool=Edit --file=src/x.ts
  *
  *   node heartbeat.js --vault="/path/to/vault" --id="my-session" --stop
@@ -111,7 +122,7 @@ function writeAtomic(targetPath, contents) {
   const dir = path.dirname(targetPath);
   // NB: the tmp name must NOT end in .json — the plugin lists *.json and would
   // otherwise read this half-written file as a phantom duplicate agent.
-  const tmp = path.join(dir, `.tmp-${process.pid}-${hashString(targetPath)}.tmp`);
+  const tmp = path.join(dir, \`.tmp-\${process.pid}-\${hashString(targetPath)}.tmp\`);
   fs.writeFileSync(tmp, contents);
   try {
     fs.renameSync(tmp, targetPath);
@@ -189,7 +200,7 @@ function logSessionEvent(vaultPath, snap, prior, isStop, now) {
   };
 
   try {
-    fs.appendFileSync(path.join(sessionsDir, `${snap.sessionId}.jsonl`), JSON.stringify(event) + '\n');
+    fs.appendFileSync(path.join(sessionsDir, \`\${snap.sessionId}.jsonl\`), JSON.stringify(event) + '\\n');
   } catch { /* non-fatal */ }
 
   pruneSessionLogs(sessionsDir, now);
@@ -216,7 +227,7 @@ function pruneSessionLogs(sessionsDir, now) {
 /**
  * Read a Claude Code hook payload from stdin.
  *
- * Hooks do NOT get `$CLAUDE_SESSION_ID` or `$TOOL_NAME` environment variables —
+ * Hooks do NOT get \`$CLAUDE_SESSION_ID\` or \`$TOOL_NAME\` environment variables —
  * the only env vars exposed are $CLAUDE_PROJECT_DIR, $CLAUDE_PLUGIN_ROOT,
  * $CLAUDE_ENV_FILE and $CLAUDE_CODE_REMOTE. Everything else arrives as a single
  * JSON object on stdin:
@@ -239,10 +250,10 @@ function readHookPayload() {
 }
 
 /**
- * Pull the target file out of a PreToolUse/PostToolUse `tool_input`.
+ * Pull the target file out of a PreToolUse/PostToolUse \`tool_input\`.
  *
- * Field name varies by tool: Edit/Write/Read use `file_path`, NotebookEdit uses
- * `notebook_path`, and some tools just use `path`.
+ * Field name varies by tool: Edit/Write/Read use \`file_path\`, NotebookEdit uses
+ * \`notebook_path\`, and some tools just use \`path\`.
  */
 function fileFromToolInput(toolInput) {
   if (!toolInput || typeof toolInput !== 'object') return null;
@@ -326,7 +337,7 @@ function main() {
   const sessionStart = Number(params['session-start']) || now;
   const sessionId = params.id && params.id !== true
     ? String(params.id)
-    : `local-${hashString(`${process.pid}:${sessionStart}`)}`;
+    : \`local-\${hashString(\`\${process.pid}:\${sessionStart}\`)}\`;
 
   const agentsDir = path.join(vaultPath, '.hypernovum', 'agents');
   try {
@@ -340,10 +351,10 @@ function main() {
   // from any per-project .hypernovum/ dir; write a broad ignore if absent.
   const gitignorePath = path.join(vaultPath, '.hypernovum', '.gitignore');
   try {
-    if (!fs.existsSync(gitignorePath)) fs.writeFileSync(gitignorePath, '*\n');
+    if (!fs.existsSync(gitignorePath)) fs.writeFileSync(gitignorePath, '*\\n');
   } catch { /* non-fatal */ }
 
-  const snapshotFile = path.join(agentsDir, `${sessionId}.json`);
+  const snapshotFile = path.join(agentsDir, \`\${sessionId}.json\`);
 
   // Read the prior snapshot once — used to preserve sessionStart and to sample
   // session-log events (only log when something actually changed).
@@ -363,9 +374,9 @@ function main() {
 
   // Identity is sticky across pings; per-ping activity is not.
   //
-  // The generated Stop hook runs `--hook --stop` with no other flags, and a Stop
+  // The generated Stop hook runs \`--hook --stop\` with no other flags, and a Stop
   // payload carries no tool_name, so without inheritance the final write would
-  // replace the session with `name: 'Agent'`, no agent type, and null
+  // replace the session with \`name: 'Agent'\`, no agent type, and null
   // action/tool/file — throwing away everything earlier pings recorded, which is
   // exactly what the completed orb and the session-log stop event display.
   const inheritOnStop = (value, priorValue) =>
@@ -409,9 +420,10 @@ function main() {
   logSessionEvent(vaultPath, snapshot, prior, !!params.stop, now);
 
   if (params.stop) {
-    console.log(`Hypernovum: session ${sessionId} marked complete`);
+    console.log(\`Hypernovum: session \${sessionId} marked complete\`);
   }
   // Silent success for hook usage otherwise.
 }
 
 main();
+`;
