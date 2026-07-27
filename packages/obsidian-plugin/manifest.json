@@ -3,7 +3,7 @@
   "name": "Hypernovum",
   "version": "0.4.0",
   "minAppVersion": "1.6.0",
-  "description": "Agent-ops 3D IDE for your second brain: visualize your vault as a Three.js code city, dispatch AI coding agents with full context, post research quests, and track Git activity live.",
+  "description": "Visualize your vault as a 3D city, launch AI coding agents with full context, and track Git activity live.",
   "author": "Randall Morgan",
   "authorUrl": "https://github.com/pardesco",
   "fundingUrl": "https://github.com/sponsors/pardesco",
