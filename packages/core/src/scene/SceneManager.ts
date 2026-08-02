@@ -2806,7 +2806,7 @@ export class SceneManager {
     }
 
     // Try matching on path
-    for (const building of this.buildingPathMap.values()) {
+    for (const [path, building] of this.buildingPathMap) {
       const project = building.userData.project as ProjectData;
       if (path.toLowerCase().includes(lowerName)) {
         return project;
