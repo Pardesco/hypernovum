@@ -78,9 +78,10 @@ export class HeartbeatHooksModal extends Modal {
     const pre = block.createEl('pre');
     pre.createEl('code', { text });
     const btn = block.createEl('button', { cls: 'hypernovum-hooks-copy', text: buttonLabel });
-    btn.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(text);
-      new Notice('Copied to clipboard');
+    btn.addEventListener('click', () => {
+      void navigator.clipboard.writeText(text)
+        .then(() => { new Notice('Copied to clipboard'); })
+        .catch(() => { new Notice('Could not copy to clipboard'); });
     });
   }
 

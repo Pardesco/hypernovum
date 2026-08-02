@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ProjectData } from '../types';
 import { statusColor } from '../types';
+import { debugLog } from '../utils/log';
 
 // Shader source will be inlined by esbuild loader
 import vertexShader from '../shaders/building.vert';
@@ -59,10 +60,10 @@ export class BuildingShader {
       testGeom.dispose();
       testMaterial.dispose();
 
-      console.log('[Hypernovum] Shader compilation successful');
+      debugLog('Shader compilation successful');
       return true;
     } catch (e) {
-      console.warn('[Hypernovum] Shader compilation failed, using fallback materials:', e);
+      debugLog('Shader compilation failed, using fallback materials:', e);
       this.compilationFailed = true;
       return false;
     }
@@ -106,7 +107,7 @@ export class BuildingShader {
         transparent: true,
       });
     } catch (e) {
-      console.warn('[Hypernovum] Failed to create shader material:', e);
+      debugLog('Failed to create shader material:', e);
       return null;
     }
   }

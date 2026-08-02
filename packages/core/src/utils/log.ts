@@ -1,26 +1,21 @@
 /**
- * Development logging, silent by default. Enable from the Obsidian dev
- * console with `localStorage.hypernovumDebug = '1'` (reload not required —
- * checked lazily). Warnings and errors always pass through console directly;
- * this gate is only for chatty operational logs.
+ * Development logging, silent by default. Hosts can opt in explicitly with
+ * `setDebugLogging(true)`. This avoids browser-global persistence leaking a
+ * debug preference across vaults while keeping core platform-agnostic.
  */
-let cached: boolean | null = null;
+let debugEnabled = false;
+let debugSink: ((...args: unknown[]) => void) | null = null;
 
-function enabled(): boolean {
-  if (cached !== null) return cached;
-  try {
-    cached = typeof localStorage !== 'undefined' && localStorage.getItem('hypernovumDebug') === '1';
-  } catch {
-    cached = false;
-  }
-  return cached;
+/** Enable or disable chatty operational logs for the current host session. */
+export function setDebugLogging(enabled: boolean): void {
+  debugEnabled = enabled;
 }
 
-/** Re-check the localStorage flag (e.g. after toggling it in the console) */
-export function refreshDebugFlag(): void {
-  cached = null;
+/** Supply a host-owned debug sink; core never writes to the console directly. */
+export function setDebugSink(sink: ((...args: unknown[]) => void) | null): void {
+  debugSink = sink;
 }
 
 export function debugLog(...args: unknown[]): void {
-  if (enabled()) console.log('[Hypernovum]', ...args);
+  if (debugEnabled) debugSink?.('[Hypernovum]', ...args);
 }

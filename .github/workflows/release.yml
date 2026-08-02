@@ -18,6 +18,9 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   release:
@@ -28,9 +31,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       # Guards the 0.4.0 failure mode: the plugin manifest was left on 0.3.0
       # while the root manifest said 0.4.0. Checks every version site AND the tag.
@@ -44,6 +48,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Lint
+        run: npm run lint
 
       - name: Build core + plugin
         run: npm run build
@@ -60,6 +67,13 @@ jobs:
             echo "Run 'npm run gen:heartbeat' and commit the result." >&2
             exit 1
           fi
+
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            packages/obsidian-plugin/main.js
+            packages/obsidian-plugin/styles.css
 
       - name: Create release with plugin assets
         env:

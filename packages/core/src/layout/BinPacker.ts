@@ -1,4 +1,4 @@
-import type { ProjectData, District, Bounds } from '../types';
+import type { ProjectData, District } from '../types';
 
 /**
  * Spatial bin-packing layout engine.

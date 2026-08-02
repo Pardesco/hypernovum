@@ -11,6 +11,7 @@
     "build:plugin": "npm run gen:heartbeat && npm run build -w packages/obsidian-plugin",
     "dev": "npm run gen:heartbeat && npm run dev -w packages/obsidian-plugin",
     "gen:heartbeat": "node scripts/gen-heartbeat-source.mjs",
+    "lint": "eslint packages/core/src packages/obsidian-plugin/src",
     "typecheck": "tsc --build",
     "check:versions": "node scripts/check-versions.mjs",
     "test": "vitest run"
@@ -18,6 +19,10 @@
   "author": "Randall Morgan",
   "license": "AGPL-3.0-only",
   "devDependencies": {
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.4.0",
+    "jiti": "^2.6.1",
+    "typescript-eslint": "^8.59.1",
     "vitest": "^4.1.10"
   }
 }

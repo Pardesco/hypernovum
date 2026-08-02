@@ -19,7 +19,6 @@ desktop.ini
 
 # npm
 npm-debug.log*
-package-lock.json
 
 # Obsidian
 data.json

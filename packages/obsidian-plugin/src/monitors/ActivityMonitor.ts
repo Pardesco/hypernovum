@@ -76,11 +76,11 @@ export class ActivityMonitor {
   start(): void {
     if (this.pollTimer !== null) return;
 
-    this.pollTimer = window.setInterval(() => this.poll(), this.pollInterval);
+    this.pollTimer = window.setInterval(() => { void this.poll(); }, this.pollInterval);
     this.registerInterval?.(this.pollTimer);
 
     // Initial poll
-    this.poll();
+    void this.poll();
   }
 
   /** Stop monitoring */
@@ -150,7 +150,7 @@ export class ActivityMonitor {
         this.callbacks.onProjectChange?.(newProject, oldProject);
       }
 
-    } catch (err) {
+    } catch {
       // File read error - ignore, might not exist yet
     }
   }
@@ -179,7 +179,8 @@ export class ActivityMonitor {
         if (!filePath.endsWith('.json')) continue;
         try {
           const content = await this.app.vault.adapter.read(filePath);
-          const presence = parseSnapshotToPresence(JSON.parse(content));
+          const parsed: unknown = JSON.parse(content);
+          const presence = parseSnapshotToPresence(parsed);
           if (presence) presences.push(presence);
           else skipped++;
         } catch {
@@ -193,7 +194,7 @@ export class ActivityMonitor {
   }
 
   /** Read and parse the status file (uses vault adapter to bypass file index) */
-  private async readStatusFile(): Promise<any | null> {
+  private async readStatusFile(): Promise<unknown> {
     try {
       // Use vault adapter for direct disk access — getAbstractFileByPath() may not
       // index externally-created files (heartbeat.js writes directly to filesystem)
@@ -201,7 +202,8 @@ export class ActivityMonitor {
       if (!exists) return null;
 
       const content = await this.app.vault.adapter.read(this.statusFilePath);
-      return JSON.parse(content);
+      const parsed: unknown = JSON.parse(content);
+      return parsed;
     } catch {
       return null;
     }

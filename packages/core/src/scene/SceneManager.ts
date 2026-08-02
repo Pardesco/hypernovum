@@ -83,6 +83,12 @@ interface AgentOrbEntry {
 }
 
 export class SceneManager {
+  private static readonly CURSOR_CLASSES = [
+    'hypernovum-cursor-pointer',
+    'hypernovum-cursor-grab',
+    'hypernovum-cursor-grabbing',
+    'hypernovum-cursor-move',
+  ] as const;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
@@ -304,10 +310,14 @@ export class SceneManager {
 
     this.labelRenderer = new CSS2DRenderer();
     this.labelRenderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.labelRenderer.domElement.style.position = 'absolute';
-    this.labelRenderer.domElement.style.top = '0';
-    this.labelRenderer.domElement.style.pointerEvents = 'none';
+    this.labelRenderer.domElement.classList.add('hypernovum-label-renderer');
     this.container.appendChild(this.labelRenderer.domElement);
+  }
+
+  /** Apply one of the interaction cursors through theme-overridable CSS classes. */
+  private setCursor(cursor: 'default' | 'pointer' | 'grab' | 'grabbing' | 'move'): void {
+    this.container.classList.remove(...SceneManager.CURSOR_CLASSES);
+    if (cursor !== 'default') this.container.classList.add(`hypernovum-cursor-${cursor}`);
   }
 
   private initControls(): MapControls {
@@ -376,7 +386,7 @@ export class SceneManager {
 
       debugLog('Bloom post-processing initialized');
     } catch (e) {
-      console.warn('[Hypernovum] Failed to initialize bloom:', e);
+      debugLog('Failed to initialize bloom:', e);
       this.composer = null;
       this.bloomPass = null;
     }
@@ -455,7 +465,7 @@ export class SceneManager {
       // Safety check - don't apply extreme offsets
       const maxOffset = 500;
       if (Math.abs(offset.offsetX) > maxOffset || Math.abs(offset.offsetZ) > maxOffset) {
-        console.warn(`Skipping extreme offset for ${category}:`, offset);
+        debugLog(`Skipping extreme offset for ${category}:`, offset);
         continue;
       }
       if (offset.offsetX !== 0 || offset.offsetZ !== 0) {
@@ -469,7 +479,7 @@ export class SceneManager {
     if (!this.onSaveLayout) return;
 
     const positions: BlockPosition[] = [];
-    for (const [category, block] of this.blocks) {
+    for (const category of this.blocks.keys()) {
       const offset = this.blockOffsets.get(category) || { offsetX: 0, offsetZ: 0 };
       positions.push({
         category,
@@ -720,7 +730,7 @@ export class SceneManager {
       const labelDiv = document.createElement('div');
       labelDiv.className = 'hypernovum-category-label';
       labelDiv.textContent = category.toUpperCase();
-      labelDiv.style.color = `#${color.toString(16).padStart(6, '0')}`;
+      labelDiv.style.setProperty('--hypernovum-category-color', `#${color.toString(16).padStart(6, '0')}`);
       const label = new CSS2DObject(labelDiv);
       label.position.set(labelX, labelY, labelZ);
       label.userData = { isLabel: true, category };
@@ -1617,7 +1627,7 @@ export class SceneManager {
         const entry = this.agentOrbs.get(agentId);
         if (entry) {
           this.showAgentTooltip(entry);
-          this.container.style.cursor = 'pointer';
+          this.setCursor('pointer');
           if (this.store) {
             const st = this.store.getState();
             if (st.hoveredAgentId !== agentId) st.hoverAgent(agentId);
@@ -1632,7 +1642,7 @@ export class SceneManager {
     if (this.store && this.store.getState().hoveredAgentId !== null) {
       this.store.getState().hoverAgent(null);
     }
-    this.container.style.cursor = 'default';
+    this.setCursor('default');
 
     // First VISIBLE hit per array — hidden (filtered-out) buildings must not be
     // hoverable, nor may they steal hover from a visible building behind them.
@@ -1653,7 +1663,7 @@ export class SceneManager {
         this.hoveredHandle = visualHandle;
         const mat = visualHandle.material as THREE.MeshStandardMaterial;
         if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = 0.8;
-        this.container.style.cursor = 'grab';
+        this.setCursor('grab');
         return;
       }
     }
@@ -1718,7 +1728,7 @@ export class SceneManager {
       this.buildingDragStart.copy(intersectPoint);
       this.isDragging = true;
       this.controls.enabled = false;
-      this.container.style.cursor = 'grabbing';
+      this.setCursor('grabbing');
       this.dragAccumulator.set(0, 0);
       return;
     }
@@ -1738,7 +1748,7 @@ export class SceneManager {
         this.isDragging = true;
         this.draggedBlock = block;
         this.controls.enabled = false; // Disable camera controls while dragging
-        this.container.style.cursor = 'grabbing';
+        this.setCursor('grabbing');
         this.dragAccumulator.set(0, 0); // Reset accumulator
 
         // Get initial intersection point on ground plane
@@ -1767,7 +1777,7 @@ export class SceneManager {
       }
     }
 
-    this.container.style.cursor = 'move';
+    this.setCursor('move');
 
     // Show move mode indicator
     this.showMoveModeIndicator(building);
@@ -1790,7 +1800,7 @@ export class SceneManager {
     }
 
     this.movingBuilding = null;
-    this.container.style.cursor = 'default';
+    this.setCursor('default');
 
     // Remove move mode indicator
     this.hideMoveModeIndicator();
@@ -1856,9 +1866,9 @@ export class SceneManager {
 
       // Keep move cursor if still in building move mode
       if (this.movingBuilding) {
-        this.container.style.cursor = 'move';
+        this.setCursor('move');
       } else {
-        this.container.style.cursor = this.hoveredHandle ? 'grab' : 'default';
+        this.setCursor(this.hoveredHandle ? 'grab' : 'default');
       }
     }
   }
@@ -2128,8 +2138,7 @@ export class SceneManager {
     if (fileBase) appendTooltipRow(div, 'File:', fileBase);
     if (age) appendTooltipRow(div, 'Ping:', age);
 
-    if (onLeft) div.style.left = '10px';
-    else div.style.right = '10px';
+    div.classList.add(onLeft ? 'hypernovum-tooltip-right' : 'hypernovum-tooltip-left');
     anchor.appendChild(div);
 
     this.tooltip = new CSS2DObject(anchor);
@@ -2229,11 +2238,7 @@ export class SceneManager {
     const div = document.createElement('div');
     div.className = 'hypernovum-tooltip';
     while (body.firstChild) div.appendChild(body.firstChild);
-    if (buildingOnLeft) {
-      div.style.left = '10px';
-    } else {
-      div.style.right = '10px';
-    }
+    div.classList.add(buildingOnLeft ? 'hypernovum-tooltip-right' : 'hypernovum-tooltip-left');
     anchor.appendChild(div);
 
     this.tooltip = new CSS2DObject(anchor);
@@ -2302,7 +2307,7 @@ export class SceneManager {
 
     if (!enabled) {
       if (this.animationId !== null) {
-        cancelAnimationFrame(this.animationId);
+        window.cancelAnimationFrame(this.animationId);
         this.animationId = null;
       }
       return;
@@ -2324,7 +2329,7 @@ export class SceneManager {
       this.animationId = null;
       return;
     }
-    this.animationId = requestAnimationFrame(this.animate);
+    this.animationId = window.requestAnimationFrame(this.animate);
 
     const elapsed = this.clock.getElapsedTime();
     const delta = this.clock.getDelta();
@@ -2589,7 +2594,7 @@ export class SceneManager {
   }
 
   dispose(): void {
-    if (this.animationId !== null) cancelAnimationFrame(this.animationId);
+    if (this.animationId !== null) window.cancelAnimationFrame(this.animationId);
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.highlight.dispose();
@@ -2691,9 +2696,9 @@ export class SceneManager {
       this.camera.position.lerpVectors(startPos, targetPos, ease);
       this.controls.target.lerpVectors(startTarget, targetLookAt, ease);
       this.controls.update();
-      if (t < 1) requestAnimationFrame(animate);
+      if (t < 1) window.requestAnimationFrame(animate);
     };
-    requestAnimationFrame(animate);
+    window.requestAnimationFrame(animate);
   }
 
   /** Position the Neural Core at the center of the city (origin) */
@@ -2784,7 +2789,7 @@ export class SceneManager {
     const lowerName = name.toLowerCase();
 
     // First try exact match on title
-    for (const [path, building] of this.buildingPathMap) {
+    for (const building of this.buildingPathMap.values()) {
       const project = building.userData.project as ProjectData;
       if (project.title.toLowerCase() === lowerName) {
         return project;
@@ -2792,7 +2797,7 @@ export class SceneManager {
     }
 
     // Then try partial match
-    for (const [path, building] of this.buildingPathMap) {
+    for (const building of this.buildingPathMap.values()) {
       const project = building.userData.project as ProjectData;
       if (project.title.toLowerCase().includes(lowerName) ||
         lowerName.includes(project.title.toLowerCase())) {
@@ -2801,7 +2806,7 @@ export class SceneManager {
     }
 
     // Try matching on path
-    for (const [path, building] of this.buildingPathMap) {
+    for (const building of this.buildingPathMap.values()) {
       const project = building.userData.project as ProjectData;
       if (path.toLowerCase().includes(lowerName)) {
         return project;
@@ -2809,7 +2814,7 @@ export class SceneManager {
     }
 
     // Try matching on projectDir folder name
-    for (const [path, building] of this.buildingPathMap) {
+    for (const building of this.buildingPathMap.values()) {
       const project = building.userData.project as ProjectData;
       if (project.projectDir) {
         const dirName = project.projectDir.split(/[/\\]/).pop()?.toLowerCase();

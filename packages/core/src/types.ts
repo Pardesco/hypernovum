@@ -71,17 +71,6 @@ export interface Bounds {
 /** City activity state for Neural Core visualization */
 export type CityState = 'IDLE' | 'STREAMING' | 'BULK_UPDATE' | 'ERROR';
 
-/** An undirected knowledge link between two projects (from vault backlinks) */
-/** @deprecated Use {@link GraphEdge} with `type: 'backlink'`. Removal targeted for 0.5. */
-export interface LinkEdge {
-  /** Project note path (endpoint A) */
-  from: string;
-  /** Project note path (endpoint B) */
-  to: string;
-  /** Combined link count between the two projects */
-  count: number;
-}
-
 /** Typed project-graph edge (Phase 4, §7.3). One model for all arc kinds. */
 export type EdgeType = 'backlink' | 'agent-working-on' | 'depends-on' | 'blocked-by';
 

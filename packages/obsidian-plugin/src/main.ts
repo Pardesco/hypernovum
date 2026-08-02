@@ -27,39 +27,39 @@ export default class HypernovumPlugin extends Plugin {
 
     // Ribbon icon
     this.addRibbonIcon('box', 'Open Hypernovum', () => {
-      this.activateView();
+      void this.activateView();
     });
 
     // Command palette entries. Obsidian shows these prefixed with the plugin
     // name and expects sentence case, so no "Hypernovum:" prefix and no Title Case.
     this.addCommand({
-      id: 'open-hypernovum',
+      id: 'open-code-city',
       name: 'Open code city',
-      callback: () => this.activateView(),
+      callback: () => { void this.activateView(); },
     });
 
     this.addCommand({
       id: 'prepare-vault-for-agents',
       name: 'Prepare vault for AI agents',
-      callback: () => this.prepareVaultForAgents(),
+      callback: () => { void this.prepareVaultForAgents(); },
     });
 
     this.addCommand({
       id: 'install-heartbeat-hooks',
       name: 'Install agent heartbeat hooks',
-      callback: () => this.installHeartbeatHooks(),
+      callback: () => { void this.installHeartbeatHooks(); },
     });
 
     this.addCommand({
       id: 'generate-daily-briefing',
       name: 'Generate daily briefing',
-      callback: () => this.generateDailyBriefing(),
+      callback: () => { void this.generateDailyBriefing(); },
     });
 
     this.addCommand({
       id: 'toggle-vault-mode',
       name: 'Toggle vault mode',
-      callback: () => this.toggleVaultMode(),
+      callback: () => { void this.toggleVaultMode(); },
     });
 
     this.registerViewCommands();
@@ -77,9 +77,9 @@ export default class HypernovumPlugin extends Plugin {
    * is actually open.
    */
   private registerViewCommands(): void {
-    const viewActions: { id: string; name: string; run: (view: HypernovumView) => unknown }[] = [
+    const viewActions: { id: string; name: string; run: (view: HypernovumView) => void }[] = [
       { id: 'save-layout', name: 'Save city layout', run: (v) => v.commandSaveLayout() },
-      { id: 'snapshot', name: 'Save city snapshot (PNG)', run: (v) => v.commandSnapshot() },
+      { id: 'snapshot', name: 'Save city snapshot (PNG)', run: (v) => { void v.commandSnapshot(); } },
       { id: 'clear-filters', name: 'Clear search and filters', run: (v) => v.commandClearFilters() },
       { id: 'reset-camera', name: 'Reset camera', run: (v) => v.commandResetCamera() },
       { id: 'lens-status', name: 'Scan lens: status', run: (v) => v.commandSetLayer('status') },
@@ -92,7 +92,7 @@ export default class HypernovumPlugin extends Plugin {
       { id: 'cycle-blocked', name: 'Go to next blocked project', run: (v) => v.commandCycleStatus('blocked') },
       { id: 'cycle-paused', name: 'Go to next paused project', run: (v) => v.commandCycleStatus('paused') },
       { id: 'trace-selection', name: 'Trace impact of selected project', run: (v) => v.commandTraceSelection() },
-      { id: 'set-project-folder', name: 'Set project folder for selected project', run: (v) => v.commandSetProjectFolder() },
+      { id: 'set-project-folder', name: 'Set project folder for selected project', run: (v) => { void v.commandSetProjectFolder(); } },
     ];
 
     for (const action of viewActions) {
@@ -110,7 +110,7 @@ export default class HypernovumPlugin extends Plugin {
     }
   }
 
-  async onunload(): Promise<void> {
+  onunload(): void {
     // View is automatically cleaned up by Obsidian
   }
 
@@ -149,7 +149,7 @@ export default class HypernovumPlugin extends Plugin {
 
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     if (leaves.length > 0) {
-      this.app.workspace.revealLeaf(leaves[0]);
+      this.app.workspace.setActiveLeaf(leaves[0], { focus: true });
     }
   }
 
@@ -205,7 +205,7 @@ export default class HypernovumPlugin extends Plugin {
       try {
         await installHeartbeatScript(this.app);
         heartbeat = heartbeatPaths(this.app);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('[Hypernovum] Heartbeat install failed:', error);
       }
 
@@ -215,8 +215,8 @@ export default class HypernovumPlugin extends Plugin {
           ? `AGENTS.md created — ${result.projectCount} projects indexed for AI agents`
           : `AGENTS.md updated — ${result.projectCount} projects indexed for AI agents`,
       );
-    } catch (error: any) {
-      new Notice(`Failed to prepare vault: ${error?.message ?? error}`);
+    } catch (error: unknown) {
+      new Notice(`Failed to prepare vault: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -234,8 +234,8 @@ export default class HypernovumPlugin extends Plugin {
         return;
       }
       new HeartbeatHooksModal(this.app, paths, result.action).open();
-    } catch (error: any) {
-      new Notice(`Failed to install heartbeat: ${error?.message ?? error}`);
+    } catch (error: unknown) {
+      new Notice(`Failed to install heartbeat: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -244,10 +244,10 @@ export default class HypernovumPlugin extends Plugin {
     try {
       const projects = await new ProjectParser(this.app).parseProjects(this.settings);
       const notePath = await generateDailyBriefing(this.app, projects, this.settings.outputFolder);
-      this.app.workspace.openLinkText(notePath, '', false);
+      await this.app.workspace.openLinkText(notePath, '', false);
       new Notice('Daily briefing generated');
-    } catch (error: any) {
-      new Notice(`Failed to generate briefing: ${error?.message ?? error}`);
+    } catch (error: unknown) {
+      new Notice(`Failed to generate briefing: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

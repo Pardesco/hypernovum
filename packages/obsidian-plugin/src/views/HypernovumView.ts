@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, App, Notice, TFile, TFolder, Menu, Modal, Setting, Platform, debounce } from 'obsidian';
+import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Platform, debounce } from 'obsidian';
 import { existsSync, statSync } from 'fs';
 import { execFile } from 'child_process';
 import * as path from 'path';
@@ -50,6 +50,13 @@ import type HypernovumPlugin from '../main';
 export const VIEW_TYPE = 'hypernovum-view';
 
 type VisualLayer = 'status' | 'git' | 'memory' | 'tasks' | 'recency' | 'stack' | 'attention';
+
+interface DirectoryDialog {
+  showOpenDialog(options: {
+    properties: Array<'openDirectory' | 'createDirectory'>;
+    title: string;
+  }): Promise<{ canceled: boolean; filePaths: string[] }>;
+}
 
 /** Dim slate for buildings with no data in the active scan mode */
 const NO_DATA_COLOR = 0x39415c;
@@ -122,9 +129,22 @@ function hexCss(hex: number): string {
 /** Colored legend swatch. The glow colour is data-derived, so it stays in JS. */
 function appendLegendChip(parent: HTMLElement, color: string): HTMLElement {
   const chip = parent.createSpan({ cls: 'legend-chip' });
-  chip.style.background = color;
-  chip.style.boxShadow = `0 0 6px ${color}88`;
+  chip.setCssProps({
+    '--hypernovum-legend-color': color,
+    '--hypernovum-legend-glow': `${color}88`,
+  });
   return chip;
+}
+
+function appendLegendItem(parent: HTMLElement, color: string, text: string): HTMLElement {
+  const item = parent.createDiv({ cls: 'legend-item' });
+  appendLegendChip(item, color);
+  item.appendText(text);
+  return item;
+}
+
+function appendOption(select: HTMLSelectElement, value: string, text: string): HTMLOptionElement {
+  return select.createEl('option', { text, attr: { value } });
 }
 
 /**
@@ -301,7 +321,9 @@ export class HypernovumView extends ItemView {
     // Initialize 3D scene with save callback and settings
     this.sceneManager = new SceneManager(container, {
       savedPositions: this.settings.blockPositions,
-      onSaveLayout: (positions) => this.saveLayout(positions),
+      onSaveLayout: (positions) => {
+        void this.saveLayout(positions);
+      },
       settings: this.settings,
       interactionStore: this.interactionStore,
     });
@@ -317,9 +339,7 @@ export class HypernovumView extends ItemView {
     if (this.plugin.agentFeaturesEnabled) {
       // Top-left overlays stack in a flex column so the agents panel and
       // activity indicator never overlap each other.
-      this.hudTopLeft = document.createElement('div');
-      this.hudTopLeft.className = 'hypernovum-hud-topleft';
-      container.appendChild(this.hudTopLeft);
+      this.hudTopLeft = container.createDiv({ cls: 'hypernovum-hud-topleft' });
       this.addAgentSwitcher(this.hudTopLeft);
     } else {
       container.addClass('vault-mode-active');
@@ -344,7 +364,7 @@ export class HypernovumView extends ItemView {
       this.selectProject(hit.project);
     });
     this.raycaster.setOpenHandler((hit) => {
-      this.app.workspace.openLinkText(hit.project.path, '', false);
+      void this.app.workspace.openLinkText(hit.project.path, '', false);
     });
     this.raycaster.setEmptyClickHandler(() => {
       this.interactionStore.getState().clearSelection();
@@ -397,7 +417,9 @@ export class HypernovumView extends ItemView {
     // Watch for vault changes and rebuild on update
     this.metadataExtractor = new MetadataExtractor(
       this.app,
-      () => this.buildCity(),
+      () => {
+        void this.buildCity();
+      },
       2000,
     );
     this.metadataExtractor.startWatching();
@@ -468,19 +490,26 @@ export class HypernovumView extends ItemView {
         .setTitle('Create new project')
         .setIcon('folder-plus')
         .onClick(() => {
-          new FolderInputModal(this.app, async (folderPath) => {
-            try {
-              // Attempt to create the folder if it doesn't exist
-              let folderCreated = false;
-              if (!this.app.vault.getAbstractFileByPath(folderPath)) {
-                await this.app.vault.createFolder(folderPath);
-                folderCreated = true;
-              }
-              // Ensure we have a markdown note acting as the district center
-              const folderName = folderPath.split('/').pop() || 'New Project';
-              const notePath = `${folderPath}/${folderName}.md`;
-              if (!this.app.vault.getAbstractFileByPath(notePath)) {
-                const newNote = await this.app.vault.create(notePath, `---
+          new FolderInputModal(this.app, (folderPath) => {
+            void this.createProjectFromFolder(folderPath);
+          }).open();
+        });
+    });
+    menu.showAtMouseEvent(event);
+  }
+
+  private async createProjectFromFolder(folderPath: string): Promise<void> {
+    try {
+      let folderCreated = false;
+      if (!this.app.vault.getAbstractFileByPath(folderPath)) {
+        await this.app.vault.createFolder(folderPath);
+        folderCreated = true;
+      }
+
+      const folderName = folderPath.split('/').pop() || 'New Project';
+      const notePath = `${folderPath}/${folderName}.md`;
+      if (!this.app.vault.getAbstractFileByPath(notePath)) {
+        const newNote = await this.app.vault.create(notePath, `---
 type: project
 title: ${folderName}
 status: active
@@ -489,20 +518,16 @@ category: default
 ---
 # ${folderName}
 `);
-                this.app.workspace.openLinkText(newNote.path, '', false);
-                new Notice(`Created new project: ${folderName}`);
-              } else if (folderCreated) {
-                new Notice(`Created project folder: ${folderPath}`);
-              } else {
-                new Notice(`Project folder already exists: ${folderPath}`);
-              }
-            } catch (error: any) {
-              new Notice(`Failed to create project: ${error?.message ?? error}`);
-            }
-          }).open();
-        });
-    });
-    menu.showAtMouseEvent(event);
+        await this.app.workspace.openLinkText(newNote.path, '', false);
+        new Notice(`Created new project: ${folderName}`);
+      } else if (folderCreated) {
+        new Notice(`Created project folder: ${folderPath}`);
+      } else {
+        new Notice(`Project folder already exists: ${folderPath}`);
+      }
+    } catch (error: unknown) {
+      new Notice(`Failed to create project: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** Explain a missing WebGL context instead of leaving an empty black panel. */
@@ -521,7 +546,9 @@ category: default
     steps.createEl('li', { text: 'Otherwise, update your graphics drivers.' });
 
     const retry = panel.createEl('button', { text: 'Try again' });
-    retry.addEventListener('click', () => this.plugin.reloadOpenViews());
+    retry.addEventListener('click', () => {
+      void this.plugin.reloadOpenViews();
+    });
   }
 
   /**
@@ -915,10 +942,7 @@ category: default
       const selected = values.includes(current) ? current : 'all';
       select.replaceChildren();
       values.forEach((value) => {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = value === 'all' ? 'All' : value;
-        select.appendChild(option);
+        appendOption(select, value, value === 'all' ? 'All' : value);
       });
       select.value = selected;
     };
@@ -960,54 +984,55 @@ category: default
       { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', icon: 'A', color: '#4d96ff', installHint: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' },
     ];
 
-    const panel = document.createElement('div');
-    panel.className = 'agents-panel';
-    panel.innerHTML = `
-      <div class="agents-header">
-        <div>
-          <span class="agents-title">AGENTS</span>
-          <div class="agents-subtitle">Right-click a building to launch</div>
-        </div>
-      </div>
-      <div class="agents-list"></div>
-      <div class="agents-abilities" style="display: none;">
-        <div class="agents-abilities-header">ABILITIES &middot; <span class="abilities-count">0</span></div>
-        <div class="agents-abilities-list"></div>
-      </div>
-      <div class="agents-not-installed" style="display: none;">
-        <button class="agents-not-installed-toggle">
-          Available to Install (<span class="not-installed-count">0</span>)
-        </button>
-        <div class="agents-not-installed-list" style="display: none; padding-bottom: 4px;"></div>
-      </div>
-      <button class="agents-prepare-btn" title="Write AGENTS.md at the vault root so agents understand your projects">Prepare vault &middot; AGENTS.md</button>
-    `;
-
-    const prepareBtn = panel.querySelector('.agents-prepare-btn') as HTMLButtonElement;
-    prepareBtn.addEventListener('click', async () => {
-      prepareBtn.disabled = true;
-      await this.plugin.prepareVaultForAgents();
-      prepareBtn.textContent = '✓ AGENTS.md updated';
-      setTimeout(() => {
-        prepareBtn.textContent = 'Prepare vault · AGENTS.md';
-        prepareBtn.disabled = false;
-      }, 2000);
+    const panel = container.createDiv({ cls: 'agents-panel' });
+    const header = panel.createDiv({ cls: 'agents-header' });
+    const heading = header.createDiv();
+    heading.createSpan({ cls: 'agents-title', text: 'AGENTS' });
+    heading.createDiv({ cls: 'agents-subtitle', text: 'Right-click a building to launch' });
+    const list = panel.createDiv({ cls: 'agents-list' });
+    const abilitiesSection = panel.createDiv({ cls: 'agents-abilities' });
+    abilitiesSection.hidden = true;
+    const abilitiesHeader = abilitiesSection.createDiv({ cls: 'agents-abilities-header' });
+    abilitiesHeader.appendText('ABILITIES · ');
+    abilitiesHeader.createSpan({ cls: 'abilities-count', text: '0' });
+    abilitiesSection.createDiv({ cls: 'agents-abilities-list' });
+    const notInstalledSection = panel.createDiv({ cls: 'agents-not-installed' });
+    notInstalledSection.hidden = true;
+    const toggleBtn = notInstalledSection.createEl('button', { cls: 'agents-not-installed-toggle' });
+    toggleBtn.appendText('Available to Install (');
+    let countSpan = toggleBtn.createSpan({ cls: 'not-installed-count', text: '0' });
+    toggleBtn.appendText(')');
+    const notInstalledList = notInstalledSection.createDiv({ cls: 'agents-not-installed-list' });
+    notInstalledList.hidden = true;
+    const prepareBtn = panel.createEl('button', {
+      cls: 'agents-prepare-btn',
+      text: 'Prepare vault · AGENTS.md',
+      attr: { title: 'Write AGENTS.md at the vault root so agents understand your projects' },
     });
-
-    const list = panel.querySelector('.agents-list') as HTMLElement;
-    const notInstalledSection = panel.querySelector('.agents-not-installed') as HTMLElement;
-    const toggleBtn = panel.querySelector('.agents-not-installed-toggle') as HTMLElement;
-    const notInstalledList = panel.querySelector('.agents-not-installed-list') as HTMLElement;
-    const countSpan = panel.querySelector('.not-installed-count') as HTMLElement;
+    prepareBtn.addEventListener('click', () => {
+      prepareBtn.disabled = true;
+      void this.plugin.prepareVaultForAgents()
+        .then(() => {
+          prepareBtn.textContent = '✓ AGENTS.md updated';
+          window.setTimeout(() => {
+            prepareBtn.textContent = 'Prepare vault · AGENTS.md';
+            prepareBtn.disabled = false;
+          }, 2000);
+        })
+        .catch((error: unknown) => {
+          prepareBtn.disabled = false;
+          new Notice(`Could not prepare vault: ${error instanceof Error ? error.message : String(error)}`);
+        });
+    });
 
     let showNotInstalled = false;
     toggleBtn.addEventListener('click', () => {
       showNotInstalled = !showNotInstalled;
-      notInstalledList.toggle(showNotInstalled);
+      notInstalledList.hidden = !showNotInstalled;
       const count = countSpan.textContent ?? '0';
       toggleBtn.empty();
       toggleBtn.appendText(`${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (`);
-      toggleBtn.createSpan({ cls: 'not-installed-count', text: count });
+      countSpan = toggleBtn.createSpan({ cls: 'not-installed-count', text: count });
       toggleBtn.appendText(')');
     });
 
@@ -1053,37 +1078,34 @@ category: default
       // Render installed — DOM API, not innerHTML: agent.name/icon can come
       // from user settings (custom agent) and must land as text, not markup.
       for (const agent of installed) {
-        const item = document.createElement('div');
-        item.className = 'agents-item' + (currentCommand === agent.command ? ' active' : '');
+        const item = list.createDiv({ cls: 'agents-item' });
+        item.classList.toggle('active', currentCommand === agent.command);
+        item.setCssProps({ '--hypernovum-agent-color': agent.color });
         const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
-        iconCircle.style.background = agent.color;
+        iconCircle.setCssProps({ '--hypernovum-agent-color': agent.color });
         item.createSpan({ cls: 'agents-item-name', text: agent.name });
-        if (currentCommand === agent.command) {
-          item.style.borderLeftColor = agent.color;
-        }
-        item.addEventListener('click', async () => {
+        item.addEventListener('click', () => {
           this.plugin.settings.agentName = agent.name;
           this.plugin.settings.agentCommand = agent.command;
-          await this.plugin.saveSettings();
-          renderAgents();
+          void this.plugin.saveSettings().then(renderAgents).catch((error: unknown) => {
+            new Notice(`Could not save agent selection: ${error instanceof Error ? error.message : String(error)}`);
+          });
         });
-        list.appendChild(item);
       }
 
       // Render not installed
       if (notInstalled.length > 0) {
-        notInstalledSection.style.display = 'block';
+        notInstalledSection.hidden = false;
         countSpan.textContent = notInstalled.length.toString();
         toggleBtn.empty();
         toggleBtn.appendText(`${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (`);
-        toggleBtn.createSpan({ cls: 'not-installed-count', text: String(notInstalled.length) });
+        countSpan = toggleBtn.createSpan({ cls: 'not-installed-count', text: String(notInstalled.length) });
         toggleBtn.appendText(')');
 
         for (const agent of notInstalled) {
-          const item = document.createElement('div');
-          item.className = 'agents-item not-detected';
+          const item = notInstalledList.createDiv({ cls: 'agents-item not-detected' });
           const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
-          iconCircle.style.background = `${agent.color}55`;
+          iconCircle.setCssProps({ '--hypernovum-agent-color': `${agent.color}55` });
           item.createSpan({ cls: 'agents-item-name', text: agent.name });
           const installBtn = item.createEl('button', {
             cls: 'agents-install-pill',
@@ -1092,33 +1114,31 @@ category: default
           });
           installBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            navigator.clipboard.writeText(agent.installHint);
+            void navigator.clipboard.writeText(agent.installHint).catch(() => {
+              new Notice('Could not copy the install command.');
+            });
             installBtn.textContent = '\u2713 Copied';
-            installBtn.style.borderColor = '#00cc66';
-            installBtn.style.color = '#00cc66';
-            setTimeout(() => { 
-              installBtn.textContent = 'Install'; 
-              installBtn.style.borderColor = '';
-              installBtn.style.color = '';
+            installBtn.classList.add('copied');
+            window.setTimeout(() => {
+              installBtn.textContent = 'Install';
+              installBtn.classList.remove('copied');
             }, 1500);
           });
-          
-          notInstalledList.appendChild(item);
         }
       } else {
-        notInstalledSection.style.display = 'none';
+        notInstalledSection.hidden = true;
       }
     };
     
     // Initial render assuming all are detected until check finishes
     renderAgents();
-    container.appendChild(panel);
-
     // Run async checks to detect installed agents
-    Promise.all(KNOWN_AGENTS.map(async (agent) => {
+    void Promise.all(KNOWN_AGENTS.map(async (agent) => {
       detectedMap[agent.command] = await checkCommand(agent.command);
     })).then(() => {
       renderAgents();
+    }).catch((error: unknown) => {
+      new Notice(`Could not detect installed agents: ${error instanceof Error ? error.message : String(error)}`);
     });
 
     this.renderAbilities(panel);
@@ -1138,11 +1158,11 @@ category: default
     const vaultPath = getVaultBasePath(this.app);
     const skills = vaultPath ? scanSkills(vaultPath) : [];
     if (skills.length === 0) {
-      section.style.display = 'none';
+      section.hidden = true;
       return;
     }
 
-    section.style.display = 'block';
+    section.hidden = false;
     count.textContent = String(skills.length);
     list.empty();
 
@@ -1153,12 +1173,14 @@ category: default
       item.createSpan({ cls: 'ability-scope', text: skill.scope === 'vault' ? 'V' : 'G' });
       item.title = `${skill.description || skill.name}\n${skill.path}\nClick to copy invocation`;
       item.addEventListener('click', () => {
-        navigator.clipboard.writeText(`Use the "${skill.name}" skill (${skill.path})`);
+        void navigator.clipboard.writeText(`Use the "${skill.name}" skill (${skill.path})`).catch(() => {
+          new Notice('Could not copy the skill invocation.');
+        });
         const gem = item.querySelector('.ability-gem') as HTMLElement;
         if (gem) {
           gem.textContent = '✓';
           gem.classList.add('copied');
-          setTimeout(() => {
+          window.setTimeout(() => {
             gem.textContent = '◆';
             gem.classList.remove('copied');
           }, 1200);
@@ -1168,14 +1190,10 @@ category: default
   }
 
   private addLegend(container: HTMLElement): void {
-    const legend = document.createElement('div');
-    legend.className = 'hypernovum-legend';
-    legend.innerHTML = `
-      <div class="legend-kicker"></div>
-      <div class="legend-body"></div>
-    `;
+    const legend = container.createDiv({ cls: 'hypernovum-legend' });
+    legend.createDiv({ cls: 'legend-kicker' });
+    legend.createDiv({ cls: 'legend-body' });
     this.legendEl = legend;
-    container.appendChild(legend);
     this.renderLegend();
   }
 
@@ -1197,76 +1215,75 @@ category: default
     };
     kicker.textContent = `SCAN · ${modeNames[this.visualLayer]}`;
 
-    const chip = (color: string) =>
-      `<span class="legend-chip" style="background:${color};box-shadow:0 0 6px ${color}88"></span>`;
+    body.empty();
 
     switch (this.visualLayer) {
       case 'attention': {
         const count = warningBadgeCount(this.warnings);
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Severity &middot; Color</div>
-            <div class="legend-list">
-              <div class="legend-item">${chip('#ff4444')}High &mdash; conflict / blocked / failed</div>
-              <div class="legend-item">${chip('#ffaa33')}Medium &mdash; dirty / behind / waiting</div>
-              <div class="legend-item">${chip('#5a6b82')}Low &mdash; stale</div>
-            </div>
-            <div class="legend-note">${count > 0 ? `${count} item${count === 1 ? '' : 's'} need attention` : 'City is healthy — nothing needs you'}</div>
-          </div>
-        `;
+        const section = body.createDiv({ cls: 'legend-section' });
+        section.createDiv({ cls: 'legend-label', text: 'Severity · Color' });
+        const list = section.createDiv({ cls: 'legend-list' });
+        appendLegendItem(list, '#ff4444', 'High — conflict / blocked / failed');
+        appendLegendItem(list, '#ffaa33', 'Medium — dirty / behind / waiting');
+        appendLegendItem(list, '#5a6b82', 'Low — stale');
+        section.createDiv({
+          cls: 'legend-note',
+          text: count > 0
+            ? `${count} item${count === 1 ? '' : 's'} need attention`
+            : 'City is healthy — nothing needs you',
+        });
         break;
       }
 
-      case 'git':
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Signal &middot; Meaning</div>
-            <div class="legend-list">
-              <div class="legend-item">${chip('#ff6600')}Hot glow &mdash; high commit churn</div>
-              <div class="legend-item">${chip('#dd3333')}Glitch &mdash; merge conflict</div>
-              <div class="legend-item">${chip('#6b6b7a')}Dim &mdash; stale repository</div>
-            </div>
-            <div class="legend-note">Status colors still apply beneath signals</div>
-          </div>
-        `;
+      case 'git': {
+        const section = body.createDiv({ cls: 'legend-section' });
+        section.createDiv({ cls: 'legend-label', text: 'Signal · Meaning' });
+        const list = section.createDiv({ cls: 'legend-list' });
+        appendLegendItem(list, '#ff6600', 'Hot glow — high commit churn');
+        appendLegendItem(list, '#dd3333', 'Glitch — merge conflict');
+        appendLegendItem(list, '#6b6b7a', 'Dim — stale repository');
+        section.createDiv({ cls: 'legend-note', text: 'Status colors still apply beneath signals' });
         break;
+      }
 
       case 'memory': {
         const ready = this.allProjects.filter((p) => p.hasMemoryContext).length;
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Filter &middot; Memory</div>
-            <div class="legend-list">
-              <div class="legend-item">${chip('#66e0a3')}Memory-ready projects only</div>
-            </div>
-            <div class="legend-note">${ready} of ${this.allProjects.length} projects carry MEMORY_CONTEXT.md</div>
-          </div>
-        `;
+        const section = body.createDiv({ cls: 'legend-section' });
+        section.createDiv({ cls: 'legend-label', text: 'Filter · Memory' });
+        const list = section.createDiv({ cls: 'legend-list' });
+        appendLegendItem(list, '#66e0a3', 'Memory-ready projects only');
+        section.createDiv({
+          cls: 'legend-note',
+          text: `${ready} of ${this.allProjects.length} projects carry MEMORY_CONTEXT.md`,
+        });
         break;
       }
 
-      case 'tasks':
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Completion &middot; Color</div>
-            <div class="legend-gradient" style="background:linear-gradient(to right,${TASK_RAMP.map(hexCss).join(',')})"></div>
-            <div class="legend-range"><span>0%</span><span>100%</span></div>
-            <div class="legend-list legend-footnote">
-              <div class="legend-item">${chip(hexCss(NO_DATA_COLOR))}No tasks tracked</div>
-            </div>
-          </div>
-        `;
+      case 'tasks': {
+        const section = body.createDiv({ cls: 'legend-section' });
+        section.createDiv({ cls: 'legend-label', text: 'Completion · Color' });
+        section.createDiv({ cls: 'legend-gradient' }).setCssProps({
+          '--hypernovum-legend-gradient': `linear-gradient(to right,${TASK_RAMP.map(hexCss).join(',')})`,
+        });
+        const range = section.createDiv({ cls: 'legend-range' });
+        range.createSpan({ text: '0%' });
+        range.createSpan({ text: '100%' });
+        const list = section.createDiv({ cls: 'legend-list legend-footnote' });
+        appendLegendItem(list, hexCss(NO_DATA_COLOR), 'No tasks tracked');
         break;
+      }
 
-      case 'recency':
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Last Touched &middot; Heat</div>
-            <div class="legend-gradient" style="background:linear-gradient(to right,${RECENCY_RAMP.map(hexCss).join(',')})"></div>
-            <div class="legend-range"><span>Today</span><span>60d+</span></div>
-          </div>
-        `;
+      case 'recency': {
+        const section = body.createDiv({ cls: 'legend-section' });
+        section.createDiv({ cls: 'legend-label', text: 'Last touched · Heat' });
+        section.createDiv({ cls: 'legend-gradient' }).setCssProps({
+          '--hypernovum-legend-gradient': `linear-gradient(to right,${RECENCY_RAMP.map(hexCss).join(',')})`,
+        });
+        const range = section.createDiv({ cls: 'legend-range' });
+        range.createSpan({ text: 'Today' });
+        range.createSpan({ text: '60d+' });
         break;
+      }
 
       case 'stack': {
         // Stack names come from note frontmatter, so this legend is built with DOM
@@ -1278,7 +1295,6 @@ category: default
         }
         const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-        body.empty();
         const section = body.createDiv({ cls: 'legend-section' });
         section.createDiv({ cls: 'legend-label', text: 'Primary Stack · Color' });
         const list = section.createDiv({ cls: 'legend-list' });
@@ -1301,55 +1317,58 @@ category: default
         break;
       }
 
-      default:
-        body.innerHTML = `
-          <div class="legend-section">
-            <div class="legend-label">Status &middot; Color</div>
-            <div class="legend-grid">
-              <div class="legend-item"><span class="legend-chip active"></span>Active</div>
-              <div class="legend-item"><span class="legend-chip blocked"></span>Blocked</div>
-              <div class="legend-item"><span class="legend-chip paused"></span>Paused</div>
-              <div class="legend-item"><span class="legend-chip complete"></span>Complete</div>
-            </div>
-          </div>
-          <div class="legend-section">
-            <div class="legend-label">Priority &middot; Height</div>
-            <div class="legend-skyline">
-              <div class="legend-bars">
-                <div class="legend-bar h1"></div>
-                <div class="legend-bar h2"></div>
-                <div class="legend-bar h3"></div>
-                <div class="legend-bar h4"></div>
-              </div>
-              <div class="legend-range"><span>Low</span><span>Critical</span></div>
-            </div>
-          </div>
-        `;
+      default: {
+        const statusSection = body.createDiv({ cls: 'legend-section' });
+        statusSection.createDiv({ cls: 'legend-label', text: 'Status · Color' });
+        const grid = statusSection.createDiv({ cls: 'legend-grid' });
+        for (const [status, label] of [
+          ['active', 'Active'],
+          ['blocked', 'Blocked'],
+          ['paused', 'Paused'],
+          ['complete', 'Complete'],
+        ] as const) {
+          const item = grid.createDiv({ cls: 'legend-item' });
+          item.createSpan({ cls: `legend-chip ${status}` });
+          item.appendText(label);
+        }
+
+        const prioritySection = body.createDiv({ cls: 'legend-section' });
+        prioritySection.createDiv({ cls: 'legend-label', text: 'Priority · Height' });
+        const skyline = prioritySection.createDiv({ cls: 'legend-skyline' });
+        const bars = skyline.createDiv({ cls: 'legend-bars' });
+        for (const height of ['h1', 'h2', 'h3', 'h4']) {
+          bars.createDiv({ cls: `legend-bar ${height}` });
+        }
+        const range = skyline.createDiv({ cls: 'legend-range' });
+        range.createSpan({ text: 'Low' });
+        range.createSpan({ text: 'Critical' });
+        break;
+      }
     }
   }
 
   private addControlsHint(container: HTMLElement): void {
-    const controls = document.createElement('div');
-    controls.className = 'hypernovum-controls';
-    controls.innerHTML = `
-      <div class="controls-row"><kbd>Click</kbd><span>Select</span></div>
-      <div class="controls-row"><kbd>Dbl-click</kbd><span>Open note</span></div>
-      <div class="controls-row"><kbd>Right-click</kbd><span>Actions menu</span></div>
-      <div class="controls-row"><kbd>Esc</kbd><span>Deselect / exit move</span></div>
-      <div class="controls-row"><kbd>Right-drag</kbd><span>Pan</span></div>
-      <div class="controls-row"><kbd>Scroll</kbd><span>Zoom</span></div>
-      <div class="controls-row"><kbd>B / S</kbd><span>Cycle blocked / stale</span></div>
-      <div class="controls-row"><kbd>Space</kbd><span>Reset camera</span></div>
-    `;
-    container.appendChild(controls);
+    const controls = container.createDiv({ cls: 'hypernovum-controls' });
+    for (const [key, action] of [
+      ['Click', 'Select'],
+      ['Dbl-click', 'Open note'],
+      ['Right-click', 'Actions menu'],
+      ['Esc', 'Deselect / exit move'],
+      ['Right-drag', 'Pan'],
+      ['Scroll', 'Zoom'],
+      ['B / S', 'Cycle blocked / stale'],
+      ['Space', 'Reset camera'],
+    ] as const) {
+      const row = controls.createDiv({ cls: 'controls-row' });
+      row.createEl('kbd', { text: key });
+      row.createSpan({ text: action });
+    }
   }
 
   private addEmptyState(container: HTMLElement): void {
-    const el = document.createElement('div');
-    el.className = 'hypernovum-empty-state';
-    el.style.display = 'none';
+    const el = container.createDiv({ cls: 'hypernovum-empty-state' });
+    el.hidden = true;
     this.emptyStateEl = el;
-    container.appendChild(el);
   }
 
   private updateEmptyState(): void {
@@ -1360,12 +1379,12 @@ category: default
     const noMatches = !noProjects && this.filteredProjects.length === 0;
 
     if (!noProjects && !noMatches) {
-      el.style.display = 'none';
+      el.hidden = true;
       return;
     }
 
     el.empty();
-    el.style.display = 'block';
+    el.hidden = false;
 
     if (noProjects) {
       el.createDiv({ cls: 'empty-kicker', text: 'AWAITING CITY DATA' });
@@ -1374,10 +1393,14 @@ category: default
       el.createEl('pre', { text: '---\ntags: [project]\nstatus: active\npriority: high\ncategory: web-apps\n---' });
       const actions = el.createDiv({ cls: 'empty-actions' });
       const btn = actions.createEl('button', { text: 'Create sample project' });
-      btn.addEventListener('click', () => this.createSampleProject());
+      btn.addEventListener('click', () => {
+        void this.createSampleProject();
+      });
       if (!this.settings.vaultMode) {
         const prepBtn = actions.createEl('button', { text: 'Prepare vault for agents' });
-        prepBtn.addEventListener('click', () => this.plugin.prepareVaultForAgents());
+        prepBtn.addEventListener('click', () => {
+          void this.plugin.prepareVaultForAgents();
+        });
       }
     } else {
       el.createDiv({ cls: 'empty-kicker', text: 'NO SIGNAL' });
@@ -1406,10 +1429,10 @@ stack: [TypeScript, Three.js]
 Duplicate this note and edit the frontmatter to add your own projects to the city.
 `);
       }
-      this.app.workspace.openLinkText(notePath, '', false);
+      await this.app.workspace.openLinkText(notePath, '', false);
       await this.buildCity();
-    } catch (error: any) {
-      new Notice(`Failed to create sample project: ${error?.message ?? error}`);
+    } catch (error: unknown) {
+      new Notice(`Failed to create sample project: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1428,22 +1451,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   }
 
   private addSaveButton(container: HTMLElement): void {
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'hypernovum-save-btn';
-    saveBtn.textContent = 'Save Layout';
+    const saveBtn = container.createEl('button', { cls: 'hypernovum-save-btn', text: 'Save layout' });
     saveBtn.addEventListener('click', () => {
       if (this.sceneManager) {
         this.sceneManager.triggerSave();
       }
     });
-    container.appendChild(saveBtn);
-
-    const snapBtn = document.createElement('button');
-    snapBtn.className = 'hypernovum-save-btn hypernovum-snapshot-btn';
-    snapBtn.textContent = 'Snapshot';
-    snapBtn.title = 'Save a clean PNG of the city (no HUD) into the vault';
-    snapBtn.addEventListener('click', () => this.captureSnapshot());
-    container.appendChild(snapBtn);
+    const snapBtn = container.createEl('button', {
+      cls: 'hypernovum-save-btn hypernovum-snapshot-btn',
+      text: 'Snapshot',
+      attr: { title: 'Save a clean PNG of the city (no HUD) into the vault' },
+    });
+    snapBtn.addEventListener('click', () => { void this.captureSnapshot(); });
   }
 
   /** Capture the city, composite a title card, and save as a PNG in the vault */
@@ -1458,7 +1477,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         img.src = dataUrl;
       });
 
-      const canvas = document.createElement('canvas');
+      const canvas = createEl('canvas');
       canvas.width = img.width;
       canvas.height = img.height;
       const ctx = canvas.getContext('2d')!;
@@ -1501,65 +1520,95 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         await blob.arrayBuffer(),
       );
       new Notice(`Snapshot saved: ${savedPath}`);
-    } catch (error: any) {
-      new Notice(`Snapshot failed: ${error?.message ?? error}`);
+    } catch (error: unknown) {
+      new Notice(`Snapshot failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private addCommandPanel(container: HTMLElement): void {
-    const panel = document.createElement('div');
-    panel.className = 'hypernovum-command-panel';
-    panel.innerHTML = `
-      <div class="command-panel-header">
-        <span class="command-panel-title">PROJECTS</span>
-        <button class="attention-badge" title="Needs attention — click for the triage lens" hidden>⚠ 0</button>
-        <span class="command-panel-summary">Loading...</span>
-      </div>
-      <input class="command-search" type="search" placeholder="Search projects" />
-      <div class="command-row">
-        <label>Layer</label>
-        <select class="layer-select">
-          <option value="status">Status</option>
-          <option value="attention">Needs Attention</option>
-          <option value="git">Git Activity</option>
-          <option value="memory">Memory Ready</option>
-          <option value="tasks">Task Progress</option>
-          <option value="recency">Recency</option>
-          <option value="stack">Tech Stack</option>
-        </select>
-      </div>
-      <div class="command-row">
-        <label>Preset</label>
-        <div class="preset-controls">
-          <select class="preset-select"></select>
-          <button class="preset-save" title="Save the current view as a preset">Save view</button>
-          <button class="preset-delete" title="Delete the selected preset" hidden>Delete</button>
-        </div>
-      </div>
-      <div class="command-filters">
-        <select class="status-select"><option value="all">All status</option></select>
-        <select class="priority-select"><option value="all">All priority</option></select>
-        <select class="category-select"><option value="all">All categories</option></select>
-      </div>
-      <div class="edge-toggles" title="Show typed project-graph edges">
-        <span class="edge-toggles-label">EDGES</span>
-        <button class="edge-chip" data-edge="backlink">Backlinks</button>
-        <button class="edge-chip" data-edge="depends-on">Deps</button>
-        <button class="edge-chip" data-edge="blocked-by">Blocked</button>
-        <button class="edge-chip" data-edge="agent-working-on">Agents</button>
-      </div>
-      <button class="vault-mode-toggle" title="Vault mode: pure 3D visualization, no AI agent features. Reloads the view.">VAULT MODE &middot; OFF</button>
-    `;
+    const panel = container.createDiv({ cls: 'hypernovum-command-panel' });
+    const header = panel.createDiv({ cls: 'command-panel-header' });
+    header.createSpan({ cls: 'command-panel-title', text: 'PROJECTS' });
+    const attentionBadge = header.createEl('button', {
+      cls: 'attention-badge',
+      text: '⚠ 0',
+      attr: { title: 'Needs attention — click for the triage lens' },
+    });
+    attentionBadge.hidden = true;
+    const summary = header.createSpan({ cls: 'command-panel-summary', text: 'Loading...' });
+    const searchInput = panel.createEl('input', {
+      cls: 'command-search',
+      attr: { type: 'search', placeholder: 'Search projects' },
+    });
 
-    const searchInput = panel.querySelector('.command-search') as HTMLInputElement;
-    const layerSelect = panel.querySelector('.layer-select') as HTMLSelectElement;
+    const layerRow = panel.createDiv({ cls: 'command-row' });
+    layerRow.createEl('label', { text: 'Layer' });
+    const layerSelect = layerRow.createEl('select', { cls: 'layer-select' });
+    for (const [value, label] of [
+      ['status', 'Status'],
+      ['attention', 'Needs attention'],
+      ['git', 'Git activity'],
+      ['memory', 'Memory ready'],
+      ['tasks', 'Task progress'],
+      ['recency', 'Recency'],
+      ['stack', 'Tech stack'],
+    ] as const) appendOption(layerSelect, value, label);
+
+    const presetRow = panel.createDiv({ cls: 'command-row' });
+    presetRow.createEl('label', { text: 'Preset' });
+    const presetControls = presetRow.createDiv({ cls: 'preset-controls' });
+    const presetSelect = presetControls.createEl('select', { cls: 'preset-select' });
+    const presetSave = presetControls.createEl('button', {
+      cls: 'preset-save',
+      text: 'Save view',
+      attr: { title: 'Save the current view as a preset' },
+    });
+    const presetDelete = presetControls.createEl('button', {
+      cls: 'preset-delete',
+      text: 'Delete',
+      attr: { title: 'Delete the selected preset' },
+    });
+    presetDelete.hidden = true;
+
+    const filters = panel.createDiv({ cls: 'command-filters' });
+    const statusSelect = filters.createEl('select', { cls: 'status-select' });
+    appendOption(statusSelect, 'all', 'All status');
+    const prioritySelect = filters.createEl('select', { cls: 'priority-select' });
+    appendOption(prioritySelect, 'all', 'All priority');
+    const categorySelect = filters.createEl('select', { cls: 'category-select' });
+    appendOption(categorySelect, 'all', 'All categories');
+
+    const edgeToggles = panel.createDiv({
+      cls: 'edge-toggles',
+      attr: { title: 'Show typed project-graph edges' },
+    });
+    edgeToggles.createSpan({ cls: 'edge-toggles-label', text: 'EDGES' });
+    const edgeChips: HTMLButtonElement[] = [];
+    for (const [type, label] of [
+      ['backlink', 'Backlinks'],
+      ['depends-on', 'Deps'],
+      ['blocked-by', 'Blocked'],
+      ['agent-working-on', 'Agents'],
+    ] as const) {
+      edgeChips.push(edgeToggles.createEl('button', {
+        cls: 'edge-chip',
+        text: label,
+        attr: { 'data-edge': type },
+      }));
+    }
+    const vaultToggle = panel.createEl('button', {
+      cls: 'vault-mode-toggle',
+      text: 'VAULT MODE · OFF',
+      attr: { title: 'Vault mode: pure 3D visualization, no AI agent features. Reloads the view.' },
+    });
+
     this.searchInput = searchInput;
     this.layerSelect = layerSelect;
-    this.statusSelect = panel.querySelector('.status-select') as HTMLSelectElement;
-    this.prioritySelect = panel.querySelector('.priority-select') as HTMLSelectElement;
-    this.categorySelect = panel.querySelector('.category-select') as HTMLSelectElement;
-    this.summaryEl = panel.querySelector('.command-panel-summary') as HTMLElement;
-    this.attentionBadge = panel.querySelector('.attention-badge') as HTMLElement;
+    this.statusSelect = statusSelect;
+    this.prioritySelect = prioritySelect;
+    this.categorySelect = categorySelect;
+    this.summaryEl = summary;
+    this.attentionBadge = attentionBadge;
 
     this.attentionBadge.addEventListener('click', () => {
       this.visualLayer = 'attention';
@@ -1568,13 +1617,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
 
     // Lens presets (LENS-001)
-    this.presetSelect = panel.querySelector('.preset-select') as HTMLSelectElement;
-    this.presetDeleteBtn = panel.querySelector('.preset-delete') as HTMLButtonElement;
-    const presetSave = panel.querySelector('.preset-save') as HTMLButtonElement;
+    this.presetSelect = presetSelect;
+    this.presetDeleteBtn = presetDelete;
     this.renderPresetOptions();
     this.presetSelect.addEventListener('change', () => this.onPresetSelected());
     presetSave.addEventListener('click', () => this.saveCurrentLens());
-    this.presetDeleteBtn.addEventListener('click', () => this.deleteSelectedPreset());
+    this.presetDeleteBtn.addEventListener('click', () => {
+      void this.deleteSelectedPreset();
+    });
 
     // Debounce so a rebuild fires once per typing pause, not per keystroke (PERF-001).
     const debouncedSearch = debounce(() => this.applyView(), 200, false);
@@ -1588,23 +1638,23 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       this.applyView();
     });
 
-    this.statusSelect.addEventListener('change', () => {
-      this.statusFilter = this.statusSelect?.value ?? 'all';
+    statusSelect.addEventListener('change', () => {
+      this.statusFilter = statusSelect.value;
       this.applyView();
     });
 
-    this.prioritySelect.addEventListener('change', () => {
-      this.priorityFilter = this.prioritySelect?.value ?? 'all';
+    prioritySelect.addEventListener('change', () => {
+      this.priorityFilter = prioritySelect.value;
       this.applyView();
     });
 
-    this.categorySelect.addEventListener('change', () => {
-      this.categoryFilter = this.categorySelect?.value ?? 'all';
+    categorySelect.addEventListener('change', () => {
+      this.categoryFilter = categorySelect.value;
       this.applyView();
     });
 
     // Edge-type toggle chips (EDG-006)
-    this.edgeChips = Array.from(panel.querySelectorAll<HTMLButtonElement>('.edge-chip'));
+    this.edgeChips = edgeChips;
     this.syncEdgeChips();
     for (const chip of this.edgeChips) {
       chip.addEventListener('click', () => {
@@ -1617,23 +1667,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       });
     }
 
-    const vaultToggle = panel.querySelector('.vault-mode-toggle') as HTMLButtonElement;
     vaultToggle.textContent = `VAULT MODE · ${this.settings.vaultMode ? 'ON' : 'OFF'}`;
     vaultToggle.classList.toggle('active', this.settings.vaultMode);
     vaultToggle.addEventListener('click', () => {
       // Reloads the view; the fresh view renders the new state
-      this.plugin.toggleVaultMode();
+      void this.plugin.toggleVaultMode();
     });
-
-    container.appendChild(panel);
   }
 
   private addInspectorPanel(container: HTMLElement): void {
-    const panel = document.createElement('div');
-    panel.className = 'hypernovum-project-inspector';
+    const panel = container.createDiv({ cls: 'hypernovum-project-inspector' });
     panel.createDiv({ cls: 'inspector-empty', text: 'Select a project' });
     this.inspectorPanel = panel;
-    container.appendChild(panel);
   }
 
   private storeUnsubscribe: (() => void) | null = null;
@@ -1758,18 +1803,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         }
         break;
       case 'open-note':
-        if (project) this.app.workspace.openLinkText(project.path, '', false);
+        if (project) void this.app.workspace.openLinkText(project.path, '', false);
         break;
       case 'launch-agent': {
         if (!project || !this.plugin.agentFeaturesEnabled) break;
         const dir = this.requireProjectDir(project);
-        if (dir) this.launchAgentForProject(project, dir);
+        if (dir) void this.launchAgentForProject(project, dir);
         break;
       }
       case 'open-terminal': {
         if (!project || !this.plugin.agentFeaturesEnabled) break;
         const dir = this.requireProjectDir(project);
-        if (dir) this.openTerminalForProject(project, dir);
+        if (dir) void this.openTerminalForProject(project, dir);
         break;
       }
     }
@@ -1854,16 +1899,20 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     new TextInputModal(
       this.app,
       { title: 'Save lens preset', label: 'Preset name', placeholder: 'e.g. Blocked work', cta: 'Save' },
-      async (name) => {
-        const id = nextPresetId(this.settings.savedLenses);
-        this.plugin.settings.savedLenses.push(stateToPreset(id, name, this.currentLensState()));
-        await this.plugin.saveSettings();
-        this.renderPresetOptions();
-        if (this.presetSelect) this.presetSelect.value = id;
-        if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = false;
-        new Notice(`Saved lens "${name}"`);
+      (name) => {
+        void this.persistCurrentLens(name);
       },
     ).open();
+  }
+
+  private async persistCurrentLens(name: string): Promise<void> {
+    const id = nextPresetId(this.settings.savedLenses);
+    this.plugin.settings.savedLenses.push(stateToPreset(id, name, this.currentLensState()));
+    await this.plugin.saveSettings();
+    this.renderPresetOptions();
+    if (this.presetSelect) this.presetSelect.value = id;
+    if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = false;
+    new Notice(`Saved lens "${name}"`);
   }
 
   private async deleteSelectedPreset(): Promise<void> {
@@ -2272,7 +2321,9 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         cls: 'inspector-inline-action',
         text: 'Set project folder…',
       });
-      setBtn.addEventListener('click', () => this.promptForProjectDir(project));
+      setBtn.addEventListener('click', () => {
+        void this.promptForProjectDir(project);
+      });
     } else if (!git) {
       gitSection.createDiv({ cls: 'inspector-empty-inline', text: 'Not a Git repository' });
     } else {
@@ -2343,24 +2394,27 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       return btn;
     };
 
-    action('Open Note', () => this.app.workspace.openLinkText(project.path, '', false));
+    action('Open Note', () => {
+      void this.app.workspace.openLinkText(project.path, '', false);
+    });
 
     if (agentsOn) {
-      action('Folder', async () => {
+      action('Folder', () => {
         const dir = this.requireProjectDir(project);
         if (!dir) return;
-        const result = await TerminalLauncher.openInExplorer(dir);
-        new Notice(
-          result.success ? `Opened ${project.title} folder` : `Failed to open folder: ${result.message}`,
-        );
+        void TerminalLauncher.openInExplorer(dir).then((result) => {
+          new Notice(
+            result.success ? `Opened ${project.title} folder` : `Failed to open folder: ${result.message}`,
+          );
+        });
       }, true);
       action('Terminal', () => {
         const dir = this.requireProjectDir(project);
-        if (dir) this.openTerminalForProject(project, dir);
+        if (dir) void this.openTerminalForProject(project, dir);
       }, true);
-      action('Launch Agent', async () => {
+      action('Launch Agent', () => {
         const dir = this.requireProjectDir(project);
-        if (dir) await this.launchAgentForProject(project, dir);
+        if (dir) void this.launchAgentForProject(project, dir);
       }, true);
       action('Context', () => {
         const dir = this.requireProjectDir(project);
@@ -2371,7 +2425,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (agentsOn) {
       action('Copy Path', () => {
         const dir = this.requireProjectDir(project);
-        if (dir) this.copyProjectPath(dir);
+        if (dir) void this.copyProjectPath(dir);
       }, true);
     }
     action('Add Quest', () => this.addQuestForProject(project));
@@ -2513,8 +2567,10 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
 
     const setupPath = path.join(projectPath, '.hypernovum', 'SETUP.md');
-    navigator.clipboard.writeText(setupPath);
-    new Notice('Agent context path copied');
+    void navigator.clipboard.writeText(setupPath).then(
+      () => new Notice('Agent context path copied'),
+      () => new Notice('Could not copy agent context path'),
+    );
   }
 
   private formatRelativeTime(epochMs: number): string {
@@ -2561,18 +2617,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   /** Add activity indicator overlay */
   private addActivityIndicator(container: HTMLElement): void {
-    const indicator = document.createElement('div');
-    indicator.className = 'hypernovum-activity-indicator';
-    indicator.innerHTML = `
-      <div class="activity-status">
-        <span class="activity-dot"></span>
-        <span class="activity-text">IDLE</span>
-      </div>
-      <div class="activity-project"></div>
-      <div class="activity-action"></div>
-    `;
-    indicator.style.display = 'none'; // Hidden by default
-    container.appendChild(indicator);
+    const indicator = container.createDiv({ cls: 'hypernovum-activity-indicator' });
+    const status = indicator.createDiv({ cls: 'activity-status' });
+    status.createSpan({ cls: 'activity-dot' });
+    status.createSpan({ cls: 'activity-text', text: 'IDLE' });
+    indicator.createDiv({ cls: 'activity-project' });
+    indicator.createDiv({ cls: 'activity-action' });
+    indicator.hidden = true;
     this.activityIndicator = indicator;
   }
 
@@ -2681,7 +2732,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (!this.activityIndicator) return;
 
     if (active && status) {
-      this.activityIndicator.style.display = 'block';
+      this.activityIndicator.hidden = false;
       this.activityIndicator.classList.add('active');
 
       const dot = this.activityIndicator.querySelector('.activity-dot') as HTMLElement;
@@ -2703,9 +2754,9 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       if (text) text.textContent = 'IDLE';
 
       // Hide after a short delay
-      setTimeout(() => {
+      window.setTimeout(() => {
         if (this.activityIndicator && !this.activityMonitor?.isCurrentlyActive()) {
-          this.activityIndicator.style.display = 'none';
+          this.activityIndicator.hidden = true;
         }
       }, 2000);
     }
@@ -2723,23 +2774,30 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     new TextInputModal(
       this.app,
       { title: `Add quest — ${project.title}`, label: 'Research question', placeholder: 'What do we still need to answer?', cta: 'Add quest' },
-      async (question) => {
-        const file = this.app.vault.getAbstractFileByPath(project.path);
-        if (!(file instanceof TFile)) { new Notice('Could not find the project note'); return; }
-        try {
-          await this.app.fileManager.processFrontMatter(file, (fm) => {
-            // questions may be a single string or an array — normalize to array.
-            const existing = fm.questions;
-            const arr = Array.isArray(existing) ? existing.slice() : (existing ? [existing] : []);
-            arr.push(question);
-            fm.questions = arr;
-          });
-          new Notice(`Quest added to ${project.title}`);
-        } catch {
-          new Notice('Could not add quest');
-        }
+      (question) => {
+        void this.persistQuest(project, question);
       },
     ).open();
+  }
+
+  private async persistQuest(project: ProjectData, question: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(project.path);
+    if (!(file instanceof TFile)) {
+      new Notice('Could not find the project note');
+      return;
+    }
+
+    try {
+      await this.app.fileManager.processFrontMatter(file, (fm) => {
+        const existing = fm.questions;
+        const questions = Array.isArray(existing) ? existing.slice() : (existing ? [existing] : []);
+        questions.push(question);
+        fm.questions = questions;
+      });
+      new Notice(`Quest added to ${project.title}`);
+    } catch {
+      new Notice('Could not add quest');
+    }
   }
 
   /** Copy the resolved project directory to the clipboard — TRI-007. */
@@ -2824,7 +2882,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
           .setIcon('square-terminal')
           .onClick(() => {
             const dir = this.requireProjectDir(project);
-            if (dir) this.openTerminalForProject(project, dir);
+            if (dir) void this.openTerminalForProject(project, dir);
           });
       });
     }
@@ -2835,7 +2893,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         .setIcon('copy')
         .onClick(() => {
           const dir = this.requireProjectDir(project);
-          if (dir) this.copyProjectPath(dir);
+          if (dir) void this.copyProjectPath(dir);
         });
     });
 
@@ -2860,7 +2918,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         .setTitle('Open note')
         .setIcon('file-text')
         .onClick(() => {
-          this.app.workspace.openLinkText(project.path, '', false);
+          void this.app.workspace.openLinkText(project.path, '', false);
         });
     });
 
@@ -2955,15 +3013,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const dir = this.projectDirOf(project);
     if (dir) return dir;
 
-    const notice = new Notice('', 12000);
-    notice.messageEl.createSpan({
-      text: `${project.title} has no project folder. `,
-    });
-    const link = notice.messageEl.createEl('a', { text: 'Set one now' });
-    link.addEventListener('click', () => {
-      notice.hide();
-      void this.promptForProjectDir(project);
-    });
+    new Notice(`${project.title} has no project folder. Use “Set project folder…” first.`, 12000);
     return null;
   }
 
@@ -3061,19 +3111,12 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   /** Add neon HUD title at top center */
   private addHudTitle(container: HTMLElement): void {
-    const title = document.createElement('div');
+    const title = container.createDiv({ cls: 'hypernovum-hud-title', text: 'HYPERNOVUM' });
     // All styling lives in styles.css (.hypernovum-hud-title).
-    title.className = 'hypernovum-hud-title';
-
-    const cursor = document.createElement('span');
-    cursor.textContent = '\u2588';
+    const cursor = title.createSpan({ cls: 'hypernovum-cursor', text: '\u2588' });
     // Keyframes + animation live in styles.css (.hypernovum-cursor) \u2014 never
     // inject <style> into document.head; it leaks across plugin reloads.
-    cursor.className = 'hypernovum-cursor';
-    title.textContent = 'HYPERNOVUM';
-    title.appendChild(cursor);
-
-    container.appendChild(title);
+    cursor.setAttribute('aria-hidden', 'true');
   }
 
   /** Show context menu for right-clicked Neural Core orb */
@@ -3102,7 +3145,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const agentName = this.settings.agentName || 'Claude Code';
 
     // Try native Electron dialog (modern @electron/remote first, then legacy)
-    const dialog = this.getElectronDialog();
+    const dialog = await this.getElectronDialog();
     if (dialog) {
       try {
         const result = await dialog.showOpenDialog({
@@ -3122,24 +3165,23 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     }
 
     // Fallback: text input modal
-    new FolderInputModal(this.app, async (folderPath) => {
-      await this.launchAgentInFolder(folderPath);
+    new FolderInputModal(this.app, (folderPath) => {
+      void this.launchAgentInFolder(folderPath);
     }).open();
   }
 
   /** Try to get Electron's dialog API, or null if unavailable */
-  private getElectronDialog(): any {
+  private async getElectronDialog(): Promise<DirectoryDialog | null> {
     try {
       // Modern Electron (Obsidian 1.5+): @electron/remote
-      const remote = require('@electron/remote');
-      if (remote?.dialog) return remote.dialog;
+      const remote = await import('@electron/remote');
+      if (remote.dialog) return remote.dialog;
     } catch { /* not available */ }
 
     try {
       // Legacy Electron: electron.remote
-      const electron = require('electron');
-      const remote = electron.remote || (electron as any).default?.remote;
-      if (remote?.dialog) return remote.dialog;
+      const electron = await import('electron');
+      if (electron.remote?.dialog) return electron.remote.dialog;
     } catch { /* not available */ }
 
     return null;

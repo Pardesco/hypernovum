@@ -70,8 +70,9 @@ function strOrNull(v: unknown): string | null {
  * Parse one v2 snapshot object into a presence. Returns null when the object
  * is unusable (missing id/ping) so the caller can count it as degraded data.
  */
-export function parseSnapshotToPresence(raw: any): AgentPresence | null {
-  if (!raw || typeof raw !== 'object') return null;
+export function parseSnapshotToPresence(value: unknown): AgentPresence | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
   const id = str(raw.sessionId);
   const lastPing = Number(raw.lastPing);
   if (!id || !Number.isFinite(lastPing) || lastPing <= 0) return null;
@@ -104,8 +105,9 @@ export function parseSnapshotToPresence(raw: any): AgentPresence | null {
  * Convert the legacy single-status file into a presence (id 'legacy').
  * Mirrors the old anonymous-agent behavior. Returns null if unusable.
  */
-export function legacyToPresence(raw: any): AgentPresence | null {
-  if (!raw || typeof raw !== 'object') return null;
+export function legacyToPresence(value: unknown): AgentPresence | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
   const lastPing = Number(raw.lastPing);
   if (!Number.isFinite(lastPing) || lastPing <= 0) return null;
   return {

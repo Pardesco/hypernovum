@@ -1,4 +1,4 @@
-import { App, TFile, TFolder } from 'obsidian';
+import { App, TFile } from 'obsidian';
 import type { HypernovumSettings, ProjectData } from '@hypernovum/core';
 
 export class ProjectParser {

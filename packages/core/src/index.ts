@@ -3,7 +3,7 @@
 export const CORE_BUILD_VERSION = 'dev';
 
 // Types
-export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, LinkEdge, RecentCommit, GraphEdge, EdgeType } from './types';
+export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, RecentCommit, GraphEdge, EdgeType } from './types';
 export { EdgeManager } from './scene/EdgeManager';
 export { collectImpact } from './graph/traverse';
 export type { TraceImpactResult, TraceNode, TraceOptions } from './graph/traverse';
@@ -59,5 +59,5 @@ export { createProjectStore } from './stores/projectStore';
 export type { ProjectState } from './stores/projectStore';
 
 // Utils
-export { debugLog, refreshDebugFlag } from './utils/log';
+export { debugLog, setDebugLogging, setDebugSink } from './utils/log';
 export { escapeHtml } from './utils/html';
