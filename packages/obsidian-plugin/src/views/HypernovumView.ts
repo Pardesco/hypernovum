@@ -2216,7 +2216,13 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       const warnKey = topWarningPerProject(this.warnings)
         .map((w) => `${w.projectPath}:${w.severity}:${w.message}`)
         .join('|');
-      const feedKey = this.fleetSessions.map((s) => `${s.sessionId}:${s.state}:${s.lastPing}`).join('|');
+      // lastPing is deliberately NOT part of this key: live agents re-ping every
+      // few seconds, and the overview renders nothing ping-derived that the state
+      // + minute bucket don't already cover — keying on it would tear down and
+      // rebuild the panel on every heartbeat, the exact churn this gate prevents.
+      const feedKey = this.fleetSessions
+        .map((s) => `${s.sessionId}:${s.state}:${s.name}:${s.projectPath ?? ''}`)
+        .join('|');
       // Every number the overview prints has to be in here. Fingerprinting only
       // path/status/category left the quest total, the 30-day commit count and the
       // recent-activity feed stale until the minute bucket happened to roll over.
@@ -2722,8 +2728,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       }
     }
 
-    // Keep the inspector's Agents section in sync when a project is selected.
-    if (this.selectedProject) this.updateInspector();
+    // Keep the inspector in sync — BOTH renders read the fleet. The project
+    // view shows its Agents section; the city overview (nothing selected)
+    // shows the fleet summary (AGT-009) and agent-derived Attention rows.
+    // This call used to be gated on `this.selectedProject`, so the overview
+    // was never invalidated by fleet changes and permanently kept whatever it
+    // rendered before the first poll (i.e. no fleet summary at all). The
+    // signature gate in updateInspector() keeps the unconditional call cheap.
+    this.updateInspector();
   }
 
   /** Handle Claude Code activity start */
