@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.4 — two rendering fixes (2026-08-03)
+
+### Fixed
+
+- **The city overview never showed the agent fleet.** Orbs, arteries and the
+  per-project inspector all tracked live sessions, but the overview panel —
+  the one shown when nothing is selected — kept its first, fleet-less render
+  forever, because the refresh was gated on having a project selected.
+- **Shader compilation is now actually checked.** `renderer.compile()` does not
+  throw on a GLSL error, so the guard around it never tested anything and a
+  broken shader would have fallen back to plain materials in silence. The
+  program's link status is now read directly, which also clears the 12
+  `GL_INVALID_VALUE` errors every session logged on its first city build.
+
+
 ## 0.4.3 — whole-vault fallback (2026-08-03)
 
 ### Added
