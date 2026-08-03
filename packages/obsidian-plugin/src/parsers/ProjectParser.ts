@@ -26,6 +26,82 @@ export class ProjectParser {
     return projects;
   }
 
+  /**
+   * Whole-vault projection, used only when the vault contains no project notes
+   * at all. A fresh install otherwise opens on an empty city, which reads as
+   * "broken" rather than "nothing tagged yet".
+   *
+   * Every note becomes a building and its top-level folder becomes a district.
+   * The encodings that can still be honest are kept and the rest are left
+   * alone rather than faked:
+   *   - height  = incoming links, so hub notes tower (the closest honest
+   *               analogue of priority for an untagged note)
+   *   - windows = real checkbox tasks, exactly as for a project note
+   *   - decay   = mtime, so stale corners of the vault dim on their own
+   *   - status  stays 'active' for everything. Age is already carried by decay
+   *             and the recency lens; colouring old notes 'complete' would be
+   *             inventing a claim the note never made.
+   * No `projectDir`, so nothing here gets Git signals or an agent launch —
+   * these are notes, not projects, and the inspector should say so.
+   */
+  async parseVaultAsCity(settings: HypernovumSettings): Promise<ProjectData[]> {
+    const files = this.app.vault.getMarkdownFiles();
+    const incoming = this.countIncomingLinks();
+    const projects: ProjectData[] = [];
+
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const fm = (cache?.frontmatter ?? {}) as Record<string, unknown>;
+      const taskData = await this.parseTasks(fm, file);
+      const links = incoming.get(file.path) ?? 0;
+
+      projects.push({
+        path: file.path,
+        title: file.basename,
+        status: 'active',
+        priority: this.priorityFromLinks(links),
+        stage: 'active',
+        category: this.districtForFile(file),
+        scope: Math.max(1, Math.round(file.stat.size / 400)),
+        lastModified: file.stat.mtime,
+        recentActivity: this.isRecentlyActive(file.stat.mtime),
+        health: 80,
+        noteCount: 1,
+        ...taskData,
+      });
+    }
+
+    return projects;
+  }
+
+  /** Top-level folder as the district; root notes group under 'vault'. */
+  private districtForFile(file: TFile): string {
+    const parts = file.path.split('/');
+    return parts.length > 1 ? parts[0] : 'vault';
+  }
+
+  /**
+   * Incoming link count per note. `resolvedLinks` is source→target→count, so it
+   * has to be inverted; `getBacklinksForFile` is not part of the public API.
+   */
+  private countIncomingLinks(): Map<string, number> {
+    const incoming = new Map<string, number>();
+    const resolved = this.app.metadataCache.resolvedLinks ?? {};
+    for (const targets of Object.values(resolved)) {
+      for (const [target, count] of Object.entries(targets)) {
+        incoming.set(target, (incoming.get(target) ?? 0) + count);
+      }
+    }
+    return incoming;
+  }
+
+  private priorityFromLinks(links: number): string {
+    if (links >= 7) return 'critical';
+    if (links >= 3) return 'high';
+    if (links >= 1) return 'medium';
+    return 'low';
+  }
+
   private async tryParseProject(
     file: TFile,
     settings: HypernovumSettings,

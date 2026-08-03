@@ -1664,3 +1664,35 @@
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* Whole-vault fallback notice — only visible when no note carries the project tag */
+.hypernovum-fallback-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0 2px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 190, 80, 0.35);
+  border-left: 3px solid rgba(255, 190, 80, 0.8);
+  border-radius: 4px;
+  background: rgba(255, 170, 40, 0.08);
+}
+.hypernovum-fallback-banner[hidden] { display: none; }
+.fallback-banner-text {
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.fallback-banner-action {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: rgba(255, 205, 120, 0.95);
+  background: rgba(255, 170, 40, 0.12);
+  border: 1px solid rgba(255, 190, 80, 0.4);
+  border-radius: 3px;
+}
+.fallback-banner-action:hover { background: rgba(255, 170, 40, 0.22); }

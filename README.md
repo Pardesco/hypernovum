@@ -19,8 +19,10 @@ Desktop only — the agent half of the plugin talks to your local `git` and term
 
 ## Quick start
 
-Hypernovum renders **project notes**, not every note in your vault, so a brand-new install
-shows an empty city until at least one note is tagged. Add this frontmatter to a note:
+Until you tag anything, Hypernovum shows **your whole vault** — folders become districts,
+notes become buildings, and height is how many notes link in. That is a preview, not the
+product: tag one note and the city switches to project mode, where colour, height and
+windows start reporting real state. Add this frontmatter to a note:
 
 ```yaml
 ---
@@ -36,6 +38,8 @@ projectDir: C:\Users\me\projects\my-project   # unlocks Git signals + agent laun
 The city rebuilds as you save. `projectDir` is the field that matters most: without it a
 project has no Git activity, no dependency edges, and no **Launch agent** action. See
 [SCHEMA.md](SCHEMA.md) for every field.
+
+![Whole-vault fallback — an untagged vault rendered as districts by folder, with hub notes towering](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/whole-vault-fallback.png)
 
 ## What this plugin does on your machine
 

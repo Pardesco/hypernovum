@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A vault with no project notes now renders as itself** instead of as an empty
+  plane: folders become districts, notes become buildings, height is incoming
+  links, and window rows are real checkbox tasks. A banner says what is being
+  shown and how to switch. The moment one note is tagged, the city rebuilds in
+  project mode on its own — the fallback only ever applies at zero.
+
+
 ## 0.4.2 — parametric buildings by default (2026-08-03)
 
 ### Changed

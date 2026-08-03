@@ -211,6 +211,9 @@ export class HypernovumView extends ItemView {
   private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
+  /** True when the vault has no project notes and the city is showing notes instead. */
+  private vaultFallback = false;
+  private fallbackBanner: HTMLElement | null = null;
   private filteredProjects: ProjectData[] = [];
   /** Single source of truth for selection/hover/move-mode (shared with SceneManager) */
   private interactionStore = createInteractionStore();
@@ -652,6 +655,16 @@ category: default
   private async buildCity(): Promise<void> {
     // Parse vault metadata into project data
     this.allProjects = await this.parser.parseProjects(this.settings);
+
+    // Nothing tagged yet: show the vault itself rather than an empty plane. A
+    // blank city reads as a broken plugin, and the setup step it is actually
+    // waiting for is invisible until something is on screen to explain it.
+    // Re-checked on every rebuild, so the moment the first note is tagged the
+    // city switches to project mode on its own.
+    this.vaultFallback = this.allProjects.length === 0;
+    if (this.vaultFallback) {
+      this.allProjects = await this.parser.parseVaultAsCity(this.settings);
+    }
 
     // Enforce maxBuildings so oversized vaults degrade predictably (PERF-003):
     // keep the top-N by priority then recency, and tell the user what was cut.
@@ -1536,9 +1549,27 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
     attentionBadge.hidden = true;
     const summary = header.createSpan({ cls: 'command-panel-summary', text: 'Loading...' });
+
+    // Shown only while the city is standing in for an untagged vault. Built with
+    // DOM APIs, never innerHTML — the vault name is user content.
+    const banner = panel.createDiv({ cls: 'hypernovum-fallback-banner' });
+    banner.hidden = true;
+    banner.createSpan({
+      cls: 'fallback-banner-text',
+      text: 'No project notes yet — showing your whole vault. Folders are districts, height is incoming links.',
+    });
+    const howTo = banner.createEl('button', { cls: 'fallback-banner-action', text: 'How to tag a project' });
+    howTo.addEventListener('click', () => {
+      new Notice(
+        'Add "tags: [project]" to the frontmatter of any note, plus optional status, priority, '
+        + 'category and projectDir. The city switches to project mode as soon as one note has it.',
+        12000,
+      );
+    });
+    this.fallbackBanner = banner;
     const searchInput = panel.createEl('input', {
       cls: 'command-search',
-      attr: { type: 'search', placeholder: 'Search projects' },
+      attr: { type: 'search', placeholder: 'Search' },
     });
 
     const layerRow = panel.createDiv({ cls: 'command-row' });
@@ -1943,6 +1974,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     const questCount = this.allProjects.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
     const questPart = questCount > 0 ? ` | ◆ ${questCount} quests` : '';
     this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory${questPart}`;
+    if (this.fallbackBanner) this.fallbackBanner.hidden = !this.vaultFallback;
   }
 
   /** State chip reusing the agent-state CSS classes. */
@@ -2490,7 +2522,12 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     const header = panel.createDiv({ cls: 'inspector-header' });
     header.createSpan({ cls: 'inspector-kicker', text: 'CITY OVERVIEW' });
-    header.createEl('h3', { text: `${projects.length} projects` });
+    // In fallback the buildings are notes, not projects — say so rather than
+    // overstate what the vault contains.
+    const noun = this.vaultFallback
+      ? (projects.length === 1 ? 'note' : 'notes')
+      : (projects.length === 1 ? 'project' : 'projects');
+    header.createEl('h3', { text: `${projects.length} ${noun}` });
 
     const grid = panel.createDiv({ cls: 'inspector-grid' });
     const cell = (label: string, value: number) => {
