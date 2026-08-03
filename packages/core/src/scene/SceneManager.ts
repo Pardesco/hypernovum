@@ -917,7 +917,11 @@ export class SceneManager {
     let isShaderMaterial = false;
 
     if (this.useShaders && BuildingShader.isAvailable()) {
-      const shaderMat = this.buildingShader.createMaterial(project, { floors: build.floors, diagrid: build.diagrid });
+      const shaderMat = this.buildingShader.createMaterial(project, {
+        floors: build.floors,
+        diagrid: build.diagrid,
+        sides: build.sides,
+      });
       if (shaderMat) {
         material = shaderMat;
         isShaderMaterial = true;
@@ -947,8 +951,14 @@ export class SceneManager {
     // Track building by project path for data flow targeting
     this.buildingPathMap.set(project.path, mesh);
 
-    // Edge glow - brighter for bloom pickup when enabled
-    const edges = new THREE.EdgesGeometry(geometry);
+    // Edge glow - brighter for bloom pickup when enabled.
+    // Lofts need a real crease threshold: at the 1-degree default, a 20-sample
+    // superellipse draws every vertical grid line, and twist makes each quad
+    // non-planar so its two triangles diverge and the internal diagonals draw
+    // too — the tower becomes a glowing triangulated cage. 20 degrees keeps the
+    // edges that are actual silhouette events (setback ledges, waist creases,
+    // polygon facets). Classic passes 1 explicitly, matching the old default.
+    const edges = new THREE.EdgesGeometry(geometry, build.floors > 0 ? 20 : 1);
     const bloomMultiplier = this.useBloom ? 1.5 : 1.0;
     const edgeOpacity = project.status === 'blocked' ? 0.8 * bloomMultiplier :
       project.status === 'active' ? 0.5 * bloomMultiplier : 0.3;
@@ -984,7 +994,7 @@ export class SceneManager {
 
     // Rooftop detail kit — children of the building mesh so they move and
     // dispose with it (clearCity traverses recursively; raycaster does not).
-    const roof = RooftopFactory.createRooftop(project, geometry);
+    const roof = RooftopFactory.createRooftop(project, geometry, build.topCenter);
     if (roof.detail) {
       const detailMat = new THREE.MeshStandardMaterial({
         color: 0x232838,
@@ -1022,7 +1032,8 @@ export class SceneManager {
       });
       const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), questMat);
       const baseY = topY + 1.2;
-      gem.position.set(0, baseY, 0);
+      // Track the roof centerline — leaning presets move it well off local origin
+      gem.position.set(build.topCenter.x, baseY, build.topCenter.z);
       gem.userData = {
         isBuilding: true,
         project,
@@ -1051,7 +1062,13 @@ export class SceneManager {
    * flag for the shader); unmapped categories and any error fall back to the
    * classic silhouette. Classic mode is byte-for-byte the prior behavior.
    */
-  private buildBuildingGeometry(project: ProjectData): { geometry: THREE.BufferGeometry; floors: number; diagrid: boolean } {
+  private buildBuildingGeometry(project: ProjectData): {
+    geometry: THREE.BufferGeometry;
+    floors: number;
+    diagrid: boolean;
+    sides: number | null;
+    topCenter: { x: number; z: number };
+  } {
     if (this.buildingStyle === 'parametric' && project.dimensions) {
       const { width, height, depth } = project.dimensions;
       const preset = presetForProject({ path: project.path, category: project.category, width, height, depth });
@@ -1061,13 +1078,25 @@ export class SceneManager {
           // loftTower is bottom-anchored already; normalize defensively.
           geometry.computeBoundingBox();
           geometry.translate(0, -geometry.boundingBox!.min.y, 0);
-          return { geometry, floors: preset.floors, diagrid: preset.diagrid };
+          return {
+            geometry,
+            floors: preset.floors,
+            diagrid: preset.diagrid,
+            sides: preset.sides,
+            topCenter: preset.topCenter,
+          };
         } catch {
           // fall through to classic
         }
       }
     }
-    return { geometry: this.createBuildingGeometry(project), floors: 0, diagrid: false };
+    return {
+      geometry: this.createBuildingGeometry(project),
+      floors: 0,
+      diagrid: false,
+      sides: null,
+      topCenter: { x: 0, z: 0 },
+    };
   }
 
   private createBuildingGeometry(project: ProjectData): THREE.BufferGeometry {

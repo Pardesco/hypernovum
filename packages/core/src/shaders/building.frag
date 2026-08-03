@@ -9,9 +9,11 @@ uniform float uTotalTasks;    // Task count (drives window grid density)
 uniform float uDimFactor;     // 1.0 = normal, <1 = dimmed (focus mode unrelated)
 uniform float uFloors;        // 0 = legacy auto-density; >0 = real floor count (parametric)
 uniform float uDiagrid;       // 0 = off; >0 = draw a diagrid facade (preset D)
+uniform float uWindowCols;    // 0 = legacy per-face density; >0 = explicit column count
 
 varying vec2 vUv;
-varying vec3 vNormal;
+varying vec3 vNormal;         // object-space (legacy classic rim)
+varying vec3 vNormalV;        // view-space
 varying vec3 vPosition;
 
 // Pseudo-random function
@@ -27,8 +29,12 @@ void main() {
   // === WINDOW GRID ===
   // Task-based grid if tasks exist, else scope-based
   float taskSource = uTotalTasks > 0.0 ? uTotalTasks : uScope;
-  float windowCols = 3.0 + floor(taskSource / 8.0);
-  windowCols = clamp(windowCols, 3.0, 10.0);
+  // Classic UVs run 0-1 per box FACE, so the legacy count is per-face. A loft's
+  // u spans the whole perimeter, so the same number would give a quarter of the
+  // windows; parametric mode passes an explicit perimeter count instead.
+  float windowCols = uWindowCols > 0.5
+    ? uWindowCols
+    : clamp(3.0 + floor(taskSource / 8.0), 3.0, 10.0);
   // Parametric mode: window rows = real floor count. Classic (uFloors 0): auto.
   float windowRows = uFloors > 0.5
     ? uFloors
@@ -82,6 +88,21 @@ void main() {
     wallColor *= 0.55 + 0.45 * lines; // darken along the diagonal members
   }
 
+  // === SURFACE LIGHTING (parametric only) ===
+  // Classic silhouettes are axis-aligned boxes whose look is tuned around the
+  // flat vertical gradient alone. Lofted profiles need a real normal response
+  // or their taper, waist and facets are literally invisible — which is also
+  // what made facetedNormals pay 3x the vertices for nothing. viewMatrix is a
+  // three.js built-in, so the key and up directions stay fixed in world space.
+  if (uFloors > 0.5) {
+    vec3 N = normalize(vNormalV);
+    vec3 keyDir = normalize(mat3(viewMatrix) * vec3(0.45, 0.80, 0.40));
+    vec3 upDir = normalize(mat3(viewMatrix) * vec3(0.0, 1.0, 0.0));
+    float ndl = max(dot(N, keyDir), 0.0);
+    float hemi = 0.85 + 0.15 * dot(N, upDir);
+    wallColor *= (0.55 + 0.45 * ndl) * hemi;
+  }
+
   // === COMBINE ===
   vec3 finalColor = mix(wallColor, windowColor, isWindow * lightOn);
 
@@ -119,8 +140,13 @@ void main() {
   finalColor += uColor * glowAmount;
 
   // === EDGE GLOW (rim lighting) ===
-  // Constant faint fresnel gives every tower a glass edge; pulse/completion boost it
-  float rim = 1.0 - max(dot(normalize(vNormal), vec3(0.0, 0.0, 1.0)), 0.0);
+  // Constant faint fresnel gives every tower a glass edge; pulse/completion boost it.
+  // Parametric uses the VIEW-space normal, which makes this an actual fresnel —
+  // in view space +Z points at the camera. Classic keeps the object-space normal
+  // it was tuned against (a fixed stripe, but changing it would alter every
+  // shipped classic building).
+  vec3 rimN = uFloors > 0.5 ? normalize(vNormalV) : normalize(vNormal);
+  float rim = 1.0 - max(dot(rimN, vec3(0.0, 0.0, 1.0)), 0.0);
   rim = pow(rim, 2.0);
   finalColor += uColor * rim * (0.08 + 0.3 * max(uPulse, uLitPercent * 0.3));
 

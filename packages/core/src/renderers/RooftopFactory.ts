@@ -38,12 +38,22 @@ export class RooftopFactory {
     };
   }
 
-  static createRooftop(project: ProjectData, buildingGeo: THREE.BufferGeometry): RooftopKit {
+  /**
+   * @param topCenter Local XZ of the roof's centerline. Leaning parametric
+   *   presets move it by up to 0.12·H — several times the safe radius — so
+   *   without this the whole kit floats in mid-air beside the tower.
+   */
+  static createRooftop(
+    project: ProjectData,
+    buildingGeo: THREE.BufferGeometry,
+    topCenter: { x: number; z: number } = { x: 0, z: 0 },
+  ): RooftopKit {
     const { width, height, depth } = project.dimensions!;
     const pointed = POINTED_CATEGORIES.has(project.category);
 
     buildingGeo.computeBoundingBox();
     const topY = buildingGeo.boundingBox!.max.y;
+    const cx = topCenter.x, cz = topCenter.z;
 
     // Critical projects get a warning beacon even on pointed roofs
     const wantsBeacon = project.priority === 'critical';
@@ -52,7 +62,7 @@ export class RooftopFactory {
     if (pointed || height < 3) {
       return {
         detail: null,
-        beaconPosition: wantsBeacon ? new THREE.Vector3(0, topY + 0.3, 0) : null,
+        beaconPosition: wantsBeacon ? new THREE.Vector3(cx, topY + 0.3, cz) : null,
       };
     }
 
@@ -66,8 +76,8 @@ export class RooftopFactory {
     const mastH = Math.min(1.2 + rand() * 1.8, height * 0.35);
     const mastAngle = rand() * Math.PI * 2;
     const mastR = rand() * safeR * 0.7;
-    const mastX = Math.cos(mastAngle) * mastR;
-    const mastZ = Math.sin(mastAngle) * mastR;
+    const mastX = cx + Math.cos(mastAngle) * mastR;
+    const mastZ = cz + Math.sin(mastAngle) * mastR;
     const mast = new THREE.CylinderGeometry(0.05, 0.08, mastH, 5);
     mast.translate(mastX, topY + mastH / 2, mastZ);
     geometries.push(mast);
@@ -87,7 +97,7 @@ export class RooftopFactory {
       const dist = rand() * safeR;
       const block = new THREE.BoxGeometry(bw, bh, bd);
       block.rotateY(rand() > 0.5 ? Math.PI / 4 : 0);
-      block.translate(Math.cos(angle) * dist, topY + bh / 2, Math.sin(angle) * dist);
+      block.translate(cx + Math.cos(angle) * dist, topY + bh / 2, cz + Math.sin(angle) * dist);
       geometries.push(block);
     }
 

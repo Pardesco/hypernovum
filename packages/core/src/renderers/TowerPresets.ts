@@ -1,4 +1,4 @@
-import type { TowerLoftParams } from './TowerLoft';
+import { loftTopCenter, type TowerLoftParams } from './TowerLoft';
 
 /**
  * Category → TowerLoft preset families (BLD-003). Maps a project's category +
@@ -26,6 +26,10 @@ export interface TowerBuildResult {
   params: TowerLoftParams;
   floors: number;          // → shader uFloors (floor-true windows)
   diagrid: boolean;        // → shader uDiagrid (preset D facades)
+  /** Polygon facet count, or null for smooth profiles — window columns snap to it. */
+  sides: number | null;
+  /** Top-ring centerline in local XZ; roof-mounted props must be offset by it. */
+  topCenter: { x: number; z: number };
 }
 
 type Family = 'A' | 'B' | 'C' | 'D' | 'E';
@@ -86,11 +90,14 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
   let params: TowerLoftParams;
   let diagrid = false;
 
+  // Twist is family A's signature and nobody else's. When every family twisted,
+  // none of them read as "the twisted one" — so C, D and E are straight now and
+  // A owns the move outright.
   switch (family) {
     case 'A': // Spiral — web-apps
       params = {
         profile: { kind: 'superellipse', a, b, n: 3.5, samples: 20 },
-        floors, floorHeight, taper: 0.22, twistDeg: 65 + jitter(10),
+        floors, floorHeight, taper: 0.22, twistDeg: 78 + jitter(12),
       };
       break;
     case 'B': // Sculpted waist — content, desktop-apps
@@ -101,17 +108,18 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
         crown: { reduction: 0.12, start: 0.82 },
       };
       break;
-    case 'C': // Leaning S-curve — visualization, art
+    case 'C': // Leaning S-curve — visualization, art. The lean IS the move; no twist.
       params = {
         profile: { kind: 'superellipse', a, b, n: 2, samples: 18 },
-        floors, floorHeight, taper: 0.20, twistDeg: 10,
+        floors, floorHeight, taper: 0.20,
         lean: { dx: input.height * 0.06 * (rng() < 0.5 ? -1 : 1), dz: input.height * jitter(0.02), sCurve: true },
       };
       break;
-    case 'E': // Modular Hive — obsidian-plugins: clean faceted hexagonal column
+    case 'E': // Modular Hive — obsidian-plugins: clean faceted hexagonal column.
+      // Straight: a twisted hex prism reads like the facets are sliding off.
       params = {
         profile: { kind: 'polygon', sides: 6, a, b },
-        floors, floorHeight, taper: 0.14, twistDeg: 15 + jitter(5),
+        floors, floorHeight, taper: 0.14,
         facetedNormals: true,
       };
       break;
@@ -119,13 +127,26 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
     default:
       params = {
         profile: { kind: 'polygon', sides: 8, a, b },
-        floors, floorHeight, taper: 0.25, twistDeg: 30 + jitter(6),
-        setbacks: [{ at: 0.4, depth: 0.08 }, { at: 0.7, depth: 0.08 }],
+        floors, floorHeight, taper: 0.25,
+        // Setback placement is the classic skyline-variety generator; it was
+        // hardcoded to 0.4/0.7 on every D tower in every vault. Jittered, with
+        // an occasional third step, it does the job it was there to do.
+        setbacks: rng() < 0.35
+          ? [
+            { at: 0.26 + rng() * 0.10, depth: 0.07 },
+            { at: 0.50 + rng() * 0.12, depth: 0.07 },
+            { at: 0.74 + rng() * 0.12, depth: 0.06 },
+          ]
+          : [
+            { at: 0.32 + rng() * 0.16, depth: 0.08 },
+            { at: 0.62 + rng() * 0.18, depth: 0.08 },
+          ],
         facetedNormals: true,
       };
       diagrid = true;
       break;
   }
 
-  return { params, floors, diagrid };
+  const sides = params.profile.kind === 'polygon' ? params.profile.sides : null;
+  return { params, floors, diagrid, sides, topCenter: loftTopCenter(params) };
 }

@@ -233,6 +233,26 @@ export function clearLoftCache(): void {
   geometryCache.clear();
 }
 
+/**
+ * Where the top ring's centerline actually sits, in the geometry's local XZ.
+ *
+ * Leaning presets translate the centerline by up to `leanFrac`·H — far outside
+ * the rooftop safe radius — so anything mounted on the roof (greeble kit,
+ * beacon, quest marker) has to be offset by this or it hangs in mid-air beside
+ * the building. At v=1 both easings resolve to 1, so this is just the clamped
+ * lean; kept in lockstep with `leanAt` inside `loftTower`.
+ */
+export function loftTopCenter(params: TowerLoftParams): { x: number; z: number } {
+  if (!params.lean) return { x: 0, z: 0 };
+  const floors = Math.round(clamp(params.floors, CLAMP.floors[0], CLAMP.floors[1]));
+  const floorHeight = params.floorHeight > 0 ? params.floorHeight : 2.5;
+  const leanCap = CLAMP.leanFrac * (floors * floorHeight);
+  return {
+    x: clamp(params.lean.dx, -leanCap, leanCap),
+    z: clamp(params.lean.dz, -leanCap, leanCap),
+  };
+}
+
 /** Vertex count of the INDEXED grid (before any toNonIndexed) — for tests. */
 export function loftVertexCount(params: TowerLoftParams): number {
   const floors = Math.round(clamp(params.floors, CLAMP.floors[0], CLAMP.floors[1]));

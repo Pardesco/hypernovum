@@ -41,4 +41,31 @@ describe('RooftopFactory', () => {
     expect(kit.detail).toBeNull();
     expect(kit.beaconPosition).not.toBeNull();
   });
+
+  // Regression: leaning presets move the roof centerline by up to 0.12·H, many
+  // times the safe radius, so a kit built around local origin hangs in mid-air
+  // beside the tower. Every piece must ride the offset.
+  it('places the whole kit on the roof centerline, not local origin', () => {
+    const p = project('lean.md', { priority: 'critical' });
+    const topCenter = { x: 2.5, z: -1.75 };
+    const kit = RooftopFactory.createRooftop(p, box(), topCenter);
+
+    const safeR = Math.min(3, 3) * 0.18; // min(width, depth) * 0.18
+    const pos = kit.detail!.attributes.position.array as Float32Array;
+    for (let i = 0; i < pos.length; i += 3) {
+      const dist = Math.hypot(pos[i] - topCenter.x, pos[i + 2] - topCenter.z);
+      // Greebles have their own extent; generous bound, but far tighter than
+      // the ~3.05 they would sit at if they were still centred on the origin.
+      expect(dist).toBeLessThan(safeR + 1.0);
+    }
+    // The beacon rides the mast, which is scattered within safeR of the centre.
+    expect(Math.abs(kit.beaconPosition!.x - topCenter.x)).toBeLessThan(safeR);
+    expect(Math.abs(kit.beaconPosition!.z - topCenter.z)).toBeLessThan(safeR);
+  });
+
+  it('defaults to local origin when no lean is supplied (classic path)', () => {
+    const kit = RooftopFactory.createRooftop(project('c.md', { priority: 'critical' }), box());
+    expect(Math.abs(kit.beaconPosition!.x)).toBeLessThan(0.6);
+    expect(Math.abs(kit.beaconPosition!.z)).toBeLessThan(0.6);
+  });
 });

@@ -40,6 +40,7 @@ export class BuildingShader {
           uDimFactor: { value: 1.0 },
           uFloors: { value: 0.0 },
           uDiagrid: { value: 0.0 },
+          uWindowCols: { value: 0.0 },
         },
         vertexShader,
         fragmentShader,
@@ -80,7 +81,10 @@ export class BuildingShader {
    * Create shader material for a project building.
    * Returns null if shader compilation previously failed.
    */
-  createMaterial(project: ProjectData, opts?: { floors?: number; diagrid?: boolean }): THREE.ShaderMaterial | null {
+  createMaterial(
+    project: ProjectData,
+    opts?: { floors?: number; diagrid?: boolean; sides?: number | null },
+  ): THREE.ShaderMaterial | null {
     if (BuildingShader.compilationFailed) {
       return null;
     }
@@ -100,6 +104,9 @@ export class BuildingShader {
           // Parametric mode passes real floor count + optional diagrid facade.
           uFloors: { value: opts?.floors ?? 0 },
           uDiagrid: { value: opts?.diagrid ? 1.0 : 0.0 },
+          uWindowCols: {
+            value: opts?.floors ? this.perimeterWindowCols(project, opts.sides ?? null) : 0.0,
+          },
         },
         vertexShader,
         fragmentShader,
@@ -110,6 +117,25 @@ export class BuildingShader {
       debugLog('Failed to create shader material:', e);
       return null;
     }
+  }
+
+  /**
+   * Window columns around a lofted tower's full perimeter.
+   *
+   * The shader's legacy count is per box FACE; a loft's u wraps the entire
+   * perimeter, so reusing it directly gives ~a quarter of the windows and
+   * visibly weakens the task-count → density encoding. Scale by four faces'
+   * worth, then snap to a multiple of the facet count so panes never straddle
+   * a hard corner and read as broken decals.
+   */
+  private perimeterWindowCols(project: ProjectData, sides: number | null): number {
+    const taskSource = project.totalTasks && project.totalTasks > 0
+      ? project.totalTasks
+      : (project.scope || project.noteCount || 10);
+    const perFace = Math.min(10, Math.max(3, 3 + Math.floor(taskSource / 8)));
+    let cols = perFace * 4;
+    if (sides && sides > 0) cols = Math.max(sides, Math.round(cols / sides) * sides);
+    return Math.min(cols, 64);
   }
 
   private getStatusColor(status: string): THREE.Color {

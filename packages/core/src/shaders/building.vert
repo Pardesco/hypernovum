@@ -2,7 +2,8 @@ uniform float uTime;
 uniform float uGlitch;        // 0.0 = normal, 1.0 = full glitch (blocked)
 
 varying vec2 vUv;
-varying vec3 vNormal;
+varying vec3 vNormal;   // raw object-space (legacy classic rim — do not change)
+varying vec3 vNormalV;  // view-space, for real lighting + a true fresnel
 varying vec3 vPosition;
 
 // Pseudo-random
@@ -13,6 +14,7 @@ float hash(float n) {
 void main() {
   vUv = uv;
   vNormal = normal;
+  vNormalV = normalize(normalMatrix * normal);
   vPosition = position;
 
   vec3 pos = position;
