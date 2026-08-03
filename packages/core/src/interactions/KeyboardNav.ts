@@ -11,9 +11,7 @@ export class KeyboardNav {
   // Callbacks
   private onCycleBlocked: (() => void) | null = null;
   private onCycleStale: (() => void) | null = null;
-  private onJumpToProject: ((index: number) => void) | null = null;
   private onResetCamera: (() => void) | null = null;
-  private onDebugFlow: (() => void) | null = null;
   private onEscape: (() => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -37,16 +35,12 @@ export class KeyboardNav {
   setHandlers(handlers: {
     onCycleBlocked?: () => void;
     onCycleStale?: () => void;
-    onJumpToProject?: (index: number) => void;
     onResetCamera?: () => void;
-    onDebugFlow?: () => void;
     onEscape?: () => void;
   }): void {
     this.onCycleBlocked = handlers.onCycleBlocked ?? null;
     this.onCycleStale = handlers.onCycleStale ?? null;
-    this.onJumpToProject = handlers.onJumpToProject ?? null;
     this.onResetCamera = handlers.onResetCamera ?? null;
-    this.onDebugFlow = handlers.onDebugFlow ?? null;
     this.onEscape = handlers.onEscape ?? null;
   }
 
@@ -62,20 +56,9 @@ export class KeyboardNav {
         event.preventDefault();
         this.onCycleStale?.();
         break;
-      case '1':
-      case '2':
-      case '3':
-        event.preventDefault();
-        this.onJumpToProject?.(parseInt(event.key) - 1);
-        break;
       case ' ':
         event.preventDefault();
         this.onResetCamera?.();
-        break;
-      case 't':
-      case 'T':
-        event.preventDefault();
-        this.onDebugFlow?.();
         break;
       case 'Escape':
         event.preventDefault();

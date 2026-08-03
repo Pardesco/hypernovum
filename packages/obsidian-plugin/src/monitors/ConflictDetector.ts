@@ -61,7 +61,7 @@ function intersect(a: Set<string>, b: Set<string>): string[] {
 }
 
 function displayName(s: AgentSession): string {
-  return s.name || (s.legacy ? 'Agent' : s.sessionId);
+  return s.name || s.sessionId;
 }
 
 /**

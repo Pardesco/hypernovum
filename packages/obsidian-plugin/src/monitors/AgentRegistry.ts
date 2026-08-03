@@ -32,7 +32,6 @@ export interface AgentSession {
   sessionStart: number;
   lastPing: number;
   dirtyAtStart?: boolean;
-  legacy: boolean;
 }
 
 // §10 timing bands
@@ -117,7 +116,7 @@ export class AgentRegistry {
       if (!s || (start !== undefined && s.sessionStart !== start)) {
         s = {
           sessionId: p.id,
-          name: p.name ?? (p.legacy ? 'Agent' : 'Agent'),
+          name: p.name ?? 'Agent',
           agentType: p.agentType,
           projectPath,
           state: 'starting',
@@ -128,7 +127,6 @@ export class AgentRegistry {
           sessionStart: start ?? p.lastPing,
           lastPing: p.lastPing,
           dirtyAtStart: p.dirtyAtStart,
-          legacy: p.legacy,
         };
         this.sessions.set(p.id, s);
       }
@@ -142,7 +140,6 @@ export class AgentRegistry {
       s.file = p.file;
       s.lastPing = p.lastPing;
       if (s.dirtyAtStart === undefined && p.dirtyAtStart !== undefined) s.dirtyAtStart = p.dirtyAtStart;
-      s.legacy = p.legacy;
       s.state = deriveAgentState(p, now);
 
       // Accumulate filesTouched per (session, project).

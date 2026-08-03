@@ -8,9 +8,8 @@
  *     <vault>/.hypernovum/agents/<sessionId>.json
  *
  * Because every session writes only its own file (tmp + atomic rename), any
- * number of concurrent agents coexist without clobbering each other — the bug
- * the old single-file `.hypernovum-status.json` format had. The plugin reads
- * this directory (and still reads the legacy file, so old hooks keep working).
+ * number of concurrent agents coexist without clobbering each other. The plugin
+ * polls this directory.
  *
  * Usage — from a Claude Code hook (preferred). `--hook` reads the hook's stdin
  * JSON for session_id / tool_name / cwd, so nothing needs interpolating:

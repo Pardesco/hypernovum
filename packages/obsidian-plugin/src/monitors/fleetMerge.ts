@@ -1,12 +1,8 @@
 /**
  * Pure fleet-merge logic — no `obsidian` import, so it is unit-testable.
  *
- * Reads two presence sources and produces one normalized AgentPresence list:
- *   1. v2 per-session snapshots  (<vault>/.hypernovum/agents/*.json)
- *   2. the legacy single-status file (.hypernovum-status.json)
- *
- * Legacy support keeps existing users' unmodified hooks rendering (as the
- * anonymous 'legacy' agent) for one release; see plan §7.4 migration path.
+ * Normalizes the v2 per-session snapshots (<vault>/.hypernovum/agents/*.json)
+ * into one AgentPresence list: freshest-first, deduped by session id, capped.
  */
 
 /** v2 snapshot file shape written by scripts/heartbeat.js (§7.4). */
@@ -29,7 +25,7 @@ export interface HeartbeatSnapshotV2 {
   stoppedAt?: number;
 }
 
-/** One agent's presence, normalized across v2 + legacy sources (§7.5 subset). */
+/** One agent's presence, normalized from a v2 snapshot (§7.5 subset). */
 export interface AgentPresence {
   id: string;                 // sessionId (or 'legacy')
   name?: string;
@@ -52,7 +48,6 @@ export interface AgentPresence {
   objective?: string;
   plannedFiles?: string[];
   active: boolean;            // snapshot did not signal stop/complete
-  legacy: boolean;
 }
 
 /** Max sessions surfaced to the UI per poll (freshest first). */
@@ -97,55 +92,15 @@ export function parseSnapshotToPresence(value: unknown): AgentPresence | null {
       ? raw.plannedFiles.filter((f: unknown): f is string => typeof f === 'string')
       : undefined,
     active: state !== 'complete' && state !== 'failed' && raw.stoppedAt == null,
-    legacy: false,
   };
 }
 
-/**
- * Convert the legacy single-status file into a presence (id 'legacy').
- * Mirrors the old anonymous-agent behavior. Returns null if unusable.
- */
-export function legacyToPresence(value: unknown): AgentPresence | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
-  const lastPing = Number(raw.lastPing);
-  if (!Number.isFinite(lastPing) || lastPing <= 0) return null;
-  return {
-    id: 'legacy',
-    name: str(raw.name),
-    project: raw.project == null ? null : strOrNull(raw.project),
-    action: strOrNull(raw.action),
-    tool: raw.tool == null ? null : strOrNull(raw.tool),
-    file: raw.file == null ? null : strOrNull(raw.file),
-    lastPing,
-    active: raw.active !== false,
-    legacy: true,
-  };
-}
-
-/**
- * Merge v2 presences with the legacy presence, dedupe, sort freshest-first,
- * and cap. The legacy entry is dropped when any v2 session already claims the
- * same project with an equal-or-fresher ping (avoids a duplicate anonymous orb
- * for a session that has upgraded to v2 heartbeats).
- */
+/** Sort presences freshest-first, dedupe by session id, and cap. */
 export function mergeFleet(
   v2: AgentPresence[],
-  legacy: AgentPresence | null,
   cap: number = FLEET_CAP,
 ): AgentPresence[] {
   const merged = [...v2];
-
-  if (legacy) {
-    const supersededByV2 = v2.some(
-      (p) =>
-        p.project != null &&
-        legacy.project != null &&
-        p.project === legacy.project &&
-        p.lastPing >= legacy.lastPing,
-    );
-    if (!supersededByV2) merged.push(legacy);
-  }
 
   merged.sort((a, b) => b.lastPing - a.lastPing);
 

@@ -112,11 +112,6 @@ function splitFloors(total: number, weights: number[]): number[] {
   return out;
 }
 
-/** Every category renders parametrically; unmapped ones get the quiet BLOCK. */
-export function isParametricCategory(_category: string): boolean {
-  return true;
-}
-
 export function presetForProject(input: TowerBuildInput): TowerBuildResult {
   const family = CATEGORY_FAMILY[input.category] ?? 'BLOCK';
   const rng = mulberry32(hashStr(input.path));

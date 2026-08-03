@@ -107,7 +107,7 @@ backlink graph all still work.
 - **City states**: IDLE (cyan) / STREAMING (cyan fast) / BULK_UPDATE (gold)
 
 ### Agent integration
-- **Activity Monitor** polls `.hypernovum/agents/` (v2 per-session snapshots) plus the legacy `.hypernovum-status.json` for real-time agent status
+- **Activity Monitor** polls `.hypernovum/agents/` (per-session snapshots) for real-time agent status
 - **Persistent streaming artery** while an agent is actively working on a project
 - **Activity indicator overlay** shows current project and action
 - **Terminal Launcher** for launching Claude Code, GPT Codex, Antigravity CLI, or a custom agent command
@@ -203,10 +203,6 @@ hooks are just the most convenient path.
 > The script's source of truth is `scripts/heartbeat.js` in this repository; the
 > plugin carries an embedded copy and writes it into your vault, so an installed
 > plugin never depends on having the repo checked out.
-
-> **Legacy:** the older single-file `.hypernovum-status.json` is still read for one
-> release, so existing hooks keep working (as an anonymous agent). v2 adds
-> identity, lifecycle state, and conflict detection.
 
 ## Development
 

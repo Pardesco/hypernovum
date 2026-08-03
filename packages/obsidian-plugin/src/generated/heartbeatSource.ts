@@ -6,7 +6,7 @@
 // vault. See scripts/gen-heartbeat-source.mjs for why.
 
 /** Short content hash of scripts/heartbeat.js — used to detect a stale copy in a vault. */
-export const HEARTBEAT_SOURCE_SHA = 'd11620ef7df1';
+export const HEARTBEAT_SOURCE_SHA = 'abab882024c1';
 
 /** Verbatim contents of scripts/heartbeat.js. */
 export const HEARTBEAT_SOURCE = `#!/usr/bin/env node
@@ -19,9 +19,8 @@ export const HEARTBEAT_SOURCE = `#!/usr/bin/env node
  *     <vault>/.hypernovum/agents/<sessionId>.json
  *
  * Because every session writes only its own file (tmp + atomic rename), any
- * number of concurrent agents coexist without clobbering each other — the bug
- * the old single-file \`.hypernovum-status.json\` format had. The plugin reads
- * this directory (and still reads the legacy file, so old hooks keep working).
+ * number of concurrent agents coexist without clobbering each other. The plugin
+ * polls this directory.
  *
  * Usage — from a Claude Code hook (preferred). \`--hook\` reads the hook's stdin
  * JSON for session_id / tool_name / cwd, so nothing needs interpolating:

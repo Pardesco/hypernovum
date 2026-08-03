@@ -15,11 +15,11 @@ export { HighlightManager } from './scene/HighlightManager';
 export type { BuildingParts } from './scene/HighlightManager';
 export { resolveVisualState } from './scene/visualState';
 export type { VisualState, ResolveInput, LabelTier } from './scene/visualState';
-export { loftTower, loftTowerCached, clearLoftCache, loftVertexCount, loftTopCenter, loftRoofDeckY } from './renderers/TowerLoft';
+export { loftTower, loftTowerCached, clearLoftCache, loftVertexCount, loftRoofDeckY } from './renderers/TowerLoft';
 export { loftStack, loftStackCached, clearStackCache, stackVertexCount, stackFloors, stackRoofDeckY } from './renderers/TowerLoft';
 export type { TowerSegment, TowerStackParams } from './renderers/TowerLoft';
 export type { TowerLoftParams, TowerProfile } from './renderers/TowerLoft';
-export { presetForProject, isParametricCategory } from './renderers/TowerPresets';
+export { presetForProject } from './renderers/TowerPresets';
 export type { TowerBuildInput, TowerBuildResult } from './renderers/TowerPresets';
 export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbVisual';
 export type { OrbVisual } from './scene/agentOrbVisual';
@@ -27,12 +27,10 @@ export type { AgentOrbInput } from './scene/SceneManager';
 
 // Layout
 export { BinPacker } from './layout/BinPacker';
-export { CityLayoutEngine } from './layout/CityLayoutEngine';
 
 // Renderers
 export { BuildingShader } from './renderers/BuildingShader';
 export { GeometryFactory } from './renderers/GeometryFactory';
-export { VisualEncoder } from './renderers/VisualEncoder';
 
 // Interactions
 export { BuildingRaycaster } from './interactions/Raycaster';
@@ -45,21 +43,9 @@ export { NeuralCore } from './visuals/NeuralCore';
 export { DataArtery } from './visuals/DataArtery';
 export { ArteryManager } from './visuals/ArteryManager';
 
-// Filters
-export { FacetFilter } from './filters/FacetFilter';
-export { QueryEngine } from './filters/QueryEngine';
-
-// Effects
-export { DecayEffect } from './effects/DecayEffect';
-export { GlowManager } from './effects/GlowManager';
-
 // Store
 export { createInteractionStore } from './stores/interactionStore';
 export type { InteractionState, InteractionStore, TraceImpactState } from './stores/interactionStore';
-/** @deprecated see stores/projectStore.ts */
-export { createProjectStore } from './stores/projectStore';
-export type { ProjectState } from './stores/projectStore';
 
 // Utils
-export { debugLog, setDebugLogging, setDebugSink } from './utils/log';
-export { escapeHtml } from './utils/html';
+export { debugLog } from './utils/log';

@@ -523,20 +523,6 @@ export function clearLoftCache(): void {
   geometryCache.clear();
 }
 
-/**
- * Where the top ring's centerline actually sits, in the geometry's local XZ.
- *
- * Leaning presets translate the centerline by up to `leanFrac`·H — far outside
- * the rooftop safe radius — so anything mounted on the roof (greeble kit,
- * beacon, quest marker) has to be offset by this or it hangs in mid-air beside
- * the building. At v=1 both easings resolve to 1, so this is just the clamped
- * @deprecated Lean was removed on 2026-08-03 — always returns the origin.
- *   Kept as an export because `@hypernovum/core` is published (see docs/DEAD-CODE.md).
- */
-export function loftTopCenter(_params: TowerLoftParams): { x: number; z: number } {
-  return { x: 0, z: 0 };
-}
-
 /** Vertex count of the INDEXED grid (before any toNonIndexed) — for tests. */
 export function loftVertexCount(params: TowerLoftParams): number {
   const floors = Math.round(clamp(params.floors, CLAMP.floors[0], CLAMP.floors[1]));

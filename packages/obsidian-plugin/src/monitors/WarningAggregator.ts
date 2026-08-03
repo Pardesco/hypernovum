@@ -35,7 +35,7 @@ export interface WarningItem {
 const RANK: Record<WarningSeverity, number> = { high: 3, medium: 2, low: 1 };
 
 /** Numeric severity for sorting (high first). */
-export function severityRank(s: WarningSeverity): number {
+function severityRank(s: WarningSeverity): number {
   return RANK[s];
 }
 
@@ -50,7 +50,7 @@ function daysSince(ms: number): number {
 }
 
 function displayName(s: AgentSession): string {
-  return s.name || (s.legacy ? 'Agent' : s.sessionId);
+  return s.name || s.sessionId;
 }
 
 /**

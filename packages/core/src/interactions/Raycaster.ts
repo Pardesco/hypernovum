@@ -84,11 +84,6 @@ export class BuildingRaycaster {
     this.clickGuard = guard;
   }
 
-  /** @deprecated Use setSelectHandler/setOpenHandler — single-click no longer opens. */
-  setClickHandler(handler: (hit: RaycastHit) => void): void {
-    this.onSelect = handler;
-  }
-
   setRightClickHandler(handler: (hit: RaycastHit, event: MouseEvent) => void): void {
     this.onBuildingRightClick = handler;
   }

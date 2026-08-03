@@ -150,7 +150,7 @@ ${buildStopExample(heartbeat)}
 
 The script itself lives at \`${heartbeat.scriptPath}\` — Hypernovum installs and updates it, so don't edit it by hand.
 
-A legacy single-file \`.hypernovum-status.json\` is still read for one release (renders as an anonymous agent), but v2 gives you identity, state, and conflict detection. When Hypernovum launches an agent it writes the full per-project invocation into that project's \`.hypernovum/SETUP.md\`.`;
+When Hypernovum launches an agent it writes the full per-project invocation into that project's \`.hypernovum/SETUP.md\`.`;
 }
 
 function buildInventory(projects: ProjectData[]): string {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSnapshotToPresence, legacyToPresence, mergeFleet } from '../src/monitors/fleetMerge';
+import { parseSnapshotToPresence, mergeFleet } from '../src/monitors/fleetMerge';
 import { parseSessionLines, parseSessionDigest } from '../src/monitors/sessionDigest';
 import { buildManifestIndex, matchManifestDeps, resolveProjectRef } from '../src/monitors/dependencyMatch';
 import { parseRecentCommits, parseAheadBehind } from '../src/monitors/GitActivityCollector';
@@ -20,14 +20,9 @@ describe('HRD-002 — parsers never throw on garbage', () => {
     expect(parseSnapshotToPresence([])).toBeNull();
   });
 
-  it('legacyToPresence tolerates any input', () => {
-    for (const g of GARBAGE) expect(() => legacyToPresence(g)).not.toThrow();
-    expect(legacyToPresence('garbage')).toBeNull();
-  });
-
   it('mergeFleet tolerates empty/garbage-derived lists', () => {
-    expect(() => mergeFleet([], null)).not.toThrow();
-    expect(mergeFleet([], null)).toEqual([]);
+    expect(() => mergeFleet([])).not.toThrow();
+    expect(mergeFleet([])).toEqual([]);
   });
 });
 

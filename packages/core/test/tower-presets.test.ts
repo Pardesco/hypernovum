@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { presetForProject, isParametricCategory, type TowerBuildInput } from '../src/renderers/TowerPresets';
+import { presetForProject, type TowerBuildInput } from '../src/renderers/TowerPresets';
 import { loftStack, loftTower } from '../src/renderers/TowerLoft';
 
 function input(over: Partial<TowerBuildInput> = {}): TowerBuildInput {
@@ -65,7 +65,6 @@ describe('presetForProject — family mapping', () => {
     const r = presetForProject(input({ category: 'nonsense' }));
     expect(r.kind).toBe('stack');
     if (r.kind === 'stack') expect(r.params.segments).toHaveLength(1);
-    expect(isParametricCategory('nonsense')).toBe(true);
   });
 
   it('OBELISK (visualization, art) is a diamond shaft closing to a point — nothing leans', () => {

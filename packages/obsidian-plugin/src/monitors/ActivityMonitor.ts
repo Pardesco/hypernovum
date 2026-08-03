@@ -3,7 +3,6 @@ import {
   type AgentPresence,
   mergeFleet,
   parseSnapshotToPresence,
-  legacyToPresence,
 } from './fleetMerge';
 
 export type { AgentPresence } from './fleetMerge';
@@ -25,9 +24,9 @@ export interface ActivityCallbacks {
   onActivityStop?: () => void;
   onProjectChange?: (newProject: string | null, oldProject: string | null) => void;
   /**
-   * Called every poll with the full merged fleet (v2 sessions + legacy),
-   * freshest-first, capped. Includes stale/complete sessions so the registry
-   * (AGT-003) can drive the §10 lifecycle; consumers filter as needed.
+   * Called every poll with the full fleet, freshest-first, capped. Includes
+   * stale/complete sessions so the registry (AGT-003) can drive the §10
+   * lifecycle; consumers filter as needed.
    */
   onFleetUpdate?: (agents: AgentPresence[]) => void;
   /** Called when unreadable snapshot files were skipped this poll (degraded data). */
@@ -35,8 +34,8 @@ export interface ActivityCallbacks {
 }
 
 /**
- * Monitors Claude Code activity via heartbeat status file.
- * Watches .hypernovum-status.json in vault root for real-time updates.
+ * Monitors agent activity via the heartbeat snapshots the hooks write to
+ * <vault>/.hypernovum/agents/*.json.
  */
 export class ActivityMonitor {
   private app: App;
@@ -46,7 +45,6 @@ export class ActivityMonitor {
   private pollTimer: number | null = null;
   private lastStatus: ActivityStatus | null = null;
   private isActive = false;
-  private statusFilePath = '.hypernovum-status.json';
   private agentsDirPath = '.hypernovum/agents';
 
   /**
@@ -96,21 +94,17 @@ export class ActivityMonitor {
     try {
       const now = Date.now();
 
-      // v2: per-session snapshots in .hypernovum/agents/*.json
-      const { presences: v2, skipped } = await this.readAgentSnapshots();
+      // Per-session snapshots in .hypernovum/agents/*.json
+      const { presences, skipped } = await this.readAgentSnapshots();
 
-      // Legacy: single .hypernovum-status.json (old hooks / third-party writers)
-      const legacyRaw = await this.readStatusFile();
-      const legacy = legacyRaw ? legacyToPresence(legacyRaw) : null;
-
-      const agents = mergeFleet(v2, legacy);
+      const agents = mergeFleet(presences);
       // Emit every poll (incl. 0) so consumers can clear a prior degraded state.
       this.callbacks.onDegradedData?.(skipped);
 
       // Full fleet (incl. stale/complete) drives the registry (AGT-003).
       this.callbacks.onFleetUpdate?.(agents);
 
-      // Legacy single-status callbacks + activity indicator use fresh only.
+      // Single-status callbacks + activity indicator use fresh only.
       const fresh = agents.filter((a) => a.active && now - a.lastPing <= this.idleTimeout);
 
       if (fresh.length === 0) {
@@ -120,7 +114,7 @@ export class ActivityMonitor {
         return;
       }
 
-      // Primary agent drives the legacy single-status callbacks
+      // Primary agent drives the single-status callbacks
       const primary = fresh[0];
       const status: ActivityStatus = {
         active: true,
@@ -165,7 +159,7 @@ export class ActivityMonitor {
   /**
    * List and parse .hypernovum/agents/*.json into presences. Unparseable
    * files are skipped and counted (degraded-data signal). Directory absent →
-   * empty (legacy-only vault, behaves exactly as before).
+   * empty (no agent hooks installed yet).
    */
   private async readAgentSnapshots(): Promise<{ presences: AgentPresence[]; skipped: number }> {
     const presences: AgentPresence[] = [];
@@ -193,22 +187,6 @@ export class ActivityMonitor {
     return { presences, skipped };
   }
 
-  /** Read and parse the status file (uses vault adapter to bypass file index) */
-  private async readStatusFile(): Promise<unknown> {
-    try {
-      // Use vault adapter for direct disk access — getAbstractFileByPath() may not
-      // index externally-created files (heartbeat.js writes directly to filesystem)
-      const exists = await this.app.vault.adapter.exists(this.statusFilePath);
-      if (!exists) return null;
-
-      const content = await this.app.vault.adapter.read(this.statusFilePath);
-      const parsed: unknown = JSON.parse(content);
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
-
   /** Get current activity state */
   isCurrentlyActive(): boolean {
     return this.isActive;
@@ -217,24 +195,5 @@ export class ActivityMonitor {
   /** Get last known status */
   getLastStatus(): ActivityStatus | null {
     return this.lastStatus;
-  }
-
-  /** Manually trigger activity (for testing) */
-  simulateActivity(project: string, action: string = 'testing'): void {
-    const status: ActivityStatus = {
-      active: true,
-      project,
-      action,
-      lastPing: Date.now()
-    };
-
-    this.lastStatus = status;
-    this.isActive = true;
-    this.callbacks.onActivityStart?.(status);
-  }
-
-  /** Manually stop activity (for testing) */
-  simulateStop(): void {
-    this.transitionToIdle();
   }
 }

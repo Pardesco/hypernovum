@@ -403,7 +403,6 @@ export class HypernovumView extends ItemView {
       onCycleBlocked: () => this.cycleByStatus('blocked'),
       onCycleStale: () => this.cycleByStatus('paused'),
       onResetCamera: () => this.sceneManager?.resetCamera(),
-      onDebugFlow: () => this.triggerRandomFlow(),
       onEscape: () => {
         // Priority: exit move mode → clear selection
         if (this.sceneManager?.exitMoveModeIfActive()) return;
@@ -974,10 +973,10 @@ category: default
     if (matching.length === 0 || !this.sceneManager) return;
 
     // Cycle through matching projects
-    const current = this.sceneManager.getFocusedProject();
+    const currentPath = this.interactionStore.getState().selectedPath;
     let nextIndex = 0;
-    if (current) {
-      const currentIdx = matching.findIndex((p) => p.path === current.path);
+    if (currentPath) {
+      const currentIdx = matching.findIndex((p) => p.path === currentPath);
       if (currentIdx >= 0) {
         nextIndex = (currentIdx + 1) % matching.length;
       }
@@ -986,7 +985,7 @@ category: default
     const target = matching[nextIndex];
     if (target.position) {
       this.sceneManager.focusOnPosition(target.position);
-      this.sceneManager.setFocusedProject(target);
+      this.interactionStore.getState().select(target.path);
     }
   }
 
@@ -1829,7 +1828,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
           this.interactionStore.getState().select(project.path);
           if (project.position && this.sceneManager) {
             this.sceneManager.focusOnPosition(project.position);
-            this.sceneManager.setFocusedProject(project);
           }
         }
         break;
@@ -2470,7 +2468,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     action('Focus', () => {
       if (project.position && this.sceneManager) {
         this.sceneManager.focusOnPosition(project.position);
-        this.sceneManager.setFocusedProject(project);
+        this.interactionStore.getState().select(project.path);
       }
     });
   }
@@ -2631,13 +2629,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.plugin.settings.blockPositions = positions;
     await this.plugin.saveSettings();
     new Notice('City layout saved!');
-  }
-
-  /** Debug: Trigger a random data flow for testing */
-  private triggerRandomFlow(): void {
-    if (this.projects.length === 0 || !this.sceneManager) return;
-    const randomProject = this.projects[Math.floor(Math.random() * this.projects.length)];
-    this.sceneManager.triggerFlow(randomProject.path);
   }
 
   /** Handle file modifications to trigger data flow animations */

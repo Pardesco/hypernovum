@@ -2713,17 +2713,6 @@ export class SceneManager {
     this.controls.update();
   }
 
-  /** @deprecated Read selection from the shared interaction store instead. */
-  getFocusedProject(): ProjectData | null {
-    const path = this.store?.getState().selectedPath;
-    if (!path) return null;
-    return (this.buildingPathMap.get(path)?.userData.project as ProjectData | undefined) ?? null;
-  }
-  /** @deprecated Write selection through the shared interaction store instead. */
-  setFocusedProject(project: ProjectData | null): void {
-    this.store?.getState().select(project?.path ?? null);
-  }
-
   /** Smoothly animate camera back to default overhead position */
   animateCameraToDefault(duration = 1000): void {
     const projects = this.buildings.map(b => b.userData.project).filter(Boolean) as ProjectData[];

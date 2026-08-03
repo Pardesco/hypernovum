@@ -167,11 +167,7 @@ ${buildStopExample(heartbeat)}
 
 \`\`\`json
 ${buildClaudeHookJson(heartbeat)}
-\`\`\`
-
-Legacy note: an older single-file \`.hypernovum-status.json\` is still read for one
-release, so pre-existing hooks keep working as an anonymous agent — but v2 gives
-you identity, state, and conflict detection.`;
+\`\`\``;
 }
 
 // Note: Agent context is provided via .hypernovum/SETUP.md written by generateAgentContext().

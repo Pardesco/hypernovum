@@ -83,8 +83,8 @@ export interface GraphEdge {
   direction: 'directed' | 'undirected';
   /** Backlink count / dependency count — drives opacity/thickness */
   weight?: number;
-  /** Nothing emits 'inferred' yet; the slot reserves it for later */
-  source: 'deterministic' | 'inferred';
+  /** Every edge is derived from something the user wrote — no heuristics. */
+  source: 'deterministic';
   meta?: { agentId?: string; via?: 'manifest' | 'frontmatter' };
 }
 
