@@ -958,12 +958,25 @@ export class SceneManager {
     // too — the tower becomes a glowing triangulated cage. 20 degrees keeps the
     // edges that are actual silhouette events (setback ledges, waist creases,
     // polygon facets). Classic passes 1 explicitly, matching the old default.
-    const edges = new THREE.EdgesGeometry(geometry, build.floors > 0 ? 20 : 1);
+    const parametric = build.floors > 0;
+    const edges = new THREE.EdgesGeometry(geometry, parametric ? 20 : 1);
     const bloomMultiplier = this.useBloom ? 1.5 : 1.0;
-    const edgeOpacity = project.status === 'blocked' ? 0.8 * bloomMultiplier :
-      project.status === 'active' ? 0.5 * bloomMultiplier : 0.3;
+    // Parametric towers carry their own form now (P1 lighting, P2 decks, real
+    // stacked masses), so the outline only has to DELINEATE. Left at classic's
+    // brightness it does the opposite: status colour x2.5 sits 2.5x over the
+    // bloom threshold, and at city zoom that halo is wider than the building,
+    // so every tower dissolves into the same green blob and the massing this
+    // whole redesign added is erased by the post chain.
+    const edgeBoost = parametric
+      ? (this.useBloom ? 1.35 : 1.5)
+      : (this.useBloom ? 2.5 : 1.8);
+    const edgeOpacity = project.status === 'blocked'
+      ? (parametric ? 0.55 : 0.8 * bloomMultiplier)
+      : project.status === 'active'
+        ? (parametric ? 0.42 : 0.5 * bloomMultiplier)
+        : 0.3;
     const edgeColor = baseColor.clone().multiplyScalar(
-      project.status === 'blocked' ? 3.0 : (this.useBloom ? 2.5 : 1.8)
+      project.status === 'blocked' ? (parametric ? 1.9 : 3.0) : edgeBoost
     );
     const lineMat = new THREE.LineBasicMaterial({
       color: edgeColor,

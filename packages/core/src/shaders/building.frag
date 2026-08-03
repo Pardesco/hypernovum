@@ -101,7 +101,12 @@ void main() {
     vec3 upDir = normalize(mat3(viewMatrix) * vec3(0.0, 1.0, 0.0));
     float ndl = max(dot(N, keyDir), 0.0);
     float hemi = 0.85 + 0.15 * dot(N, upDir);
-    wallColor *= (0.55 + 0.45 * ndl) * hemi;
+    // A wide key range is what separates one mass from the next. At 0.55-1.0 the
+    // lit and shaded faces of a stacked tower differ by less than the bloom
+    // bleeds, so the steps vanish; 0.34-1.0 keeps them legible through the post
+    // chain. The facade also sits a little darker so windows, ledges and the
+    // outline carry the brightness instead of the whole surface glowing.
+    wallColor *= (0.34 + 0.66 * ndl) * hemi * 0.86;
 
     // Roof deck. The camera looks DOWN at roofs more than at any facade, and
     // the cap inherits v=1 — the brightest value the wall gradient produces —
