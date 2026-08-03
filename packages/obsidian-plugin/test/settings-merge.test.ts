@@ -13,6 +13,7 @@ const PLUGIN_DEFAULTS = {
   vaultMode: false,
   interactionHintShown: false,
   savedLenses: [],
+  buildingStyleMigrated: false,
 };
 
 describe('settings default-merge', () => {
@@ -26,7 +27,7 @@ describe('settings default-merge', () => {
     };
     const merged = Object.assign({}, PLUGIN_DEFAULTS, oldData);
 
-    expect(merged.buildingStyle).toBe('classic');
+    expect(merged.buildingStyle).toBe('parametric'); // default flipped in 0.4.2
     expect(merged.interactionHintShown).toBe(false);
     expect(merged.savedLenses).toEqual([]);
     // Existing values preserved
@@ -43,7 +44,7 @@ describe('settings default-merge', () => {
 
   it('empty data.json loads full defaults (fresh install)', () => {
     const merged = Object.assign({}, PLUGIN_DEFAULTS, {});
-    expect(merged.buildingStyle).toBe('classic');
+    expect(merged.buildingStyle).toBe('parametric'); // default flipped in 0.4.2
     expect(merged.vaultMode).toBe(false);
     expect(merged.savedLenses).toEqual([]);
     expect(merged.agentName).toBe('Claude Code');
@@ -59,7 +60,7 @@ describe('settings default-merge', () => {
     const merged = Object.assign({}, PLUGIN_DEFAULTS, midData);
     expect(merged.interactionHintShown).toBe(true);   // preserved
     expect(merged.vaultMode).toBe(true);              // preserved
-    expect(merged.buildingStyle).toBe('classic');     // filled
+    expect(merged.buildingStyle).toBe('parametric'); // default flipped in 0.4.2     // filled
     expect(merged.savedLenses).toEqual([]);           // filled
   });
 
@@ -72,5 +73,45 @@ describe('settings default-merge', () => {
     expect(merged.buildingStyle).toBe('parametric');
     expect(merged.savedLenses).toHaveLength(1);
     expect(merged.savedLenses[0].edgeTypes).toEqual(['blocked-by']);
+  });
+});
+
+
+// Mirrors the buildingStyle migration in HypernovumPlugin.loadSettings(). The
+// flip is only useful if EXISTING installs move too: they all have 'classic'
+// persisted, so changing DEFAULT_SETTINGS alone would strand every current
+// user on the old silhouettes.
+function migrateBuildingStyle(stored: Record<string, unknown> | null) {
+  const merged: Record<string, unknown> = { ...PLUGIN_DEFAULTS, ...(stored ?? {}) };
+  if (stored && !stored.buildingStyleMigrated) {
+    if (stored.buildingStyle === 'classic') merged.buildingStyle = 'parametric';
+    merged.buildingStyleMigrated = true;
+  }
+  return merged;
+}
+
+describe('buildingStyle 0.4.2 migration', () => {
+  it('carries an existing install off the old default exactly once', () => {
+    const m = migrateBuildingStyle({ buildingStyle: 'classic' });
+    expect(m.buildingStyle).toBe('parametric');
+    expect(m.buildingStyleMigrated).toBe(true);
+  });
+
+  it('a deliberate switch BACK to classic sticks', () => {
+    // Second load after the user chose classic post-migration.
+    const m = migrateBuildingStyle({ buildingStyle: 'classic', buildingStyleMigrated: true });
+    expect(m.buildingStyle).toBe('classic');
+  });
+
+  it('leaves an early adopter who already chose parametric alone', () => {
+    const m = migrateBuildingStyle({ buildingStyle: 'parametric' });
+    expect(m.buildingStyle).toBe('parametric');
+    expect(m.buildingStyleMigrated).toBe(true);
+  });
+
+  it('a fresh install needs no migration and takes the default', () => {
+    const m = migrateBuildingStyle(null);
+    expect(m.buildingStyle).toBe('parametric');
+    expect(m.buildingStyleMigrated).toBe(false);
   });
 });

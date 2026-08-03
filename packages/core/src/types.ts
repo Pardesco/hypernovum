@@ -195,5 +195,11 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   bloomIntensity: 0.8,
   enableAtmosphere: true,
   enableGitActivity: true,
-  buildingStyle: 'classic',
+  // Parametric is the default as of 0.4.2. The classic silhouettes stayed the
+  // default while parametric was one profile modulated by ±12% — invisible at
+  // the 2–4 unit footprints and 4–7 floors the layout actually produces. It now
+  // expresses real massing (stacked, telescoped, clustered, spired, sheared),
+  // which is the frequency band a fixed high camera can resolve. Classic
+  // remains selectable and its code path is untouched.
+  buildingStyle: 'parametric',
 };

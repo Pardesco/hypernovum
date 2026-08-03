@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Parametric buildings are now the default silhouette set.** Seven families —
+  spiral, stacked slabs, telescoping tiers, spire, sheared blade, hex cluster and
+  a quiet block — replace the previous set, which was one profile modulated by
+  ±12% and therefore invisible at the footprints and floor counts the layout
+  actually produces. Existing installs are migrated once; the setting still
+  offers **Classic**, whose code path is unchanged, and switching back sticks.
+- Buildings gained real lighting, parapets with recessed dark roof decks, and
+  perimeter-aware window columns.
+- The edge glow no longer overwhelms the buildings it outlines at city zoom.
+- The ground grid fades out radially instead of stopping at a drawn circle.
+
+### Removed
+
+- The leaning building family, and the `lean`, `waist`, `bulge` and `crown`
+  shape parameters — each was sub-visible at real building sizes.
+
+
 ## 0.4.0 — 3D-IDE overhaul + publish readiness (2026-07-25)
 
 ### Fixed — agent presence actually works when installed

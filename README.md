@@ -65,7 +65,7 @@ backlink graph all still work.
 
 ### City visualization
 - **Bin-packed layout** with category districts, block outlines, and drag handles for rearranging
-- **Procedural architecture** — each category gets a unique silhouette (helix towers, data shards, ziggurats, quant blades, hex hives, memory cores)
+- **Procedural architecture** — seven silhouette families, one per category: spiral towers, stacked slabs, telescoping tiers, spires, sheared blades, hex clusters, and a quiet block for everything else
 - **Cyberpunk shader system** with procedural windows, decay dithering, and bloom post-processing
 - **Smart labels** with CSS2D rendering and leader lines
 - **Hover tooltips** showing status, priority, health, and tech stack
@@ -89,7 +89,7 @@ backlink graph all still work.
 - **Saved lens presets**: three defaults (Active Work / Needs Attention / Agents) plus "Save current view".
 - **EDGES chips** toggle the typed project graph: Backlinks · Deps · Blocked · Agents.
 - **Project inspector**: git signals + recent commits, warnings, dependency sections (Depends on / Used by / Blocked by / Blocks), agent activity, and a last-session digest. **City overview** (nothing selected) shows district analytics, an attention list, and a recent-activity feed.
-- **Building style** (settings): Classic silhouettes or **Parametric** data-true towers (opt-in, applies live).
+- **Building style** (settings): **Parametric** data-true towers — seven silhouette families whose window rows equal their real floor count — or the original **Classic** set. Applies live.
 - **Snapshot**: one click saves a clean cinematic PNG (title card, no HUD) into your vault.
 - **Drag handles** rearrange category blocks; **scroll** to zoom, **right-drag** to pan; **keyboard** cycles blocked/stale projects + resets camera.
 

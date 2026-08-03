@@ -49,6 +49,8 @@ export interface HypernovumSettings extends CoreSettings {
   agentFeaturesConsent: AgentFeaturesConsent;
   /** Vault folder for generated briefings and snapshots ('' = vault root) */
   outputFolder: string;
+  /** The 0.4.2 classic→parametric default flip has already been applied once */
+  buildingStyleMigrated: boolean;
 }
 
 export const DEFAULT_SETTINGS: HypernovumSettings = {
@@ -61,6 +63,7 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   viewLocation: 'tab',
   agentFeaturesConsent: 'unset',
   outputFolder: '',
+  buildingStyleMigrated: false,
 };
 
 export type { BlockPosition };
@@ -246,11 +249,11 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Building style')
-      .setDesc('Classic silhouettes, or Parametric (beta) data-true towers whose window rows equal their floor count. Applies immediately to open city views.')
+      .setDesc('Parametric towers carry real massing and window rows equal to their floor count; Classic is the original silhouette set. Applies immediately to open city views.')
       .addDropdown((dropdown) => {
         dropdown
+          .addOption('parametric', 'Parametric')
           .addOption('classic', 'Classic')
-          .addOption('parametric', 'Parametric (beta)')
           .setValue(this.plugin.settings.buildingStyle)
           .onChange(async (value) => {
             this.plugin.settings.buildingStyle = value as 'classic' | 'parametric';

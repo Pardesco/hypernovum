@@ -297,6 +297,19 @@ export default class HypernovumPlugin extends Plugin {
       this.settings.agentFeaturesConsent = this.settings.vaultMode ? 'denied' : 'granted';
       await this.saveSettings();
     }
+
+    // Migration: parametric became the default in 0.4.2. Existing installs have
+    // 'classic' persisted, so flipping DEFAULT_SETTINGS alone would leave every
+    // current user on the old silhouettes forever. Nobody chose classic
+    // deliberately — it WAS the default and picking it was a no-op, so anyone
+    // who touched the setting chose parametric. Carry them over once, and
+    // record it, so that someone who then switches back to classic stays there.
+    const prior = stored as Partial<HypernovumSettings> | null;
+    if (prior && !prior.buildingStyleMigrated) {
+      if (prior.buildingStyle === 'classic') this.settings.buildingStyle = 'parametric';
+      this.settings.buildingStyleMigrated = true;
+      await this.saveSettings();
+    }
   }
 
   async saveSettings(): Promise<void> {
