@@ -144,7 +144,8 @@ export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
   const floorHeight = params.floorHeight > 0 ? params.floorHeight : 2.5;
   const taper = clamp(params.taper, CLAMP.taper[0], CLAMP.taper[1]);
   const twist = (clamp(params.twistDeg ?? 0, CLAMP.twistDeg[0], CLAMP.twistDeg[1]) * Math.PI) / 180;
-  const H = floors * floorHeight;
+  // Total height now comes from resolveParapet (`par.H`), which owns the
+  // wall/lip split — a second local copy went stale the moment that landed.
 
   if (!Number.isFinite(params.floors) || params.floors < CLAMP.floors[0]) {
     debugLog('[TowerLoft] floors out of range, clamped', params.floors, '→', floors);
