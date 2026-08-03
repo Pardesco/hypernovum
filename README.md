@@ -1,10 +1,41 @@
-# Hypernovum — Agent Ops for Your Second Brain
+# Hypernovum
 
-A **3D IDE and agent-ops dashboard** for [Obsidian](https://obsidian.md), built on **Three.js**. Hypernovum turns your vault — your **second brain** — into a living cyberpunk code city: visualize projects and their backlinks in 3D, dispatch **AI coding agents** (Claude Code, GPT Codex, Antigravity CLI) with full vault context, post research quests for agents to resolve, and watch your entire fleet work in real time.
+Turn the projects in your Obsidian vault into a live 3D city — then run your AI coding
+agents from it and watch them work.
 
-Each project note becomes a building. Status maps to color, priority to height, category to district, vault backlinks to glowing **Neural Link** arcs. A central **Neural Core** pulses with activity as you work, **Data Arteries** flow to buildings when files change, and every active agent orbits its building as a colored orb.
+Each project note becomes a building. Status maps to color, priority to height, category
+to district, and vault backlinks to glowing **Neural Link** arcs. A central **Neural Core**
+pulses as you work, **Data Arteries** flow to buildings when files change, and every active
+agent (Claude Code, GPT Codex, Antigravity CLI) orbits its building as a colored orb.
 
-![Hypernovum Obsidian Plugin](site/assets/obsidian-app.png)
+![The code city — 27 project notes rendered as buildings, grouped into category districts](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/city.png)
+
+## Install
+
+Install from **Settings → Community plugins → Browse → "Hypernovum"**, then enable it and
+run **Open code city** from the command palette (or click the cube in the ribbon).
+
+Desktop only — the agent half of the plugin talks to your local `git` and terminal.
+
+## Quick start
+
+Hypernovum renders **project notes**, not every note in your vault, so a brand-new install
+shows an empty city until at least one note is tagged. Add this frontmatter to a note:
+
+```yaml
+---
+tags: [project]
+title: My Project
+status: active          # active · blocked · paused · complete  → building color
+priority: high          # low · medium · high · critical        → building height
+category: web-apps      # any string                            → district
+projectDir: C:\Users\me\projects\my-project   # unlocks Git signals + agent launch
+---
+```
+
+The city rebuilds as you save. `projectDir` is the field that matters most: without it a
+project has no Git activity, no dependency edges, and no **Launch agent** action. See
+[SCHEMA.md](SCHEMA.md) for every field.
 
 ## What this plugin does on your machine
 
@@ -32,20 +63,22 @@ backlink graph all still work.
 
 ## Features
 
-### City Visualization
+### City visualization
 - **Bin-packed layout** with category districts, block outlines, and drag handles for rearranging
 - **Procedural architecture** — each category gets a unique silhouette (helix towers, data shards, ziggurats, quant blades, hex hives, memory cores)
 - **Cyberpunk shader system** with procedural windows, decay dithering, and bloom post-processing
 - **Smart labels** with CSS2D rendering and leader lines
 - **Hover tooltips** showing status, priority, health, and tech stack
 
-### Second Brain & Agent Ops
+### Second brain and agent ops
 - **Prepare vault for AI agents** — one click writes a marker-fenced `AGENTS.md` at the vault root: project schema, live inventory, quest board, skills roster, and heartbeat protocol, so any CLI agent instantly understands your second brain
 - **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md — resolving a quest (move it to `answered:`) fires an emerald shockwave at the building
 - **Abilities roster**: agent skills (`SKILL.md` files in vault or `~/.claude/skills/`) listed in the agents panel — click to copy an invocation
 - **Neural Links**: toggle vault backlinks between projects as pulsing violet knowledge arcs — your knowledge graph as city infrastructure
 - **Agent fleet presence**: every v2 heartbeat session gets its own state-colored orb with an identity tooltip (name/state/action/file); two agents touching the same file surface a deterministic conflict ring and inspector row
 - **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
+
+![Live agent fleet — two sessions editing the same file surface a conflict ring on the building and a conflict row in the inspector](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/agent-fleet.png)
 
 ### Interactions
 - **Single-click** a building to **select + focus** it — the city dims around your selection and connected neighbors stay lit; the camera doesn't move. **Double-click** opens the note. *(This changed in 0.4 — click no longer opens; a one-time hint appears.)*
@@ -55,28 +88,33 @@ backlink graph all still work.
 - **Scan lenses** (dropdown): status, **Needs Attention** (triage), Git activity, memory-ready, task-progress ramp, recency heatmap, tech-stack — with an adaptive legend. A **⚠ badge** jumps to the attention lens.
 - **Saved lens presets**: three defaults (Active Work / Needs Attention / Agents) plus "Save current view".
 - **EDGES chips** toggle the typed project graph: Backlinks · Deps · Blocked · Agents.
-- **Project inspector**: git signals + recent commits, warnings, dependency sections (Depends on / Used by / Blocked by / Blocks), agent activity, and a last-session digest. **City overview** (nothing selected) shows district analytics, a fleet summary, an attention list, and a recent-activity feed.
+- **Project inspector**: git signals + recent commits, warnings, dependency sections (Depends on / Used by / Blocked by / Blocks), agent activity, and a last-session digest. **City overview** (nothing selected) shows district analytics, an attention list, and a recent-activity feed.
 - **Building style** (settings): Classic silhouettes or **Parametric** data-true towers (opt-in, applies live).
 - **Snapshot**: one click saves a clean cinematic PNG (title card, no HUD) into your vault.
 - **Drag handles** rearrange category blocks; **scroll** to zoom, **right-drag** to pan; **keyboard** cycles blocked/stale projects + resets camera.
 
-### Neural Core & Data Arteries
+![Project inspector — Git signals, recent commits and the open quest board for the selected building](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/inspector.png)
+
+![Needs Attention lens — the city dims to everything that is blocked, stale or conflicted](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/needs-attention.png)
+
+### Neural core and data arteries
 - Central **geodesic wireframe sphere** with RGB chromatic split and rotating rings
 - **Data Arteries** — animated tube geometry flowing from core to buildings on file changes
 - **City states**: IDLE (cyan) / STREAMING (cyan fast) / BULK_UPDATE (gold)
 
-### Claude Code Integration
+### Agent integration
 - **Activity Monitor** polls `.hypernovum/agents/` (v2 per-session snapshots) plus the legacy `.hypernovum-status.json` for real-time agent status
-- **Persistent streaming artery** while Claude is actively working on a project
+- **Persistent streaming artery** while an agent is actively working on a project
 - **Activity indicator overlay** shows current project and action
 - **Terminal Launcher** for launching Claude Code, GPT Codex, Antigravity CLI, or a custom agent command
 - **Agent context handoff** writes `.hypernovum/SETUP.md` with project metadata, Git signals, and memory context pointers before launch
 - **Heartbeat script** installed into your vault at `.hypernovum/heartbeat.js` by the **Install agent heartbeat hooks** command, which also prints ready-to-paste hook JSON with every path already resolved
 
-### Git & Memory Signals
+### Git and memory signals
 - **Read-only Git activity layer** shows recent commit velocity, branch, working-tree state, stale projects, and merge conflict signals
 - **Memory-ready filter** finds projects that already have `.hypernovum/MEMORY_CONTEXT.md`
-- **Funding metadata** is included for users who want to support the free plugin
+
+![Git activity lens — commit churn, merge conflicts and stale repositories rendered onto the skyline](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/git-activity.png)
 
 ### HUD
 - **HYPERNOVUM** neon title with flashing block cursor at top center
@@ -84,37 +122,40 @@ backlink graph all still work.
 - **Controls hint** overlay with all mouse and keyboard shortcuts
 - **Save Layout** and **Snapshot** buttons
 
-## Platform Support
+## Platform support
 
-| Platform | Terminal Emulators | Notes |
+| Platform | Terminal emulators | Notes |
 |----------|-------------------|-------|
 | **Windows** | Windows Terminal, cmd.exe | Tries `wt` first, falls back to `cmd` |
 | **macOS** | iTerm2, Terminal.app | Tries iTerm2 first (if running), falls back to Terminal.app |
 | **Linux** | gnome-terminal, konsole, xfce4-terminal, xterm | Tries each in order until one succeeds |
 
-All features — Neural Core, Data Arteries, Claude Code integration, context menus — work identically on every platform. The only difference is which terminal emulator opens.
+All features — Neural Core, Data Arteries, agent integration, context menus — work identically on every platform. The only difference is which terminal emulator opens.
 
-## Frontmatter Schema
+## Frontmatter schema
 
-Projects are detected by frontmatter tag `project` or field `type: project`. See [SCHEMA.md](SCHEMA.md) for the full field reference.
+Projects are detected by frontmatter tag `project` or field `type: project` (the tag is
+configurable in settings). Beyond the quick-start fields, the ones worth knowing:
 
 ```yaml
 ---
 tags: [project]
-title: My Project
-status: active
-priority: high
-category: web-apps
-stack: [TypeScript, React, Vite]
-questions:            # optional research quests for AI agents
+stack: [TypeScript, React, Vite]   # shown on hover, drives the tech-stack lens
+tasks: 24                          # window grid density
+tasks_done: 15                     # lit windows
+questions:                         # research quests — gold gems above the building
   - "Which vector DB fits this workload?"
+depends_on: [Mesh Gateway]         # teal dependency arcs
+blocked_by: [Relay Grid]           # red-amber arcs + a "Blocked by" warning
 projectDir: C:\Users\me\projects\my-project   # Windows
 # projectDir: /Users/me/projects/my-project   # macOS
 # projectDir: /home/me/projects/my-project    # Linux
 ---
 ```
 
-## AI Integration
+See [SCHEMA.md](SCHEMA.md) for the full field reference.
+
+## AI integration
 
 Hypernovum has **no built-in AI**. External AI tools (Claude Code, etc.) read `SCHEMA.md` to learn the frontmatter format, scan your project directories, and write frontmatter to vault notes. Hypernovum renders the result.
 
@@ -182,11 +223,16 @@ Built with [Three.js](https://threejs.org/), [Zustand](https://github.com/pmndrs
 
 ## Hypernovum Pro
 
-This Obsidian plugin remains free and open source. For a standalone desktop experience beyond Obsidian — featuring full Engram Persistent Agent Memory, AI agent management, MCP server integration, Tandem Terminal, broader project scanning, and more — check out [Hypernovum Pro](https://studio.pardesco.com/hypernovum).
+This plugin stays free and open source. **Hypernovum Pro** is the standalone desktop app —
+the same city, rendered with realistic building models and image-based lighting, scanning
+your whole drive instead of one vault, plus Engram persistent agent memory, agent
+management, an MCP server, and the Tandem Terminal.
 
-![Hypernovum Pro](site/assets/hypernovum-pro.gif)
+[Hypernovum Pro →](https://studio.pardesco.com/hypernovum)
 
-![Hypernovum Pro Dashboard](site/assets/pro-app2.png)
+![Hypernovum Pro — the unified city, whole portfolio on one platform](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/pro-city.jpg)
+
+![Hypernovum Pro — street level, with live project readouts](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/pro-detail.jpg)
 
 ## License
 
