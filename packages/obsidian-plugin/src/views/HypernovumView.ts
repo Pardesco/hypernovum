@@ -35,7 +35,6 @@ import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
 import { mapLimit } from '../utils/concurrency';
 import { generateAgentContext } from '../utils/AgentContext';
-import { scanSkills } from '../utils/SkillsScanner';
 import { getVaultBasePath, heartbeatPaths } from '../utils/HeartbeatInstaller';
 import {
   DIR_SOURCE_LABEL,
@@ -991,9 +990,9 @@ category: default
 
   private addAgentSwitcher(container: HTMLElement): void {
     const KNOWN_AGENTS = [
-      { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b', installHint: 'npm i -g @anthropic-ai/claude-code' },
-      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77', installHint: 'npm i -g @openai/codex' },
-      { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', icon: 'A', color: '#4d96ff', installHint: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' },
+      { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b' },
+      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77' },
+      { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', icon: 'A', color: '#4d96ff' },
     ];
 
     const panel = container.createDiv({ cls: 'agents-panel' });
@@ -1002,20 +1001,6 @@ category: default
     heading.createSpan({ cls: 'agents-title', text: 'AGENTS' });
     heading.createDiv({ cls: 'agents-subtitle', text: 'Right-click a building to launch' });
     const list = panel.createDiv({ cls: 'agents-list' });
-    const abilitiesSection = panel.createDiv({ cls: 'agents-abilities' });
-    abilitiesSection.hidden = true;
-    const abilitiesHeader = abilitiesSection.createDiv({ cls: 'agents-abilities-header' });
-    abilitiesHeader.appendText('ABILITIES · ');
-    abilitiesHeader.createSpan({ cls: 'abilities-count', text: '0' });
-    abilitiesSection.createDiv({ cls: 'agents-abilities-list' });
-    const notInstalledSection = panel.createDiv({ cls: 'agents-not-installed' });
-    notInstalledSection.hidden = true;
-    const toggleBtn = notInstalledSection.createEl('button', { cls: 'agents-not-installed-toggle' });
-    toggleBtn.appendText('Available to Install (');
-    let countSpan = toggleBtn.createSpan({ cls: 'not-installed-count', text: '0' });
-    toggleBtn.appendText(')');
-    const notInstalledList = notInstalledSection.createDiv({ cls: 'agents-not-installed-list' });
-    notInstalledList.hidden = true;
     const prepareBtn = panel.createEl('button', {
       cls: 'agents-prepare-btn',
       text: 'Prepare vault · AGENTS.md',
@@ -1037,17 +1022,6 @@ category: default
         });
     });
 
-    let showNotInstalled = false;
-    toggleBtn.addEventListener('click', () => {
-      showNotInstalled = !showNotInstalled;
-      notInstalledList.hidden = !showNotInstalled;
-      const count = countSpan.textContent ?? '0';
-      toggleBtn.empty();
-      toggleBtn.appendText(`${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (`);
-      countSpan = toggleBtn.createSpan({ cls: 'not-installed-count', text: count });
-      toggleBtn.appendText(')');
-    });
-
     const detectedMap: Record<string, boolean> = {};
 
     // Probe with execFile, not exec: exec spawns a shell, and a shell isn't needed
@@ -1065,13 +1039,12 @@ category: default
 
     const renderAgents = () => {
       list.empty();
-      notInstalledList.empty();
       const currentCommand = this.settings.agentCommand;
       const currentName = this.settings.agentName;
-      
+
       const agentsToRender = [...KNOWN_AGENTS];
       const isKnown = KNOWN_AGENTS.some(a => a.command === currentCommand);
-      
+
       if (!isKnown && currentCommand) {
         agentsToRender.push({
           id: 'custom',
@@ -1079,23 +1052,28 @@ category: default
           command: currentCommand,
           icon: currentName ? currentName[0].toUpperCase() : '?',
           color: '#cc5de8',
-          installHint: ''
         });
         detectedMap[currentCommand] = true; // Assume custom is valid if selected
       }
 
-      const installed = agentsToRender.filter(a => detectedMap[a.command] !== false);
-      const notInstalled = agentsToRender.filter(a => detectedMap[a.command] === false);
-
-      // Render installed — DOM API, not innerHTML: agent.name/icon can come
-      // from user settings (custom agent) and must land as text, not markup.
-      for (const agent of installed) {
-        const item = list.createDiv({ cls: 'agents-item' });
-        item.classList.toggle('active', currentCommand === agent.command);
-        item.setCssProps({ '--hypernovum-agent-color': agent.color });
+      // One roster. Undetected agents render dimmed and inert — that reads as
+      // "not installed" without turning the panel into a place that hands out
+      // install one-liners for other vendors' CLIs.
+      // DOM API, not innerHTML: agent.name/icon can come from user settings
+      // (custom agent) and must land as text, not markup.
+      for (const agent of agentsToRender) {
+        const detected = detectedMap[agent.command] !== false;
+        const tint = detected ? agent.color : `${agent.color}55`;
+        const item = list.createDiv({ cls: detected ? 'agents-item' : 'agents-item not-detected' });
+        item.classList.toggle('active', detected && currentCommand === agent.command);
+        item.setCssProps({ '--hypernovum-agent-color': tint });
         const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
-        iconCircle.setCssProps({ '--hypernovum-agent-color': agent.color });
+        iconCircle.setCssProps({ '--hypernovum-agent-color': tint });
         item.createSpan({ cls: 'agents-item-name', text: agent.name });
+        if (!detected) {
+          item.title = `${agent.name} was not found on your PATH`;
+          continue;
+        }
         item.addEventListener('click', () => {
           this.plugin.settings.agentName = agent.name;
           this.plugin.settings.agentCommand = agent.command;
@@ -1104,44 +1082,8 @@ category: default
           });
         });
       }
-
-      // Render not installed
-      if (notInstalled.length > 0) {
-        notInstalledSection.hidden = false;
-        countSpan.textContent = notInstalled.length.toString();
-        toggleBtn.empty();
-        toggleBtn.appendText(`${showNotInstalled ? '\u25BE' : '\u25B8'} Available to Install (`);
-        countSpan = toggleBtn.createSpan({ cls: 'not-installed-count', text: String(notInstalled.length) });
-        toggleBtn.appendText(')');
-
-        for (const agent of notInstalled) {
-          const item = notInstalledList.createDiv({ cls: 'agents-item not-detected' });
-          const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
-          iconCircle.setCssProps({ '--hypernovum-agent-color': `${agent.color}55` });
-          item.createSpan({ cls: 'agents-item-name', text: agent.name });
-          const installBtn = item.createEl('button', {
-            cls: 'agents-install-pill',
-            text: 'Install',
-            attr: { title: agent.installHint },
-          });
-          installBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            void navigator.clipboard.writeText(agent.installHint).catch(() => {
-              new Notice('Could not copy the install command.');
-            });
-            installBtn.textContent = '\u2713 Copied';
-            installBtn.classList.add('copied');
-            window.setTimeout(() => {
-              installBtn.textContent = 'Install';
-              installBtn.classList.remove('copied');
-            }, 1500);
-          });
-        }
-      } else {
-        notInstalledSection.hidden = true;
-      }
     };
-    
+
     // Initial render assuming all are detected until check finishes
     renderAgents();
     // Run async checks to detect installed agents
@@ -1152,53 +1094,6 @@ category: default
     }).catch((error: unknown) => {
       new Notice(`Could not detect installed agents: ${error instanceof Error ? error.message : String(error)}`);
     });
-
-    this.renderAbilities(panel);
-  }
-
-  /**
-   * ABILITIES section — agent skills discovered from SKILL.md files
-   * (vault .claude/skills/ and global ~/.claude/skills/). Click copies an
-   * invocation phrase to paste into any agent prompt.
-   */
-  private renderAbilities(panel: HTMLElement): void {
-    const section = panel.querySelector('.agents-abilities') as HTMLElement;
-    const list = panel.querySelector('.agents-abilities-list') as HTMLElement;
-    const count = panel.querySelector('.abilities-count') as HTMLElement;
-    if (!section || !list || !count) return;
-
-    const vaultPath = getVaultBasePath(this.app);
-    const skills = vaultPath ? scanSkills(vaultPath) : [];
-    if (skills.length === 0) {
-      section.hidden = true;
-      return;
-    }
-
-    section.hidden = false;
-    count.textContent = String(skills.length);
-    list.empty();
-
-    for (const skill of skills) {
-      const item = list.createDiv({ cls: 'agents-item ability' });
-      item.createSpan({ cls: 'ability-gem', text: '◆' });
-      item.createSpan({ cls: 'agents-item-name', text: skill.name });
-      item.createSpan({ cls: 'ability-scope', text: skill.scope === 'vault' ? 'V' : 'G' });
-      item.title = `${skill.description || skill.name}\n${skill.path}\nClick to copy invocation`;
-      item.addEventListener('click', () => {
-        void navigator.clipboard.writeText(`Use the "${skill.name}" skill (${skill.path})`).catch(() => {
-          new Notice('Could not copy the skill invocation.');
-        });
-        const gem = item.querySelector('.ability-gem') as HTMLElement;
-        if (gem) {
-          gem.textContent = '✓';
-          gem.classList.add('copied');
-          window.setTimeout(() => {
-            gem.textContent = '◆';
-            gem.classList.remove('copied');
-          }, 1200);
-        }
-      });
-    }
   }
 
   private addLegend(container: HTMLElement): void {

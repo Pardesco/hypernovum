@@ -56,7 +56,7 @@ of any kind.** Everything it reads or writes is on your own machine.
 | Runs `where` / `which` (no shell) | When the city view opens | Detects whether `claude` / `codex` / `agy` are installed, to grey out agents you don't have. Skipped entirely in vault mode |
 | Opens a terminal and runs your chosen agent CLI | Only when you click **Launch agent** | The point of the agent launcher |
 | Opens your file manager | Only when you click **Open folder** | — |
-| Reads files outside the vault | Project folders you link (`package.json`, `.git`), plus `~/.claude/skills/` | Dependency detection and the abilities roster |
+| Reads files outside the vault | Project folders you link (`package.json`, `.git`) | Dependency detection and the Git activity layer |
 | Writes files outside the vault | `.hypernovum/SETUP.md` + `.hypernovum/.gitignore` in a project folder, only when you launch an agent there | Hands the agent its project context |
 | Writes inside the vault | `AGENTS.md`, `.hypernovum/heartbeat.js`, briefings, snapshots — each on an explicit action | — |
 | Reads the clipboard | Never. Only writes, when you click a copy button | — |
@@ -77,12 +77,12 @@ backlink graph all still work.
 ### Second brain and agent ops
 - **Prepare vault for AI agents** — one click writes a marker-fenced `AGENTS.md` at the vault root: project schema, live inventory, quest board, skills roster, and heartbeat protocol, so any CLI agent instantly understands your second brain
 - **Quest board**: a `questions:` list in project frontmatter renders as a floating gold quest marker over the building, shows in the inspector and tooltip, and is published to agents via AGENTS.md — resolving a quest (move it to `answered:`) fires an emerald shockwave at the building
-- **Abilities roster**: agent skills (`SKILL.md` files in vault or `~/.claude/skills/`) listed in the agents panel — click to copy an invocation
-- **Neural Links**: toggle vault backlinks between projects as pulsing violet knowledge arcs — your knowledge graph as city infrastructure
-- **Agent fleet presence**: every v2 heartbeat session gets its own state-colored orb with an identity tooltip (name/state/action/file); two agents touching the same file surface a deterministic conflict ring and inspector row
+- **Skills roster**: agent skills (`SKILL.md` files under `<vault>/.claude/skills/`) are published to agents in AGENTS.md, so a launched agent knows what it already has
+- **Backlink arcs**: the **Backlinks** chip in the EDGES row (off by default) draws vault backlinks between projects as pulsing violet knowledge arcs — your knowledge graph as city infrastructure
+- **Agent fleet presence**: every heartbeat session gets its own state-colored orb with an identity tooltip (name/state/action/file); two agents touching the same file surface a deterministic conflict ring on the building and a conflict entry in the Attention warnings
 - **Daily briefing**: one command writes a digest note — status counts, blocked/stale attention list, quest board, git heat
 
-![Live agent fleet — two sessions editing the same file surface a conflict ring on the building and a conflict row in the inspector](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/agent-fleet.png)
+![Live agent fleet — two sessions editing the same file surface a conflict ring on the building and a conflict entry in the Attention warnings](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/agent-fleet.png)
 
 ### Interactions
 - **Single-click** a building to **select + focus** it — the city dims around your selection and connected neighbors stay lit; the camera doesn't move. **Double-click** opens the note. *(This changed in 0.4 — click no longer opens; a one-time hint appears.)*

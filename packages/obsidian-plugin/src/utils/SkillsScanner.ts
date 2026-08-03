@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 /** An agent skill discovered from a SKILL.md file (Claude Code / Agent Skills convention) */
 export interface AgentSkill {
@@ -8,21 +7,20 @@ export interface AgentSkill {
   description: string;
   /** Absolute path to the SKILL.md file */
   path: string;
-  scope: 'vault' | 'global';
 }
 
 /**
- * Scan for agent skills following the SKILL.md convention:
- * - Vault-level: <vault>/.claude/skills/<name>/SKILL.md
- * - Global:      ~/.claude/skills/<name>/SKILL.md
+ * Scan the vault for agent skills following the SKILL.md convention:
+ * `<vault>/.claude/skills/<name>/SKILL.md`.
  *
- * Vault skills win on name collisions. Read-only; failures return an
+ * Vault-scoped on purpose. An earlier version also read `~/.claude/skills`,
+ * which made an Obsidian plugin enumerate the user's whole home directory to
+ * populate a panel — not a trade worth making. Read-only; failures return an
  * empty list rather than throwing.
  */
 export function scanSkills(vaultPath: string): AgentSkill[] {
   const found: AgentSkill[] = [];
-  collect(path.join(vaultPath, '.claude', 'skills'), 'vault', found);
-  collect(path.join(os.homedir(), '.claude', 'skills'), 'global', found);
+  collect(path.join(vaultPath, '.claude', 'skills'), found);
 
   const seen = new Set<string>();
   return found.filter((skill) => {
@@ -32,21 +30,21 @@ export function scanSkills(vaultPath: string): AgentSkill[] {
   });
 }
 
-function collect(dir: string, scope: 'vault' | 'global', out: AgentSkill[]): void {
+function collect(dir: string, out: AgentSkill[]): void {
   try {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const skillPath = path.join(dir, entry.name, 'SKILL.md');
       if (!fs.existsSync(skillPath)) continue;
-      out.push(parseSkill(skillPath, entry.name, scope));
+      out.push(parseSkill(skillPath, entry.name));
     }
   } catch {
     // Unreadable directory — skip silently
   }
 }
 
-function parseSkill(file: string, folderName: string, scope: 'vault' | 'global'): AgentSkill {
+function parseSkill(file: string, folderName: string): AgentSkill {
   let name = folderName;
   let description = '';
   try {
@@ -61,7 +59,7 @@ function parseSkill(file: string, folderName: string, scope: 'vault' | 'global')
   } catch {
     // Unreadable file — fall back to folder name
   }
-  return { name, description, path: file, scope };
+  return { name, description, path: file };
 }
 
 function stripQuotes(value: string): string {

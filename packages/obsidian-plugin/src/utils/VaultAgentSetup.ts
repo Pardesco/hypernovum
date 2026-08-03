@@ -204,16 +204,16 @@ function buildSkillsRoster(skills: AgentSkill[]): string {
   if (skills.length === 0) {
     return `### Available skills
 
-No SKILL.md files found in \`.claude/skills/\` (vault) or \`~/.claude/skills/\` (global).`;
+No SKILL.md files found in \`.claude/skills/\` in this vault.`;
   }
 
   const rows = skills.map((s) =>
-    `- **${s.name}** (${s.scope}) — ${s.description || 'no description'}\n  \`${s.path.replace(/\\/g, '/')}\``
+    `- **${s.name}** — ${s.description || 'no description'}\n  \`${s.path.replace(/\\/g, '/')}\``
   );
 
   return `### Available skills
 
-Reusable skills installed on this machine. Read a skill's SKILL.md before using it:
+Skills installed in this vault. Read a skill's SKILL.md before using it:
 
 ${rows.join('\n')}`;
 }
