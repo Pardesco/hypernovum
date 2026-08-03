@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loftTower, loftTowerCached, clearLoftCache, type TowerLoftParams } from '../src/renderers/TowerLoft';
+import { loftStack, loftTower, loftTowerCached, clearLoftCache, type TowerLoftParams } from '../src/renderers/TowerLoft';
 import { presetForProject, type TowerBuildInput } from '../src/renderers/TowerPresets';
 
 const sample: TowerLoftParams = {
@@ -37,30 +37,32 @@ describe('RooftopFactory safe radius fits every preset top floor (BLD-006)', () 
     return { path: 'p.md', category: 'web-apps', width: 4, height: 30, depth: 3, ...over };
   }
 
-  // safeR = min(width, depth) * 0.18 — greebles must stay inside the top ring.
-  for (const category of ['web-apps', 'content', 'visualization', 'infrastructure', 'obsidian-plugins']) {
-    it(`${category}: min top-ring radius ≥ min(w,d)·0.18`, () => {
+  // safeR = min(width, depth) * 0.18 — the greeble kit is scattered within that
+  // radius of the axis at deck height, so the deck's INRADIUS has to clear it.
+  //
+  // Measured off the built geometry rather than off grid indices, because the
+  // two generators lay their buffers out differently and a preset may switch
+  // between them: take every vertex sitting at deck height, ignore the cap
+  // centre at r=0, and the smallest remaining radius is the inradius.
+  for (const category of ['web-apps', 'content', 'desktop-apps', 'visualization', 'art', 'infrastructure', 'trading', 'obsidian-plugins', 'nonsense']) {
+    it(`${category}: deck inradius ≥ min(w,d)·0.18`, () => {
       const width = 4, depth = 3;
-      const preset = presetForProject(input({ category, width, depth }))!;
-      // Non-faceted so the grid layout is intact for per-ring measurement.
-      const geo = loftTower({ ...preset.params, facetedNormals: false });
+      const preset = presetForProject(input({ category, width, depth }));
+      const geo = preset.kind === 'stack'
+        ? loftStack({ ...preset.params, facetedNormals: false })
+        : loftTower({ ...preset.params, facetedNormals: false });
       const pos = geo.getAttribute('position').array as Float32Array;
-      const m = preset.params.profile.kind === 'polygon' ? preset.params.profile.sides : preset.params.profile.samples;
-      const cols = m + 1;
-      const floors = preset.floors;
 
-      // Top ring centroid + min vertex radius.
-      let cx = 0, cz = 0;
-      for (let j = 0; j < cols; j++) { const idx = (floors * cols + j) * 3; cx += pos[idx]; cz += pos[idx + 2]; }
-      cx /= cols; cz /= cols;
       let minR = Infinity;
-      for (let j = 0; j < cols; j++) {
-        const idx = (floors * cols + j) * 3;
-        minR = Math.min(minR, Math.hypot(pos[idx] - cx, pos[idx + 2] - cz));
+      for (let i = 0; i < pos.length; i += 3) {
+        if (Math.abs(pos[i + 1] - preset.roofDeckY) > 1e-3) continue;
+        const r = Math.hypot(pos[i], pos[i + 2]);
+        if (r < 1e-6) continue; // the cap centre
+        minR = Math.min(minR, r);
       }
 
-      const safeR = Math.min(width, depth) * 0.18;
-      expect(minR).toBeGreaterThanOrEqual(safeR);
+      expect(minR).toBeLessThan(Infinity); // a deck must exist at roofDeckY
+      expect(minR).toBeGreaterThanOrEqual(Math.min(width, depth) * 0.18);
     });
   }
 });

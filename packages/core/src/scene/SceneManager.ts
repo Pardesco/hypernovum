@@ -15,7 +15,7 @@ import type { GraphEdge, EdgeType } from '../types';
 import { BuildingShader } from '../renderers/BuildingShader';
 import { GeometryFactory } from '../renderers/GeometryFactory';
 import { BuildingFactory } from '../renderers/BuildingFactory';
-import { loftTowerCached } from '../renderers/TowerLoft';
+import { loftStackCached, loftTowerCached } from '../renderers/TowerLoft';
 import { presetForProject } from '../renderers/TowerPresets';
 import { RooftopFactory } from '../renderers/RooftopFactory';
 import { NeuralCore } from '../visuals/NeuralCore';
@@ -1072,23 +1072,23 @@ export class SceneManager {
     if (this.buildingStyle === 'parametric' && project.dimensions) {
       const { width, height, depth } = project.dimensions;
       const preset = presetForProject({ path: project.path, category: project.category, width, height, depth });
-      if (preset) {
-        try {
-          const geometry = loftTowerCached(preset.params);
-          // loftTower is bottom-anchored already; normalize defensively.
-          geometry.computeBoundingBox();
-          geometry.translate(0, -geometry.boundingBox!.min.y, 0);
-          return {
-            geometry,
-            floors: preset.floors,
-            diagrid: preset.diagrid,
-            sides: preset.sides,
-            // y = the deck, which sits below the parapet lip (the bbox top)
-            topCenter: { ...preset.topCenter, y: preset.roofDeckY },
-          };
-        } catch {
-          // fall through to classic
-        }
+      try {
+        const geometry = preset.kind === 'stack'
+          ? loftStackCached(preset.params)
+          : loftTowerCached(preset.params);
+        // Both generators are bottom-anchored already; normalize defensively.
+        geometry.computeBoundingBox();
+        geometry.translate(0, -geometry.boundingBox!.min.y, 0);
+        return {
+          geometry,
+          floors: preset.floors,
+          diagrid: preset.diagrid,
+          sides: preset.sides,
+          // y = the deck, which sits below the parapet lip (the bbox top)
+          topCenter: { x: 0, z: 0, y: preset.roofDeckY },
+        };
+      } catch {
+        // fall through to classic
       }
     }
     return {

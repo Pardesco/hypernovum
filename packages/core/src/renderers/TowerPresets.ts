@@ -1,16 +1,29 @@
-import { loftRoofDeckY, loftTopCenter, type TowerLoftParams } from './TowerLoft';
+import {
+  loftRoofDeckY,
+  stackFloors,
+  stackRoofDeckY,
+  type TowerLoftParams,
+  type TowerSegment,
+  type TowerStackParams,
+} from './TowerLoft';
 
 /**
- * Category → TowerLoft preset families (BLD-003). Maps a project's category +
- * dimensions to concrete loft params, preserving the existing visual encoding
- * (priority → overall height) while giving each family a distinct silhouette.
+ * Category → building families.
  *
- * Per-project determinism: small jitter on twist/waist/lean seeded from the
- * project path, so a given note always renders the same tower (no Math.random).
- * Preset ↔ category assignment is an art call (U2) — retune the constants freely.
+ * DESIGN NOTE (2026-08-03). The families are built against the dimensions the
+ * layout actually produces, which is narrower than the generator's clamps
+ * suggest: `BinPacker` gives every building a 2–4 unit square footprint and one
+ * of four heights (3.75 / 7.5 / 12.5 / 17.5), so `floors` is only ever 4, 5 or
+ * 7. Any silhouette move smaller than ~20% of the plan radius is invisible at
+ * that scale, which is why the previous vocabulary — one profile modulated by
+ * ±12% — read as five identical tubes.
  *
- * Unmapped categories return null → the caller falls back to the classic
- * BuildingFactory silhouette, byte-for-byte as before.
+ * The camera is fixed (pan and zoom, no orbit), so distinctness comes from
+ * three things only: PLAN SHAPE, MASSING RHYTHM, and ROOFLINE. Each family
+ * below differs from every other in at least two of them.
+ *
+ * Per-project determinism: jitter is seeded from the project path, so a note
+ * always renders the same building. No Math.random.
  */
 
 export interface TowerBuildInput {
@@ -22,29 +35,31 @@ export interface TowerBuildInput {
   detailScale?: number;    // optional density multiplier (default 1)
 }
 
-export interface TowerBuildResult {
-  params: TowerLoftParams;
+interface TowerBuildBase {
   floors: number;          // → shader uFloors (floor-true windows)
-  diagrid: boolean;        // → shader uDiagrid (preset D facades)
+  diagrid: boolean;        // → shader uDiagrid
   /** Polygon facet count, or null for smooth profiles — window columns snap to it. */
   sides: number | null;
-  /** Top-ring centerline in local XZ; roof-mounted props must be offset by it. */
-  topCenter: { x: number; z: number };
   /** Deck height — below the parapet lip, which is the bounding-box top. */
   roofDeckY: number;
 }
 
-type Family = 'A' | 'B' | 'C' | 'D' | 'E';
+export type TowerBuildResult =
+  | (TowerBuildBase & { kind: 'loft'; params: TowerLoftParams })
+  | (TowerBuildBase & { kind: 'stack'; params: TowerStackParams });
+
+type Family = 'HELIX' | 'LEDGER' | 'BASTION' | 'HIVE' | 'BLOCK';
 
 const CATEGORY_FAMILY: Record<string, Family> = {
-  'web-apps': 'A',
-  content: 'B',
-  'desktop-apps': 'B',
-  visualization: 'C',
-  art: 'C',
-  infrastructure: 'D',
-  trading: 'D',
-  'obsidian-plugins': 'E', // hexagonal "Modular Hive" → faceted hexagon tower
+  'web-apps': 'HELIX',
+  content: 'LEDGER',
+  'desktop-apps': 'LEDGER',
+  infrastructure: 'BASTION',
+  trading: 'BASTION',
+  'obsidian-plugins': 'HIVE',
+  // visualization/art previously leaned; they are quiet blocks until OBELISK lands
+  visualization: 'BLOCK',
+  art: 'BLOCK',
 };
 
 function clamp(x: number, lo: number, hi: number): number {
@@ -67,21 +82,39 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-/** Which categories render as parametric towers (the rest fall back to classic). */
-export function isParametricCategory(category: string): boolean {
-  return category in CATEGORY_FAMILY;
+/**
+ * Split `total` floors across `parts` masses by weight, giving every mass at
+ * least one floor and putting any remainder in the lowest (widest) mass, which
+ * is where extra bulk reads as a plinth rather than a stub.
+ */
+function splitFloors(total: number, weights: number[]): number[] {
+  const t = Math.max(1, Math.round(total));
+  // Never ask for more masses than there are floors — the split must sum to
+  // `total` exactly, or the building stops being its encoded height.
+  const w = weights.slice(0, Math.min(weights.length, t));
+  const parts = Math.max(1, w.length);
+  const sum = w.reduce((acc, x) => acc + x, 0) || parts;
+  const out = w.map((x) => Math.max(1, Math.floor((t * x) / sum)));
+  let used = out.reduce((acc, x) => acc + x, 0);
+  let i = 0;
+  while (used < t) { out[i % parts] += 1; used += 1; i += 1; }
+  while (used > t) {
+    const k = out.findIndex((v, idx) => v > 1 && idx > 0);
+    if (k === -1) break;
+    out[k] -= 1; used -= 1;
+  }
+  return out;
 }
 
-/**
- * Build the loft params + shader hints for a project, or null for unmapped
- * categories (caller uses the classic silhouette).
- */
-export function presetForProject(input: TowerBuildInput): TowerBuildResult | null {
-  const family = CATEGORY_FAMILY[input.category];
-  if (!family) return null;
+/** Every category renders parametrically; unmapped ones get the quiet BLOCK. */
+export function isParametricCategory(_category: string): boolean {
+  return true;
+}
 
+export function presetForProject(input: TowerBuildInput): TowerBuildResult {
+  const family = CATEGORY_FAMILY[input.category] ?? 'BLOCK';
   const rng = mulberry32(hashStr(input.path));
-  const jitter = (amount: number) => (rng() * 2 - 1) * amount; // symmetric ±amount
+  const jitter = (amount: number) => (rng() * 2 - 1) * amount;
 
   const detailScale = input.detailScale ?? 1;
   const floors = Math.round(clamp((input.height / 2.5) * detailScale, 4, 28));
@@ -89,73 +122,92 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
   const a = input.width / 2;
   const b = input.depth / 2;
 
-  let params: TowerLoftParams;
-  let diagrid = false;
+  const loft = (params: TowerLoftParams, diagrid = false): TowerBuildResult => ({
+    kind: 'loft',
+    params,
+    floors,
+    diagrid,
+    sides: params.profile.kind === 'polygon' ? params.profile.sides : null,
+    roofDeckY: loftRoofDeckY(params),
+  });
+  const stack = (params: TowerStackParams, diagrid = false): TowerBuildResult => ({
+    kind: 'stack',
+    params,
+    floors: stackFloors(params),
+    diagrid,
+    sides: params.profile.kind === 'polygon' ? params.profile.sides : null,
+    roofDeckY: stackRoofDeckY(params),
+  });
 
-  // Twist is family A's signature and nobody else's. When every family twisted,
-  // none of them read as "the twisted one" — so C, D and E are straight now and
-  // A owns the move outright.
   switch (family) {
-    case 'A': // Spiral — web-apps
-      params = {
+    case 'HELIX':
+      // web-apps. A single mass wrung about its axis — the only building whose
+      // vertical edges are curves. Twist is this family's alone.
+      return loft({
         profile: { kind: 'superellipse', a, b, n: 3.5, samples: 20 },
         floors, floorHeight, taper: 0.22, twistDeg: 78 + jitter(12),
         parapet: true,
-      };
-      break;
-    case 'B': // Sculpted waist — content, desktop-apps
-      params = {
-        profile: { kind: 'superellipse', a, b, n: 4, samples: 24 },
-        floors, floorHeight, taper: 0.10,
-        waist: { depth: 0.06 + jitter(0.02), at: 0.6, width: 0.18 },
-        crown: { reduction: 0.12, start: 0.82 },
-        parapet: true,
-      };
-      break;
-    case 'C': // Leaning S-curve — visualization, art. The lean IS the move; no twist.
-      params = {
-        profile: { kind: 'superellipse', a, b, n: 2, samples: 18 },
-        floors, floorHeight, taper: 0.20,
-        lean: { dx: input.height * 0.06 * (rng() < 0.5 ? -1 : 1), dz: input.height * jitter(0.02), sCurve: true },
-        parapet: true,
-      };
-      break;
-    case 'E': // Modular Hive — obsidian-plugins: clean faceted hexagonal column.
-      // Straight: a twisted hex prism reads like the facets are sliding off.
-      params = {
+      });
+
+    case 'LEDGER': {
+      // content, desktop-apps. Rectangular slabs stacked like books, each
+      // rotated 90° from the last — the only alternating cross-plan in the city.
+      // Aspect has to be IMPOSED: the layout always hands us width === depth.
+      const slabs = clamp(Math.round(floors / 2), 2, 4);
+      const spans = splitFloors(floors, new Array(slabs).fill(1));
+      const chunky = input.category === 'desktop-apps';
+      const segments: TowerSegment[] = spans.map((f, i) => ({
+        floors: f,
+        scale: (chunky ? 0.95 : 0.88) + rng() * (chunky ? 0.05 : 0.12),
+        rotationDeg: (i % 2 === 0 ? 0 : 90) + jitter(6),
+        taper: 0.03,
+      }));
+      return stack({
+        profile: { kind: 'polygon', sides: 4, a, b: b * 0.62 },
+        segments, floorHeight, facetedNormals: true, parapet: true,
+      });
+    }
+
+    case 'BASTION': {
+      // infrastructure, trading. Concentric masses telescoping in hard steps —
+      // a staircase silhouette with a triple dark terrace. The steps are 26%
+      // and 22%, roughly 3x what the old `setbacks` clamp could express.
+      const tiers = floors >= 6 ? 3 : 2;
+      const weights = tiers === 3 ? [0.45, 0.32, 0.23] : [0.6, 0.4];
+      const spans = splitFloors(floors, weights);
+      const scales = tiers === 3
+        ? [1.0, 0.74 + jitter(0.05), 0.52 + jitter(0.05)]
+        : [1.0, 0.68 + jitter(0.05)];
+      const segments: TowerSegment[] = spans.map((f, i) => ({
+        floors: f,
+        scale: scales[i],
+        rotationDeg: 0,
+        taper: 0.05,
+      }));
+      return stack({
+        profile: { kind: 'polygon', sides: 4, a, b },
+        segments, floorHeight, facetedNormals: true, parapet: true,
+      }, true);
+    }
+
+    case 'HIVE':
+      // obsidian-plugins. Clean faceted hexagonal column. Straight: a twisted
+      // hex prism reads like the facets are sliding off.
+      return loft({
         profile: { kind: 'polygon', sides: 6, a, b },
         floors, floorHeight, taper: 0.14,
         facetedNormals: true, parapet: true,
-      };
-      break;
-    case 'D': // Faceted octagon + setbacks — infrastructure, trading
-    default:
-      params = {
-        profile: { kind: 'polygon', sides: 8, a, b },
-        floors, floorHeight, taper: 0.25,
-        // Setback placement is the classic skyline-variety generator; it was
-        // hardcoded to 0.4/0.7 on every D tower in every vault. Jittered, with
-        // an occasional third step, it does the job it was there to do.
-        setbacks: rng() < 0.35
-          ? [
-            { at: 0.26 + rng() * 0.10, depth: 0.07 },
-            { at: 0.50 + rng() * 0.12, depth: 0.07 },
-            { at: 0.74 + rng() * 0.12, depth: 0.06 },
-          ]
-          : [
-            { at: 0.32 + rng() * 0.16, depth: 0.08 },
-            { at: 0.62 + rng() * 0.18, depth: 0.08 },
-          ],
-        facetedNormals: true, parapet: true,
-      };
-      diagrid = true;
-      break;
-  }
+      });
 
-  const sides = params.profile.kind === 'polygon' ? params.profile.sides : null;
-  return {
-    params, floors, diagrid, sides,
-    topCenter: loftTopCenter(params),
-    roofDeckY: loftRoofDeckY(params),
-  };
+    case 'BLOCK':
+    default:
+      // Everything unmapped, plus visualization/art until OBELISK lands. A
+      // deliberately ordinary near-straight tower — the foil that lets the
+      // exotic silhouettes register as exotic.
+      return stack({
+        profile: { kind: 'superellipse', a, b, n: 3 + rng() * 5, samples: 20 },
+        segments: [{ floors, scale: 1, rotationDeg: 0, taper: 0.04 + rng() * 0.06 }],
+        floorHeight, parapet: true,
+      });
+  }
 }

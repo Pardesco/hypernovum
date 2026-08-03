@@ -5,8 +5,8 @@ import { loftTower, loftRoofDeckY, loftVertexCount, type TowerLoftParams } from 
 // The four §7.11 preset families (as raw params — BLD-003 wires them to data).
 const PRESETS: Record<string, TowerLoftParams> = {
   A_spiral: { profile: { kind: 'superellipse', a: 1.5, b: 1.2, n: 3.5, samples: 20 }, floors: 12, floorHeight: 2.5, taper: 0.22, twistDeg: 65 },
-  B_sculpted: { profile: { kind: 'superellipse', a: 1.4, b: 1.4, n: 4, samples: 24 }, floors: 16, floorHeight: 2.5, taper: 0.1, waist: { depth: 0.06, at: 0.6, width: 0.18 }, crown: { reduction: 0.12, start: 0.82 } },
-  C_curved: { profile: { kind: 'superellipse', a: 1.3, b: 1.0, n: 2, samples: 18 }, floors: 10, floorHeight: 2.5, taper: 0.2, twistDeg: 10, lean: { dx: 1.5, dz: 0, sCurve: true } },
+  B_block: { profile: { kind: 'superellipse', a: 1.4, b: 1.4, n: 4, samples: 24 }, floors: 16, floorHeight: 2.5, taper: 0.1, parapet: true },
+  C_hive: { profile: { kind: 'polygon', sides: 6, a: 1.3, b: 1.0 }, floors: 10, floorHeight: 2.5, taper: 0.2, facetedNormals: true },
   D_faceted: { profile: { kind: 'polygon', sides: 8, a: 1.4, b: 1.4 }, floors: 14, floorHeight: 2.5, taper: 0.25, twistDeg: 30, setbacks: [{ at: 0.4, depth: 0.08 }, { at: 0.7, depth: 0.08 }], facetedNormals: true },
 };
 
@@ -61,7 +61,7 @@ describe('invariants 2/3 — finite + bottom-anchored + exact height', () => {
 
 describe('invariant 4 — UVs: v monotonic per ring, u in [0,1]', () => {
   it('u spans 0..1 and v increases with height', () => {
-    const p = PRESETS.B_sculpted;
+    const p = PRESETS.B_block;
     const geo = loftTower(p);
     const uv = geo.getAttribute('uv').array as Float32Array;
     let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
@@ -80,8 +80,8 @@ describe('invariant 5 — no zero-area triangles at max-clamp params', () => {
   it('extreme params still produce finite, non-degenerate triangles', () => {
     const geo = loftTower({
       profile: { kind: 'superellipse', a: 1.4, b: 1.4, n: 5, samples: 32 },
-      floors: 40, floorHeight: 2.5, taper: 0.35, bulge: 0.08, twistDeg: 120,
-      waist: { depth: 0.10, at: 0.6, width: 0.2 }, crown: { reduction: 0.20, start: 0.8 },
+      floors: 40, floorHeight: 2.5, taper: 0.35, twistDeg: 120,
+      setbacks: [{ at: 0.4, depth: 0.12 }, { at: 0.7, depth: 0.12 }], parapet: true,
     });
     const geoNI = geo.toNonIndexed();
     const pos = geoNI.getAttribute('position').array as Float32Array;
@@ -127,14 +127,12 @@ describe('invariant 7 — clamp behavior', () => {
 
 describe('invariant 8 — radial footprint bounded by base × (1+β)', () => {
   for (const [name, params] of Object.entries(PRESETS)) {
-    it(`${name}: every ring radius ≤ base radius × (1+bulge)`, () => {
+    it(`${name}: every ring radius ≤ the base ring radius`, () => {
       // Strip faceting so the indexed grid layout is intact (same shape).
       const geo = loftTower({ ...params, facetedNormals: false });
       const pos = positions(geo);
       const floors = Math.round(params.floors);
-      const bulge = params.bulge ?? 0;
-      // Per-ring centerline via lean; here rings are near-centered, so measure
-      // radius from each ring's own centroid.
+      // Rings are centred on the axis, so measure radius from each ring's centroid.
       const m = params.profile.kind === 'polygon' ? params.profile.sides : params.profile.samples;
       const cols = m + 1;
       const ringRadius: number[] = [];
@@ -147,7 +145,7 @@ describe('invariant 8 — radial footprint bounded by base × (1+β)', () => {
         ringRadius.push(maxR);
       }
       const baseR = ringRadius[0];
-      for (const r of ringRadius) expect(r).toBeLessThanOrEqual(baseR * (1 + bulge) + 1e-4);
+      for (const r of ringRadius) expect(r).toBeLessThanOrEqual(baseR + 1e-4);
     });
   }
 });
