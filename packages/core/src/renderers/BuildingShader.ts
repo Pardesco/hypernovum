@@ -57,9 +57,35 @@ export class BuildingShader {
       // Compile shaders
       renderer.compile(testScene, testCamera);
 
+      // Resolve the deferred link BEFORE the material is disposed. three
+      // (r160) probes KHR_parallel_shader_compile while building material
+      // parameters, which switches ANGLE into async program linking, and
+      // compile() defers every link-status query to first use. Deleting a
+      // program whose link was never queried makes the driver's cleanup path
+      // query the dead program internally — 12x "GL_INVALID_VALUE: Program
+      // object expected" in the console on the first city build of every
+      // session. Querying LINK_STATUS settles the link so disposal below is
+      // clean, and doubles as the real compile check this method previously
+      // never performed (compile() does not throw on GLSL errors).
+      const gl = renderer.getContext();
+      const programInfo = (
+        renderer as unknown as {
+          properties: { get(o: unknown): { currentProgram?: { program: WebGLProgram } } };
+        }
+      ).properties.get(testMaterial).currentProgram;
+      const linked = programInfo
+        ? (gl.getProgramParameter(programInfo.program, gl.LINK_STATUS) as boolean)
+        : true; // renderer internals changed shape — keep the old "assume ok"
+
       // Cleanup
       testGeom.dispose();
       testMaterial.dispose();
+
+      if (!linked) {
+        debugLog('Shader program failed to link, using fallback materials');
+        this.compilationFailed = true;
+        return false;
+      }
 
       debugLog('Shader compilation successful');
       return true;
