@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 — parametric buildings by default (2026-08-03)
 
 ### Changed
 
