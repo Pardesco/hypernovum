@@ -1067,7 +1067,7 @@ export class SceneManager {
     floors: number;
     diagrid: boolean;
     sides: number | null;
-    topCenter: { x: number; z: number };
+    topCenter: { x: number; z: number; y?: number };
   } {
     if (this.buildingStyle === 'parametric' && project.dimensions) {
       const { width, height, depth } = project.dimensions;
@@ -1083,7 +1083,8 @@ export class SceneManager {
             floors: preset.floors,
             diagrid: preset.diagrid,
             sides: preset.sides,
-            topCenter: preset.topCenter,
+            // y = the deck, which sits below the parapet lip (the bbox top)
+            topCenter: { ...preset.topCenter, y: preset.roofDeckY },
           };
         } catch {
           // fall through to classic

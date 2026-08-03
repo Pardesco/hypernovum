@@ -94,6 +94,7 @@ void main() {
   // or their taper, waist and facets are literally invisible — which is also
   // what made facetedNormals pay 3x the vertices for nothing. viewMatrix is a
   // three.js built-in, so the key and up directions stay fixed in world space.
+  float roofMask = 0.0;
   if (uFloors > 0.5) {
     vec3 N = normalize(vNormalV);
     vec3 keyDir = normalize(mat3(viewMatrix) * vec3(0.45, 0.80, 0.40));
@@ -101,10 +102,19 @@ void main() {
     float ndl = max(dot(N, keyDir), 0.0);
     float hemi = 0.85 + 0.15 * dot(N, upDir);
     wallColor *= (0.55 + 0.45 * ndl) * hemi;
+
+    // Roof deck. The camera looks DOWN at roofs more than at any facade, and
+    // the cap inherits v=1 — the brightest value the wall gradient produces —
+    // so an untreated roof was the single brightest surface on the building, in
+    // pure status color. Dark deck instead: greebles and beacons now read
+    // against it, and the parapet lip reads as a lip.
+    roofMask = smoothstep(0.86, 0.97, dot(N, upDir));
+    wallColor = mix(wallColor, wallColor * 0.30, roofMask);
   }
 
   // === COMBINE ===
-  vec3 finalColor = mix(wallColor, windowColor, isWindow * lightOn);
+  // Windows never run across the roof deck.
+  vec3 finalColor = mix(wallColor, windowColor, isWindow * lightOn * (1.0 - roofMask));
 
   // === GLITCH EFFECTS (Blocked projects) ===
   if (uGlitch > 0.0) {

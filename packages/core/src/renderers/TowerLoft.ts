@@ -28,6 +28,34 @@ export interface TowerLoftParams {
   lean?: { dx: number; dz: number; sCurve?: boolean };
   setbacks?: { at: number; depth: number }[];
   facetedNormals?: boolean;  // crisp per-facet normals (polygon / preset D)
+  parapet?: boolean;         // raised roof lip + recessed deck (BLD-P2)
+}
+
+// Parapet proportions. The lip is folded INSIDE the encoded height (the wall is
+// shortened to make room) so total height still equals floors·floorHeight —
+// "height encodes priority" stays exact — and it steps INWARD, never outward,
+// so the footprint invariant and the foundation hit pad are unaffected.
+const PARAPET = {
+  lipFrac: 0.35,    // of one floor height
+  maxFrac: 0.12,    // never more than this fraction of total height
+  inset: 0.06,      // step inward at the top of the lip
+  deckDrop: 0.6,    // deck sits this fraction of the lip below its top
+};
+
+function resolveParapet(params: TowerLoftParams): { lip: number; deckY: number; ringH: number; H: number } {
+  const floors = Math.round(clamp(params.floors, CLAMP.floors[0], CLAMP.floors[1]));
+  const floorHeight = params.floorHeight > 0 ? params.floorHeight : 2.5;
+  const H = floors * floorHeight;
+  // Exact passthrough when off: ringH must stay the literal floorHeight so the
+  // no-parapet geometry is bit-for-bit what it was before this existed.
+  if (!params.parapet) return { lip: 0, deckY: H, ringH: floorHeight, H };
+  const lip = Math.min(PARAPET.lipFrac * floorHeight, H * PARAPET.maxFrac);
+  return { lip, deckY: H - lip * PARAPET.deckDrop, ringH: (H - lip) / floors, H };
+}
+
+/** Height of the walkable roof deck — where rooftop props actually sit. */
+export function loftRoofDeckY(params: TowerLoftParams): number {
+  return resolveParapet(params).deckY;
 }
 
 // --- Clamp ranges (§7.11) ---
@@ -142,7 +170,30 @@ export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
   };
 
   const cols = m + 1;          // duplicate seam column so u reaches 1
-  const rings = floors + 1;
+  const par = resolveParapet(params);
+
+  // Ring stack: floors+1 wall rings, then optionally three parapet rings — the
+  // outer lip, a step inward at the same height, and the inner face dropping to
+  // the deck. The generic strip loop below gives each the correct outward
+  // normal for free: the inward step at constant y resolves to up-facing, and
+  // the constant-radius drop resolves to inward-facing.
+  interface Ring { y: number; s: number; th: number; ox: number; oz: number; v: number }
+  const ringStack: Ring[] = [];
+  for (let i = 0; i <= floors; i++) {
+    const v = i / floors;
+    const off = leanAt(v);
+    ringStack.push({ y: i * par.ringH, s: scaleAt(v), th: twistAt(v), ox: off.x, oz: off.z, v });
+  }
+  if (par.lip > 0) {
+    const sTop = scaleAt(1), thTop = twistAt(1), offTop = leanAt(1);
+    const sInner = sTop * (1 - PARAPET.inset);
+    // v pinned to 1 so the window grid never runs onto the parapet.
+    ringStack.push({ y: par.H, s: sTop, th: thTop, ox: offTop.x, oz: offTop.z, v: 1 });
+    ringStack.push({ y: par.H, s: sInner, th: thTop, ox: offTop.x, oz: offTop.z, v: 1 });
+    ringStack.push({ y: par.deckY, s: sInner, th: thTop, ox: offTop.x, oz: offTop.z, v: 1 });
+  }
+
+  const rings = ringStack.length;
   const gridVerts = cols * rings;
   const totalVerts = gridVerts + 1; // + roof-cap center
 
@@ -150,38 +201,34 @@ export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
   const uvs = new Float32Array(totalVerts * 2);
 
   for (let i = 0; i < rings; i++) {
-    const v = i / floors;
-    const s = scaleAt(v);
-    const th = twistAt(v);
-    const cth = Math.cos(th), sth = Math.sin(th);
-    const off = leanAt(v);
-    const y = i * floorHeight;
+    const r = ringStack[i];
+    const cth = Math.cos(r.th), sth = Math.sin(r.th);
     for (let j = 0; j < cols; j++) {
       const p = profile[j % m];
-      const sx = p.x * s, sz = p.z * s;
-      const x = sx * cth - sz * sth + off.x;
-      const z = sx * sth + sz * cth + off.z;
+      const sx = p.x * r.s, sz = p.z * r.s;
+      const x = sx * cth - sz * sth + r.ox;
+      const z = sx * sth + sz * cth + r.oz;
       const idx = i * cols + j;
       positions[idx * 3] = x;
-      positions[idx * 3 + 1] = y;
+      positions[idx * 3 + 1] = r.y;
       positions[idx * 3 + 2] = z;
       uvs[idx * 2] = j / m;
-      uvs[idx * 2 + 1] = v;
+      uvs[idx * 2 + 1] = r.v;
     }
   }
 
-  // Roof-cap center at the top ring's centerline.
+  // Roof-cap center on the top ring's centerline, at deck level.
   const topOff = leanAt(1);
   const capIdx = gridVerts;
   positions[capIdx * 3] = topOff.x;
-  positions[capIdx * 3 + 1] = H;
+  positions[capIdx * 3 + 1] = par.deckY;
   positions[capIdx * 3 + 2] = topOff.z;
   uvs[capIdx * 2] = 0.5;
   uvs[capIdx * 2 + 1] = 1;
 
-  // Indices — wall quads (2 tris each) + roof-cap fan.
+  // Indices — strip quads (2 tris each) + roof-cap fan.
   const indices: number[] = [];
-  for (let i = 0; i < floors; i++) {
+  for (let i = 0; i < rings - 1; i++) {
     for (let j = 0; j < m; j++) {
       const a = i * cols + j;
       const b = i * cols + j + 1;
@@ -190,7 +237,7 @@ export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
       indices.push(a, b, d, b, c, d); // outward-facing winding
     }
   }
-  const topBase = floors * cols;
+  const topBase = (rings - 1) * cols;
   for (let j = 0; j < m; j++) {
     indices.push(topBase + j, capIdx, topBase + j + 1); // fan → upward normal
   }
@@ -259,5 +306,6 @@ export function loftVertexCount(params: TowerLoftParams): number {
   const m = params.profile.kind === 'polygon'
     ? Math.round(clamp(params.profile.sides, CLAMP.sides[0], CLAMP.sides[1]))
     : Math.round(clamp(params.profile.samples, CLAMP.samples[0], CLAMP.samples[1]));
-  return (m + 1) * (floors + 1) + 1;
+  // Parapet adds three rings: outer lip, inward step, inner face.
+  return (m + 1) * (floors + 1 + (params.parapet ? 3 : 0)) + 1;
 }

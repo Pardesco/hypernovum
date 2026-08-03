@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { loftTower, loftVertexCount, type TowerLoftParams } from '../src/renderers/TowerLoft';
+import * as THREE from 'three';
+import { loftTower, loftRoofDeckY, loftVertexCount, type TowerLoftParams } from '../src/renderers/TowerLoft';
 
 // The four §7.11 preset families (as raw params — BLD-003 wires them to data).
 const PRESETS: Record<string, TowerLoftParams> = {
@@ -149,4 +150,55 @@ describe('invariant 8 — radial footprint bounded by base × (1+β)', () => {
       for (const r of ringRadius) expect(r).toBeLessThanOrEqual(baseR * (1 + bulge) + 1e-4);
     });
   }
+});
+
+describe('parapet (BLD-P2)', () => {
+  const base: TowerLoftParams = {
+    profile: { kind: 'superellipse', a: 2, b: 1.6, n: 3.5, samples: 20 },
+    floors: 12, floorHeight: 2.5, taper: 0.20,
+  };
+  const H = 12 * 2.5;
+
+  it('is off by default and leaves geometry bit-for-bit unchanged', () => {
+    const a = loftTower(base).getAttribute('position').array as Float32Array;
+    const b = loftTower({ ...base, parapet: false }).getAttribute('position').array as Float32Array;
+    expect(Array.from(a)).toEqual(Array.from(b));
+    expect(loftVertexCount(base)).toBe(21 * 13 + 1);
+  });
+
+  it('folds the lip INSIDE the encoded height — priority encoding stays exact', () => {
+    const geo = loftTower({ ...base, parapet: true });
+    expect(geo.boundingBox!.max.y).toBeCloseTo(H, 4);
+    expect(geo.boundingBox!.min.y).toBeCloseTo(0, 4);
+  });
+
+  it('steps inward, never outward — footprint and hit pad unaffected', () => {
+    const plain = loftTower(base);
+    const par = loftTower({ ...base, parapet: true });
+    const maxR = (g: THREE.BufferGeometry) => {
+      const p = g.getAttribute('position').array as Float32Array;
+      let r = 0;
+      for (let i = 0; i < p.length; i += 3) r = Math.max(r, Math.hypot(p[i], p[i + 2]));
+      return r;
+    };
+    expect(maxR(par)).toBeLessThanOrEqual(maxR(plain) + 1e-6);
+  });
+
+  it('adds exactly three rings and keeps every position finite', () => {
+    const p = { ...base, parapet: true };
+    const geo = loftTower(p);
+    expect(geo.getAttribute('position').count).toBe(loftVertexCount(p));
+    expect(loftVertexCount(p)).toBe(21 * 16 + 1);
+    const pos = geo.getAttribute('position').array as Float32Array;
+    expect(pos.every(Number.isFinite)).toBe(true);
+    const nrm = geo.getAttribute('normal').array as Float32Array;
+    expect(nrm.every(Number.isFinite)).toBe(true);
+  });
+
+  it('puts the deck below the lip so roof props do not float', () => {
+    const deck = loftRoofDeckY({ ...base, parapet: true });
+    expect(deck).toBeLessThan(H);
+    expect(deck).toBeGreaterThan(H - 2.5); // within one floor of the top
+    expect(loftRoofDeckY(base)).toBeCloseTo(H, 4); // no parapet → deck is the top
+  });
 });

@@ -1,4 +1,4 @@
-import { loftTopCenter, type TowerLoftParams } from './TowerLoft';
+import { loftRoofDeckY, loftTopCenter, type TowerLoftParams } from './TowerLoft';
 
 /**
  * Category → TowerLoft preset families (BLD-003). Maps a project's category +
@@ -30,6 +30,8 @@ export interface TowerBuildResult {
   sides: number | null;
   /** Top-ring centerline in local XZ; roof-mounted props must be offset by it. */
   topCenter: { x: number; z: number };
+  /** Deck height — below the parapet lip, which is the bounding-box top. */
+  roofDeckY: number;
 }
 
 type Family = 'A' | 'B' | 'C' | 'D' | 'E';
@@ -98,6 +100,7 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
       params = {
         profile: { kind: 'superellipse', a, b, n: 3.5, samples: 20 },
         floors, floorHeight, taper: 0.22, twistDeg: 78 + jitter(12),
+        parapet: true,
       };
       break;
     case 'B': // Sculpted waist — content, desktop-apps
@@ -106,6 +109,7 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
         floors, floorHeight, taper: 0.10,
         waist: { depth: 0.06 + jitter(0.02), at: 0.6, width: 0.18 },
         crown: { reduction: 0.12, start: 0.82 },
+        parapet: true,
       };
       break;
     case 'C': // Leaning S-curve — visualization, art. The lean IS the move; no twist.
@@ -113,6 +117,7 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
         profile: { kind: 'superellipse', a, b, n: 2, samples: 18 },
         floors, floorHeight, taper: 0.20,
         lean: { dx: input.height * 0.06 * (rng() < 0.5 ? -1 : 1), dz: input.height * jitter(0.02), sCurve: true },
+        parapet: true,
       };
       break;
     case 'E': // Modular Hive — obsidian-plugins: clean faceted hexagonal column.
@@ -120,7 +125,7 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
       params = {
         profile: { kind: 'polygon', sides: 6, a, b },
         floors, floorHeight, taper: 0.14,
-        facetedNormals: true,
+        facetedNormals: true, parapet: true,
       };
       break;
     case 'D': // Faceted octagon + setbacks — infrastructure, trading
@@ -141,12 +146,16 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult | nul
             { at: 0.32 + rng() * 0.16, depth: 0.08 },
             { at: 0.62 + rng() * 0.18, depth: 0.08 },
           ],
-        facetedNormals: true,
+        facetedNormals: true, parapet: true,
       };
       diagrid = true;
       break;
   }
 
   const sides = params.profile.kind === 'polygon' ? params.profile.sides : null;
-  return { params, floors, diagrid, sides, topCenter: loftTopCenter(params) };
+  return {
+    params, floors, diagrid, sides,
+    topCenter: loftTopCenter(params),
+    roofDeckY: loftRoofDeckY(params),
+  };
 }

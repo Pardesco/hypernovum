@@ -39,21 +39,24 @@ export class RooftopFactory {
   }
 
   /**
-   * @param topCenter Local XZ of the roof's centerline. Leaning parametric
-   *   presets move it by up to 0.12·H — several times the safe radius — so
-   *   without this the whole kit floats in mid-air beside the tower.
+   * @param roofAnchor Where the roof actually is, in the building's local space.
+   *   `x`/`z`: the centerline — leaning parametric presets move it by up to
+   *   0.12·H, several times the safe radius, so without this the whole kit
+   *   floats in mid-air beside the tower. `y`: the deck, when it is not simply
+   *   the top of the bounding box — a parapet's lip is the highest point, but
+   *   props sit on the recessed deck below it.
    */
   static createRooftop(
     project: ProjectData,
     buildingGeo: THREE.BufferGeometry,
-    topCenter: { x: number; z: number } = { x: 0, z: 0 },
+    roofAnchor: { x: number; z: number; y?: number } = { x: 0, z: 0 },
   ): RooftopKit {
     const { width, height, depth } = project.dimensions!;
     const pointed = POINTED_CATEGORIES.has(project.category);
 
     buildingGeo.computeBoundingBox();
-    const topY = buildingGeo.boundingBox!.max.y;
-    const cx = topCenter.x, cz = topCenter.z;
+    const topY = roofAnchor.y ?? buildingGeo.boundingBox!.max.y;
+    const cx = roofAnchor.x, cz = roofAnchor.z;
 
     // Critical projects get a warning beacon even on pointed roofs
     const wantsBeacon = project.priority === 'critical';
