@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { loftStack, loftTower, loftTowerCached, clearLoftCache, type TowerLoftParams } from '../src/renderers/TowerLoft';
 import { presetForProject, type TowerBuildInput } from '../src/renderers/TowerPresets';
+import { RooftopFactory } from '../src/renderers/RooftopFactory';
+import type { ProjectData } from '../src/types';
 
 const sample: TowerLoftParams = {
   profile: { kind: 'superellipse', a: 1.5, b: 1.2, n: 3.5, samples: 20 },
@@ -32,7 +34,7 @@ describe('loftTowerCached (BLD-006)', () => {
   });
 });
 
-describe('RooftopFactory safe radius fits every preset top floor (BLD-006)', () => {
+describe('RooftopFactory kit fits the deck it lands on (BLD-006)', () => {
   function input(over: Partial<TowerBuildInput>): TowerBuildInput {
     return { path: 'p.md', category: 'web-apps', width: 4, height: 30, depth: 3, ...over };
   }
@@ -45,14 +47,26 @@ describe('RooftopFactory safe radius fits every preset top floor (BLD-006)', () 
   // between them: take every vertex sitting at deck height, ignore the cap
   // centre at r=0, and the smallest remaining radius is the inradius.
   for (const category of ['web-apps', 'content', 'desktop-apps', 'visualization', 'art', 'infrastructure', 'trading', 'obsidian-plugins', 'nonsense']) {
-    it(`${category}: deck inradius ≥ min(w,d)·0.18`, () => {
+    it(`${category}: any greeble kit fits on the deck it is placed on`, () => {
       const width = 4, depth = 3;
       const preset = presetForProject(input({ category, width, depth }));
       const geo = preset.kind === 'stack'
         ? loftStack({ ...preset.params, facetedNormals: false })
         : loftTower({ ...preset.params, facetedNormals: false });
-      const pos = geo.getAttribute('position').array as Float32Array;
 
+      const project: ProjectData = {
+        path: 'p.md', title: 'P', status: 'active', priority: 'medium', stage: 'active',
+        category, scope: 4, lastModified: 0, recentActivity: false, health: 80, noteCount: 1,
+        dimensions: { width, height: 30, depth }, position: { x: 0, y: 0, z: 0 },
+      };
+      const kit = RooftopFactory.createRooftop(project, geo, {
+        x: 0, z: 0, y: preset.roofDeckY, pointed: preset.pointedRoof,
+      });
+      // Families that taper to a point or a knife edge declare it and get no
+      // kit — that is the contract, not a deck wide enough for HVAC blocks.
+      if (kit.detail === null) return;
+
+      const pos = geo.getAttribute('position').array as Float32Array;
       let minR = Infinity;
       for (let i = 0; i < pos.length; i += 3) {
         if (Math.abs(pos[i + 1] - preset.roofDeckY) > 1e-3) continue;
@@ -60,7 +74,6 @@ describe('RooftopFactory safe radius fits every preset top floor (BLD-006)', () 
         if (r < 1e-6) continue; // the cap centre
         minR = Math.min(minR, r);
       }
-
       expect(minR).toBeLessThan(Infinity); // a deck must exist at roofDeckY
       expect(minR).toBeGreaterThanOrEqual(Math.min(width, depth) * 0.18);
     });

@@ -25,6 +25,13 @@ export interface TowerLoftParams {
   setbacks?: { at: number; depth: number }[];
   facetedNormals?: boolean;  // crisp per-facet normals (polygon profiles)
   parapet?: boolean;         // raised roof lip + recessed deck (BLD-P2)
+  /**
+   * Minimum geometric rings, independent of `floors`. A 90-degree twist across
+   * the 5-8 rings the layout actually produces reads as wrung rather than
+   * helical. Safe to decouple: the shader takes its window ROW count from
+   * `uFloors`, not from `v`, so rows stay floor-true however finely we sample.
+   */
+  minRings?: number;
 }
 
 /*
@@ -96,7 +103,7 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 }
 
 /** One horizontal ring of the loft: plan scale, plan rotation, height, and its v. */
-interface Ring { y: number; s: number; th: number; v: number }
+interface Ring { y: number; s: number; th: number; v: number; shear?: number }
 
 /** Sample the base (unit) profile ring: M points, x∈[-a,a], z∈[-b,b]. */
 function sampleProfile(profile: TowerProfile): { pts: { x: number; z: number }[]; m: number } {
@@ -166,10 +173,11 @@ export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
   // the deck. The generic strip loop below gives each the correct outward
   // normal for free: the inward step at constant y resolves to up-facing, and
   // the constant-radius drop resolves to inward-facing.
+  const ringCount = Math.max(floors, Math.round(clamp(params.minRings ?? 0, 0, 64)));
   const ringStack: Ring[] = [];
-  for (let i = 0; i <= floors; i++) {
-    const v = i / floors;
-    ringStack.push({ y: i * par.ringH, s: scaleAt(v), th: twistAt(v), v });
+  for (let i = 0; i <= ringCount; i++) {
+    const v = i / ringCount;
+    ringStack.push({ y: v * (par.H - par.lip), s: scaleAt(v), th: twistAt(v), v });
   }
   if (par.lip > 0) {
     const sTop = scaleAt(1), thTop = twistAt(1);
@@ -253,6 +261,17 @@ export interface TowerSegment {
   scale: number;          // plan scale relative to the shared profile
   rotationDeg?: number;   // plan rotation of this mass
   taper?: number;         // taper within this mass
+  /** Explicit end scale — overrides `taper`. Lets a mass close to a point. */
+  scaleTop?: number;
+}
+
+/** A parallel column fused to the main stack — the cluster form. */
+export interface TowerSatellite {
+  dx: number;             // plan offset from the axis
+  dz: number;
+  floors: number;
+  scale: number;
+  rotationDeg?: number;
 }
 
 export interface TowerStackParams {
@@ -262,6 +281,15 @@ export interface TowerStackParams {
   floorHeight: number;
   facetedNormals?: boolean;
   parapet?: boolean;      // parapet on the topmost mass
+  /** Extra columns fused alongside the stack, each a closed prism of its own. */
+  satellites?: TowerSatellite[];
+  /**
+   * Cut the top ring on a diagonal, as a fraction of total height. The roof
+   * plane tilts across the long plan axis — the only asymmetric roofline in
+   * the city. Folded inside the encoded height, and mutually exclusive with
+   * `parapet` (a slashed roof has no rail).
+   */
+  shear?: number;
 }
 
 /**
@@ -289,10 +317,11 @@ export function loftStack(params: TowerStackParams): THREE.BufferGeometry {
       scale: clamp(s.scale, CLAMP.segScale[0], CLAMP.segScale[1]),
       rot: ((Number.isFinite(s.rotationDeg) ? s.rotationDeg! : 0) * Math.PI) / 180,
       taper: clamp(s.taper ?? 0, CLAMP.segTaper[0], CLAMP.segTaper[1]),
+      scaleTop: s.scaleTop === undefined ? undefined : clamp(s.scaleTop, 0.02, 1),
     }));
   if (segs.length === 0) {
     debugLog('[TowerStack] no segments; falling back to a single unit mass');
-    segs.push({ floors: 4, scale: 1, rot: 0, taper: 0 });
+    segs.push({ floors: 4, scale: 1, rot: 0, taper: 0, scaleTop: undefined });
   }
 
   const totalFloors = segs.reduce((n, s) => n + s.floors, 0);
@@ -304,6 +333,10 @@ export function loftStack(params: TowerStackParams): THREE.BufferGeometry {
   // only shortens the TOP mass — total height still equals totalFloors·floorHeight.
   const lip = params.parapet ? Math.min(PARAPET.lipFrac * floorHeight, H * PARAPET.maxFrac) : 0;
   const deckY = H - lip * PARAPET.deckDrop;
+  // Shear is folded inside H: the ring's mean stays put and the cut tilts about
+  // it, so the tallest corner lands exactly at H. Never combined with a parapet.
+  const shearFrac = lip > 0 ? 0 : clamp(params.shear ?? 0, 0, 0.35);
+  const shear = shearFrac * H * 0.5;
 
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -313,16 +346,45 @@ export function loftStack(params: TowerStackParams): THREE.BufferGeometry {
     uvs.push(u, v);
     return positions.length / 3 - 1;
   };
-  const ringVerts = (r: Ring, floorBase: number, floorTop: number) => {
+  // Widest |x| in the plan — normalises the shear so the cut is a clean plane.
+  let aMax = 1e-6;
+  for (const p of profile) aMax = Math.max(aMax, Math.abs(p.x));
+
+  const ringVerts = (r: Ring, ox = 0, oz = 0) => {
     const cth = Math.cos(r.th), sth = Math.sin(r.th);
     const first = positions.length / 3;
     for (let j = 0; j < cols; j++) {
       const p = profile[j % m];
       const sx = p.x * r.s, sz = p.z * r.s;
-      push(sx * cth - sz * sth, r.y, sx * sth + sz * cth, j / m, r.v);
+      // Shear tilts this ring across the plan's long axis, per vertex.
+      const dy = (r.shear ?? 0) * (p.x / aMax);
+      push(sx * cth - sz * sth + ox, r.y + dy, sx * sth + sz * cth + oz, j / m, r.v);
     }
-    void floorBase; void floorTop;
     return first;
+  };
+
+  /** Emit one closed prism (bottom cap, walls, top cap) from a ring list. */
+  const emitPrism = (rings: Ring[], ox = 0, oz = 0) => {
+    const ringStart = rings.map((r) => ringVerts(r, ox, oz));
+    const botCenter = push(ox, rings[0].y, oz, 0.5, rings[0].v);
+    for (let j = 0; j < m; j++) {
+      indices.push(ringStart[0] + j + 1, botCenter, ringStart[0] + j);
+    }
+    for (let i = 0; i < rings.length - 1; i++) {
+      for (let j = 0; j < m; j++) {
+        const a = ringStart[i] + j;
+        const b = ringStart[i] + j + 1;
+        const c = ringStart[i + 1] + j + 1;
+        const d = ringStart[i + 1] + j;
+        indices.push(a, b, d, b, c, d);
+      }
+    }
+    const last = rings.length - 1;
+    // A sheared top ring has no single height; anchor the cap at its mean.
+    const topCenter = push(ox, rings[last].y, oz, 0.5, rings[last].v);
+    for (let j = 0; j < m; j++) {
+      indices.push(ringStart[last] + j, topCenter, ringStart[last] + j + 1);
+    }
   };
 
   let floorCursor = 0;
@@ -330,17 +392,22 @@ export function loftStack(params: TowerStackParams): THREE.BufferGeometry {
     const isTop = segIndex === segs.length - 1;
     const segBaseY = floorCursor * floorHeight;
     // The top mass gives up `lip` of its height so the parapet fits inside H.
-    const segH = seg.floors * floorHeight - (isTop ? lip : 0);
+    const segH = seg.floors * floorHeight - (isTop ? lip + shear : 0);
     const ringH = segH / seg.floors;
 
     const rings: Ring[] = [];
     for (let i = 0; i <= seg.floors; i++) {
       const t = i / seg.floors;
+      // scaleTop wins over taper: it lets a mass close to a point (a spire).
+      const s = seg.scaleTop !== undefined
+        ? seg.scale + (seg.scaleTop - seg.scale) * t
+        : seg.scale * (1 - seg.taper * t);
       rings.push({
         y: segBaseY + i * ringH,
-        s: seg.scale * (1 - seg.taper * t),
+        s: Math.max(s, 0.02),
         th: seg.rot,
         v: (floorCursor + i) / totalFloors,
+        shear: isTop && i === seg.floors ? shear : 0,
       });
     }
     if (isTop && lip > 0) {
@@ -351,33 +418,27 @@ export function loftStack(params: TowerStackParams): THREE.BufferGeometry {
       rings.push({ y: deckY, s: sInner, th: seg.rot, v: 1 });
     }
 
-    const ringStart = rings.map((r) => ringVerts(r, floorCursor, floorCursor + seg.floors));
-
-    // Bottom cap — faces down. Every mass gets one: a rotated or wider mass can
-    // overhang the one below, and an open underside would show through.
-    const botCenter = push(0, rings[0].y, 0, 0.5, rings[0].v);
-    for (let j = 0; j < m; j++) {
-      indices.push(ringStart[0] + j + 1, botCenter, ringStart[0] + j);
-    }
-    // Walls
-    for (let i = 0; i < rings.length - 1; i++) {
-      for (let j = 0; j < m; j++) {
-        const a = ringStart[i] + j;
-        const b = ringStart[i] + j + 1;
-        const c = ringStart[i + 1] + j + 1;
-        const d = ringStart[i + 1] + j;
-        indices.push(a, b, d, b, c, d);
-      }
-    }
-    // Top cap — faces up; on the top mass this is the recessed deck.
-    const last = rings.length - 1;
-    const topCenter = push(0, rings[last].y, 0, 0.5, rings[last].v);
-    for (let j = 0; j < m; j++) {
-      indices.push(ringStart[last] + j, topCenter, ringStart[last] + j + 1);
-    }
-
+    // Every mass is closed: a rotated or wider mass can overhang the one below,
+    // and an open underside would show through.
+    emitPrism(rings);
     floorCursor += seg.floors;
   });
+
+  // Satellites — parallel columns fused alongside, sharing floorHeight so their
+  // window rows line up with the main column's.
+  for (const sat of params.satellites ?? []) {
+    const sf = Math.max(1, Math.round(sat.floors));
+    const rings: Ring[] = [];
+    for (let i = 0; i <= sf; i++) {
+      rings.push({
+        y: i * floorHeight,
+        s: clamp(sat.scale, CLAMP.segScale[0], CLAMP.segScale[1]),
+        th: ((sat.rotationDeg ?? 0) * Math.PI) / 180,
+        v: (i / sf) * (sf / totalFloors),
+      });
+    }
+    emitPrism(rings, sat.dx, sat.dz);
+  }
 
   let geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
@@ -398,8 +459,11 @@ export function stackFloors(params: TowerStackParams): number {
 export function stackRoofDeckY(params: TowerStackParams): number {
   const floorHeight = params.floorHeight > 0 ? params.floorHeight : 2.5;
   const H = stackFloors(params) * floorHeight;
-  if (!params.parapet) return H;
-  return H - Math.min(PARAPET.lipFrac * floorHeight, H * PARAPET.maxFrac) * PARAPET.deckDrop;
+  if (params.parapet) {
+    return H - Math.min(PARAPET.lipFrac * floorHeight, H * PARAPET.maxFrac) * PARAPET.deckDrop;
+  }
+  // A sheared roof's centre sits below its high corner; props go on the centre.
+  return H - clamp(params.shear ?? 0, 0, 0.35) * H * 0.5;
 }
 
 /** Indexed vertex count — for tests. */
@@ -411,7 +475,10 @@ export function stackVertexCount(params: TowerStackParams): number {
   const n = segs.length || 1;
   const ringTotal = segs.reduce((acc, s) => acc + Math.max(1, Math.round(s.floors || 1)) + 1, 0)
     + (params.parapet ? 3 : 0);
-  return (m + 1) * (ringTotal || 5) + 2 * n; // + 2 cap centers per mass
+  const sats = params.satellites ?? [];
+  const satRings = sats.reduce((acc, x) => acc + Math.max(1, Math.round(x.floors || 1)) + 1, 0);
+  // + 2 cap centres per closed prism (segments and satellites alike)
+  return (m + 1) * ((ringTotal || 5) + satRings) + 2 * (n + sats.length);
 }
 
 const stackCache = new Map<string, THREE.BufferGeometry>();
@@ -475,6 +542,7 @@ export function loftVertexCount(params: TowerLoftParams): number {
   const m = params.profile.kind === 'polygon'
     ? Math.round(clamp(params.profile.sides, CLAMP.sides[0], CLAMP.sides[1]))
     : Math.round(clamp(params.profile.samples, CLAMP.samples[0], CLAMP.samples[1]));
+  const ringCount = Math.max(floors, Math.round(clamp(params.minRings ?? 0, 0, 64)));
   // Parapet adds three rings: outer lip, inward step, inner face.
-  return (m + 1) * (floors + 1 + (params.parapet ? 3 : 0)) + 1;
+  return (m + 1) * (ringCount + 1 + (params.parapet ? 3 : 0)) + 1;
 }

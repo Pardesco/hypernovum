@@ -571,51 +571,67 @@ export class SceneManager {
     gridGroup.position.set(0, 0.01, 0);
     gridGroup.userData = { isGround: true };
     const gridSpacing = 5;
-    const lineMat = new THREE.LineBasicMaterial({
-      color: gridColor,
-      transparent: this.useAtmosphere,
-      opacity: this.useAtmosphere ? 0.3 : 1.0,
+
+    // The grid dissolves into the dark instead of stopping at a drawn circle.
+    // Alpha comes from radial distance in the shader, so it is smooth in world
+    // space rather than per-line; the chords are subdivided because a 2-point
+    // line would interpolate the fade linearly between its endpoints and dim
+    // the middle of a long chord that should still be at full strength.
+    const fadeStart = radius * 0.52;
+    const gridMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(gridColor) },
+        uOpacity: { value: this.useAtmosphere ? 0.3 : 1.0 },
+        uFadeStart: { value: fadeStart },
+        uRadius: { value: radius },
+      },
+      vertexShader: `
+        varying float vFade;
+        uniform float uFadeStart;
+        uniform float uRadius;
+        void main() {
+          float r = length(position.xz);
+          vFade = 1.0 - smoothstep(uFadeStart, uRadius, r);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying float vFade;
+        void main() {
+          float a = uOpacity * vFade;
+          if (a < 0.004) discard;
+          gl_FragColor = vec4(uColor, a);
+        }`,
+      transparent: true,
+      depthWrite: false,
     });
-    // Horizontal lines (parallel to X axis, varying Z)
+
+    // One LineSegments for the whole grid — also drops ~40 draw calls.
+    const STEPS = 32;
+    const verts: number[] = [];
+    const addChord = (fixed: number, half: number, alongX: boolean) => {
+      for (let i = 0; i < STEPS; i++) {
+        const t0 = -half + (2 * half * i) / STEPS;
+        const t1 = -half + (2 * half * (i + 1)) / STEPS;
+        if (alongX) verts.push(t0, 0, fixed, t1, 0, fixed);
+        else verts.push(fixed, 0, t0, fixed, 0, t1);
+      }
+    };
+    const rSq = radius * radius;
     for (let z = -radius; z <= radius; z += gridSpacing) {
-      const rSq = radius * radius;
-      const zSq = z * z;
-      if (zSq >= rSq) continue;
-      const halfChord = Math.sqrt(rSq - zSq);
-      const pts = [
-        new THREE.Vector3(-halfChord, 0, z),
-        new THREE.Vector3(halfChord, 0, z),
-      ];
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      gridGroup.add(new THREE.Line(geo, lineMat.clone()));
+      if (z * z >= rSq) continue;
+      addChord(z, Math.sqrt(rSq - z * z), true);
     }
-    // Vertical lines (parallel to Z axis, varying X)
     for (let x = -radius; x <= radius; x += gridSpacing) {
-      const rSq = radius * radius;
-      const xSq = x * x;
-      if (xSq >= rSq) continue;
-      const halfChord = Math.sqrt(rSq - xSq);
-      const pts = [
-        new THREE.Vector3(x, 0, -halfChord),
-        new THREE.Vector3(x, 0, halfChord),
-      ];
-      const geo = new THREE.BufferGeometry().setFromPoints(pts);
-      gridGroup.add(new THREE.Line(geo, lineMat.clone()));
+      if (x * x >= rSq) continue;
+      addChord(x, Math.sqrt(rSq - x * x), false);
     }
-    // Circular border outline
-    const borderPts: THREE.Vector3[] = [];
-    const segments = 64;
-    for (let i = 0; i <= segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      borderPts.push(new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
-    }
-    const borderGeo = new THREE.BufferGeometry().setFromPoints(borderPts);
-    const borderMat = new THREE.LineBasicMaterial({
-      color: gridColor,
-      transparent: this.useAtmosphere,
-      opacity: this.useAtmosphere ? 0.3 : 1.0,
-    });
-    gridGroup.add(new THREE.Line(borderGeo, borderMat));
+    const gridGeo = new THREE.BufferGeometry();
+    gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    const gridLines = new THREE.LineSegments(gridGeo, gridMat);
+    gridLines.userData = { isGround: true };
+    gridGroup.add(gridLines);
     this.scene.add(gridGroup);
   }
 
@@ -1080,7 +1096,7 @@ export class SceneManager {
     floors: number;
     diagrid: boolean;
     sides: number | null;
-    topCenter: { x: number; z: number; y?: number };
+    topCenter: { x: number; z: number; y?: number; pointed?: boolean };
   } {
     if (this.buildingStyle === 'parametric' && project.dimensions) {
       const { width, height, depth } = project.dimensions;
@@ -1098,7 +1114,7 @@ export class SceneManager {
           diagrid: preset.diagrid,
           sides: preset.sides,
           // y = the deck, which sits below the parapet lip (the bbox top)
-          topCenter: { x: 0, z: 0, y: preset.roofDeckY },
+          topCenter: { x: 0, z: 0, y: preset.roofDeckY, pointed: preset.pointedRoof },
         };
       } catch {
         // fall through to classic

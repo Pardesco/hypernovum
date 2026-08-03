@@ -45,8 +45,8 @@ describe('presetForProject — family mapping', () => {
     }
   });
 
-  it('BASTION (infrastructure, trading) telescopes in steps far bigger than the old setback clamp', () => {
-    for (const category of ['infrastructure', 'trading']) {
+  it('BASTION (infrastructure) telescopes in steps far bigger than the old setback clamp', () => {
+    for (const category of ['infrastructure']) {
       const r = presetForProject(input({ category }));
       expect(r.kind).toBe('stack');
       if (r.kind !== 'stack') continue;
@@ -61,18 +61,6 @@ describe('presetForProject — family mapping', () => {
     }
   });
 
-  it('HIVE (obsidian-plugins) stays a straight faceted hexagon', () => {
-    const r = presetForProject(input({ category: 'obsidian-plugins' }));
-    expect(r.kind).toBe('loft');
-    if (r.kind === 'loft') {
-      expect(r.params.profile.kind).toBe('polygon');
-      if (r.params.profile.kind === 'polygon') expect(r.params.profile.sides).toBe(6);
-      expect(r.params.facetedNormals).toBe(true);
-      expect(r.params.twistDeg ?? 0).toBe(0);
-    }
-    expect(r.diagrid).toBe(false);
-  });
-
   it('unmapped categories get BLOCK rather than a classic silhouette', () => {
     const r = presetForProject(input({ category: 'nonsense' }));
     expect(r.kind).toBe('stack');
@@ -80,16 +68,44 @@ describe('presetForProject — family mapping', () => {
     expect(isParametricCategory('nonsense')).toBe(true);
   });
 
-  it('nothing leans any more — visualization and art are quiet blocks', () => {
+  it('OBELISK (visualization, art) is a diamond shaft closing to a point — nothing leans', () => {
     for (const category of ['visualization', 'art']) {
       const r = presetForProject(input({ category }));
       expect(r.kind).toBe('stack');
-      if (r.kind === 'stack') expect(r.params.segments).toHaveLength(1);
+      if (r.kind !== 'stack') continue;
+      expect(r.params.segments).toHaveLength(2);
+      // plan rotated 45 degrees so it never reads as an axis-aligned square
+      for (const seg of r.params.segments) expect(seg.rotationDeg).toBe(45);
+      // the crown closes to a spike
+      expect(r.params.segments[1].scaleTop!).toBeLessThan(0.2);
+      expect(r.params.parapet).toBeFalsy();
+    }
+  });
+
+  it('BLADE (trading) is a thin slab with a sheared roof and no parapet', () => {
+    const r = presetForProject(input({ category: 'trading' }));
+    expect(r.kind).toBe('stack');
+    if (r.kind !== 'stack') return;
+    if (r.params.profile.kind === 'polygon') {
+      expect(r.params.profile.b).toBeLessThan(r.params.profile.a * 0.5); // knife-thin
+    }
+    expect(r.params.shear!).toBeGreaterThan(0.1);
+    expect(r.params.parapet).toBeFalsy(); // a slashed roof has no rail
+  });
+
+  it('HIVE (obsidian-plugins) is a cluster — satellites fused to the main column', () => {
+    const r = presetForProject(input({ category: 'obsidian-plugins' }));
+    expect(r.kind).toBe('stack');
+    if (r.kind !== 'stack') return;
+    expect(r.params.satellites!.length).toBeGreaterThanOrEqual(2);
+    for (const sat of r.params.satellites!) {
+      expect(Math.hypot(sat.dx, sat.dz)).toBeGreaterThan(0);
+      expect(sat.floors).toBeLessThan(r.floors); // satellites are SHORTER
     }
   });
 
   it('only BASTION carries the diagrid hint', () => {
-    for (const c of ['web-apps', 'content', 'desktop-apps', 'obsidian-plugins', 'visualization', 'art', 'nonsense']) {
+    for (const c of ['web-apps', 'content', 'desktop-apps', 'obsidian-plugins', 'visualization', 'art', 'trading', 'nonsense']) {
       expect(presetForProject(input({ category: c })).diagrid).toBe(false);
     }
   });

@@ -42,24 +42,30 @@ interface TowerBuildBase {
   sides: number | null;
   /** Deck height — below the parapet lip, which is the bounding-box top. */
   roofDeckY: number;
+  /**
+   * The roof tapers to a point or a knife edge and cannot hold a greeble kit.
+   * Declared here rather than inferred from the category, because the category
+   * list in RooftopFactory describes the CLASSIC silhouettes and would scatter
+   * HVAC blocks around a spire tip for any parametric family it doesn't know.
+   */
+  pointedRoof: boolean;
 }
 
 export type TowerBuildResult =
   | (TowerBuildBase & { kind: 'loft'; params: TowerLoftParams })
   | (TowerBuildBase & { kind: 'stack'; params: TowerStackParams });
 
-type Family = 'HELIX' | 'LEDGER' | 'BASTION' | 'HIVE' | 'BLOCK';
+type Family = 'HELIX' | 'LEDGER' | 'BASTION' | 'OBELISK' | 'BLADE' | 'HIVE' | 'BLOCK';
 
 const CATEGORY_FAMILY: Record<string, Family> = {
   'web-apps': 'HELIX',
   content: 'LEDGER',
   'desktop-apps': 'LEDGER',
   infrastructure: 'BASTION',
-  trading: 'BASTION',
+  trading: 'BLADE',
   'obsidian-plugins': 'HIVE',
-  // visualization/art previously leaned; they are quiet blocks until OBELISK lands
-  visualization: 'BLOCK',
-  art: 'BLOCK',
+  visualization: 'OBELISK',
+  art: 'OBELISK',
 };
 
 function clamp(x: number, lo: number, hi: number): number {
@@ -129,24 +135,30 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult {
     diagrid,
     sides: params.profile.kind === 'polygon' ? params.profile.sides : null,
     roofDeckY: loftRoofDeckY(params),
+    pointedRoof: false,
   });
-  const stack = (params: TowerStackParams, diagrid = false): TowerBuildResult => ({
+  const stack = (params: TowerStackParams, diagrid = false, pointedRoof = false): TowerBuildResult => ({
     kind: 'stack',
     params,
     floors: stackFloors(params),
     diagrid,
     sides: params.profile.kind === 'polygon' ? params.profile.sides : null,
     roofDeckY: stackRoofDeckY(params),
+    pointedRoof,
   });
 
   switch (family) {
     case 'HELIX':
       // web-apps. A single mass wrung about its axis — the only building whose
       // vertical edges are curves. Twist is this family's alone.
+      // A chamfered SQUARE, not a blob: twist only reads when corners trace a
+      // helix, and a near-circle is rotationally near-symmetric. minRings lifts
+      // the sampling above the 5-8 the layout gives us, so the corners curve
+      // instead of visibly kinking.
       return loft({
-        profile: { kind: 'superellipse', a, b, n: 3.5, samples: 20 },
-        floors, floorHeight, taper: 0.22, twistDeg: 78 + jitter(12),
-        parapet: true,
+        profile: { kind: 'superellipse', a, b, n: 4.5 + rng() * 1.5, samples: 28 },
+        floors, floorHeight, taper: 0.26, twistDeg: 90 + jitter(15),
+        minRings: 16, parapet: true,
       });
 
     case 'LEDGER': {
@@ -190,14 +202,62 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult {
       }, true);
     }
 
-    case 'HIVE':
-      // obsidian-plugins. Clean faceted hexagonal column. Straight: a twisted
-      // hex prism reads like the facets are sliding off.
-      return loft({
-        profile: { kind: 'polygon', sides: 6, a, b },
-        floors, floorHeight, taper: 0.14,
-        facetedNormals: true, parapet: true,
+    case 'OBELISK': {
+      // visualization, art. A diamond-plan shaft resolving into a spike — the
+      // only point in the skyline, and the legitimate heir of the classic Data
+      // Shard. The plan is rotated 45 degrees so it never reads as LEDGER's or
+      // BASTION's axis-aligned square.
+      const crownFrac = input.category === 'art' ? 0.26 + rng() * 0.04 : 0.18 + rng() * 0.08;
+      const crownFloors = Math.max(1, Math.round(floors * crownFrac));
+      const shaftFloors = Math.max(1, floors - crownFloors);
+      return stack({
+        profile: { kind: 'polygon', sides: 4, a, b },
+        segments: [
+          { floors: shaftFloors, scale: 1, rotationDeg: 45, taper: 0.06 + rng() * 0.06 },
+          { floors: crownFloors, scale: 0.94, rotationDeg: 45, scaleTop: 0.10 },
+        ],
+        floorHeight, facetedNormals: true,
+      }, false, true); // spire: no greeble kit
+    }
+
+    case 'BLADE':
+      // trading. A thin knife-slab cut on a hard diagonal — the only asymmetric
+      // roofline in the city, and the heir of the classic Quant Blade. No
+      // parapet: a slashed roof has no rail.
+      return stack({
+        profile: { kind: 'polygon', sides: 4, a, b: b * 0.34 },
+        segments: [{ floors, scale: 1, rotationDeg: jitter(4), taper: 0.04 }],
+        floorHeight, facetedNormals: true,
+        shear: 0.16 + rng() * 0.06,
+      }, false, true); // knife edge: no greeble kit
+
+    case 'HIVE': {
+      // obsidian-plugins. A hex column with shorter hex satellites fused to its
+      // faces — the only CLUSTER in the city, which is what "modular" should
+      // have meant. Satellites share floorHeight so their window rows line up.
+      const satCount = 2 + (rng() < 0.45 ? 1 : 0);
+      const faces = [0, 2, 4].slice(0, satCount).map((k, i) => k + (i === 2 ? 1 : 0));
+      const satellites = faces.map((face, i) => {
+        const ang = (Math.PI / 3) * face + Math.PI / 6;
+        // Reach must stay inside the foundation plinth, which is a width x depth
+        // box: dist + satellite radius <= the plan's corner distance. At 0.72 the
+        // satellites still protrude past the hex's inradius, so the cluster reads.
+        const dist = (a + b) * 0.5 * 0.72;
+        return {
+          dx: Math.cos(ang) * dist,
+          dz: Math.sin(ang) * dist,
+          floors: Math.max(1, Math.round(floors * (0.40 + rng() * 0.25))),
+          scale: 0.42 + rng() * 0.10,
+          rotationDeg: i * 7,
+        };
       });
+      return stack({
+        profile: { kind: 'polygon', sides: 6, a, b },
+        segments: [{ floors, scale: 1, rotationDeg: 0, taper: 0.10 }],
+        floorHeight, facetedNormals: true, parapet: true,
+        satellites,
+      });
+    }
 
     case 'BLOCK':
     default:

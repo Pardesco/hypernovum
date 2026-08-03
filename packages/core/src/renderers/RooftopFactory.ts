@@ -49,10 +49,10 @@ export class RooftopFactory {
   static createRooftop(
     project: ProjectData,
     buildingGeo: THREE.BufferGeometry,
-    roofAnchor: { x: number; z: number; y?: number } = { x: 0, z: 0 },
+    roofAnchor: { x: number; z: number; y?: number; pointed?: boolean } = { x: 0, z: 0 },
   ): RooftopKit {
     const { width, height, depth } = project.dimensions!;
-    const pointed = POINTED_CATEGORIES.has(project.category);
+    const pointed = roofAnchor.pointed ?? POINTED_CATEGORIES.has(project.category);
 
     buildingGeo.computeBoundingBox();
     const topY = roofAnchor.y ?? buildingGeo.boundingBox!.max.y;
