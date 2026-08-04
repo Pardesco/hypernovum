@@ -7,6 +7,16 @@ import {
   type DependencyScanResult,
   type ManifestIndexEntry,
 } from './dependencyMatch';
+import { asString, parseJsonObject, recordAt, type Json } from '../utils/json';
+
+/** Keep only the string-valued entries of a parsed object. */
+function stringMap(source: Json): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string') out[key] = value;
+  }
+  return out;
+}
 
 export interface DependencyScanInput {
   path: string;                    // project note path
@@ -93,9 +103,12 @@ export class DependencyScanner {
     }
 
     try {
-      const json = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      const deps = { ...(json.dependencies ?? {}), ...(json.devDependencies ?? {}) };
-      const name = typeof json.name === 'string' ? json.name : undefined;
+      const json = parseJsonObject(readFileSync(manifestPath, 'utf8'));
+      if (!json) return { manifestPath, mtime, deps: {}, error: `Unreadable manifest: ${manifestPath}` };
+      // A manifest's dep maps are string→string by spec; anything else in there
+      // is not a dependency we could match against a sibling project anyway.
+      const deps = stringMap({ ...recordAt(json, 'dependencies'), ...recordAt(json, 'devDependencies') });
+      const name = asString(json.name);
       this.cache.set(manifestPath, { mtime, name, deps });
       return { manifestPath, mtime, name, deps };
     } catch {

@@ -4,6 +4,8 @@
  * handles the file reads.
  */
 
+import { parseJsonObject } from '../utils/json';
+
 export interface ActivityEvent {
   t: number;
   sessionId: string;
@@ -32,10 +34,11 @@ export function parseSessionLines(text: string): ActivityEvent[] {
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    try {
-      const e = JSON.parse(trimmed);
-      if (e && typeof e.t === 'number' && typeof e.sessionId === 'string') out.push(e);
-    } catch { /* skip torn/garbage line */ }
+    const e = parseJsonObject(trimmed); // null on a torn/garbage line
+    if (!e) continue;
+    if (typeof e.t === 'number' && typeof e.sessionId === 'string') {
+      out.push(e as unknown as ActivityEvent);
+    }
   }
   return out;
 }

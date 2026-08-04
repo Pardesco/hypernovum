@@ -50,9 +50,10 @@ export class ArteryManager {
     // Max arteries check
     if (this.activeArteries.size >= this.maxArteries) {
       // Remove oldest artery to make room
-      const oldest = this.activeArteries.values().next().value;
-      if (oldest) {
+      // Sets iterate in insertion order, so the first entry is the oldest.
+      for (const oldest of this.activeArteries) {
         this.removeArtery(oldest);
+        break;
       }
     }
 

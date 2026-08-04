@@ -24,6 +24,17 @@ import { debugLog } from '../utils/log';
 import { appendDiv, appendSpan, appendTooltipRow } from '../utils/dom';
 import { orbVisualForState, stateTintsHost, type OrbVisual } from './agentOrbVisual';
 import type { InteractionStore } from '../stores/interactionStore';
+import { ud, projectOf, setUserData } from './sceneUserData';
+
+/** Release the GPU resources a mesh or line owns. */
+function disposeRenderable(obj: {
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material | THREE.Material[];
+}): void {
+  obj.geometry.dispose();
+  if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+  else obj.material.dispose();
+}
 
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
@@ -251,7 +262,7 @@ export class SceneManager {
     const hitMat = new THREE.MeshBasicMaterial({ opacity: 0, transparent: true });
     this.coreHitSphere = new THREE.Mesh(hitGeo, hitMat);
     this.coreHitSphere.position.copy(this.neuralCore.position);
-    this.coreHitSphere.userData = { isNeuralCore: true };
+    setUserData(this.coreHitSphere, { isNeuralCore: true });
     this.scene.add(this.coreHitSphere);
 
     this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
@@ -331,7 +342,7 @@ export class SceneManager {
     controls.minPolarAngle = Math.PI / 5;
     controls.maxPolarAngle = Math.PI / 2.3;
     controls.mouseButtons = {
-      LEFT: null as unknown as THREE.MOUSE,
+      LEFT: null,
       MIDDLE: THREE.MOUSE.DOLLY,
       RIGHT: THREE.MOUSE.PAN,
     };
@@ -493,9 +504,9 @@ export class SceneManager {
   private clearCity(): void {
     const toRemove: THREE.Object3D[] = [];
     this.scene.traverse((obj) => {
-      if (obj.userData.isBuilding || obj.userData.isDistrict ||
-        obj.userData.isRoad || obj.userData.isLabel || obj.userData.isGround ||
-        obj.userData.isFoundation || obj.userData.isDragHandle) {
+      if (ud(obj).isBuilding || ud(obj).isDistrict ||
+        ud(obj).isRoad || ud(obj).isLabel || ud(obj).isGround ||
+        ud(obj).isFoundation || ud(obj).isDragHandle) {
         toRemove.push(obj);
       }
     });
@@ -508,7 +519,7 @@ export class SceneManager {
         if (m.geometry) m.geometry.dispose();
         const mat = (m as THREE.Mesh).material;
         if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-        else if (mat) (mat as THREE.Material).dispose();
+        else if (mat) mat.dispose();
       });
     };
     toRemove.forEach((obj) => {
@@ -562,14 +573,14 @@ export class SceneManager {
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(0, -0.1, 0);
     ground.receiveShadow = true;
-    ground.userData = { isGround: true };
+    setUserData(ground, { isGround: true });
     this.scene.add(ground);
 
     // Square grid lines clipped to circular boundary
     const gridColor = this.useAtmosphere ? 0x00ffff : 0x1a1a2e;
     const gridGroup = new THREE.Group();
     gridGroup.position.set(0, 0.01, 0);
-    gridGroup.userData = { isGround: true };
+    setUserData(gridGroup, { isGround: true });
     const gridSpacing = 5;
 
     // The grid dissolves into the dark instead of stopping at a drawn circle.
@@ -630,7 +641,7 @@ export class SceneManager {
     const gridGeo = new THREE.BufferGeometry();
     gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     const gridLines = new THREE.LineSegments(gridGeo, gridMat);
-    gridLines.userData = { isGround: true };
+    setUserData(gridLines, { isGround: true });
     gridGroup.add(gridLines);
     this.scene.add(gridGroup);
   }
@@ -712,7 +723,7 @@ export class SceneManager {
         opacity: 0.25,
       });
       const outline = new THREE.Line(outlineGeo, outlineMat);
-      outline.userData = { isDistrict: true, category };
+      setUserData(outline, { isDistrict: true, category });
       this.scene.add(outline);
       blockObjects.push(outline);
 
@@ -734,7 +745,7 @@ export class SceneManager {
         0.03,
         (bounds.minZ + bounds.maxZ) / 2
       );
-      fill.userData = { isDistrict: true, category };
+      setUserData(fill, { isDistrict: true, category });
       this.scene.add(fill);
       blockObjects.push(fill);
 
@@ -749,7 +760,7 @@ export class SceneManager {
       labelDiv.style.setProperty('--hypernovum-category-color', `#${color.toString(16).padStart(6, '0')}`);
       const label = new CSS2DObject(labelDiv);
       label.position.set(labelX, labelY, labelZ);
-      label.userData = { isLabel: true, category };
+      setUserData(label, { isLabel: true, category });
       this.scene.add(label);
       blockObjects.push(label);
 
@@ -767,7 +778,7 @@ export class SceneManager {
         opacity: 0.2,
       });
       const leaderLine = new THREE.Line(leaderGeo, leaderMat);
-      leaderLine.userData = { isDistrict: true, category };
+      setUserData(leaderLine, { isDistrict: true, category });
       this.scene.add(leaderLine);
       blockObjects.push(leaderLine);
 
@@ -777,7 +788,7 @@ export class SceneManager {
       const dot = new THREE.Mesh(dotGeo, dotMat);
       dot.rotation.x = -Math.PI / 2;
       dot.position.set(bounds.minX - padding, 0.08, labelZ);
-      dot.userData = { isDistrict: true, category };
+      setUserData(dot, { isDistrict: true, category });
       this.scene.add(dot);
       blockObjects.push(dot);
 
@@ -795,7 +806,7 @@ export class SceneManager {
       const bracketGeo = new THREE.BufferGeometry().setFromPoints(bracketPts);
       const bracketMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
       const handleBracket = new THREE.Line(bracketGeo, bracketMat);
-      handleBracket.userData = { isDragHandle: true, category };
+      setUserData(handleBracket, { isDragHandle: true, category });
       this.scene.add(handleBracket);
       blockObjects.push(handleBracket);
 
@@ -814,7 +825,7 @@ export class SceneManager {
       const handle = new THREE.Mesh(handleGeo, handleMat);
       handle.rotation.x = -Math.PI / 2;
       handle.position.set(handleX, 0.07, handleZ);
-      handle.userData = { isDragHandle: true, category };
+      setUserData(handle, { isDragHandle: true, category });
       this.scene.add(handle);
       this.dragHandles.push(handle);
       blockObjects.push(handle);
@@ -826,7 +837,7 @@ export class SceneManager {
       const hitBoxMat = new THREE.MeshBasicMaterial({ visible: false });
       const hitBox = new THREE.Mesh(hitBoxGeo, hitBoxMat);
       hitBox.position.set(handleX, 2.5, handleZ);
-      hitBox.userData = { isDragHandle: true, category, visualHandle: handle };
+      setUserData(hitBox, { isDragHandle: true, category, visualHandle: handle });
       this.scene.add(hitBox);
       this.handleHitBoxes.push(hitBox);
       blockObjects.push(hitBox);
@@ -853,11 +864,11 @@ export class SceneManager {
   private centerSingleBuildings(): void {
     for (const [category, block] of this.blocks) {
       const catBuildings = this.buildings.filter(
-        b => b.userData.project?.category === category
+        b => projectOf(b)?.category === category
       );
       if (catBuildings.length !== 1) continue;
       const building = catBuildings[0];
-      const project = building.userData.project;
+      const project = projectOf(building);
       if (!project?.position || !project?.dimensions) continue;
       const zoneCenterX = (block.bounds.minX + block.bounds.maxX) / 2;
       const zoneCenterZ = (block.bounds.minZ + block.bounds.maxZ) / 2;
@@ -889,7 +900,7 @@ export class SceneManager {
     const foundation = new THREE.Mesh(foundationGeo, foundationMat);
     foundation.position.set(x, 0, z);
     foundation.receiveShadow = true;
-    foundation.userData = { isFoundation: true, project };
+    setUserData(foundation, { isFoundation: true, project });
     this.scene.add(foundation);
     this.foundations.push(foundation);
 
@@ -904,7 +915,7 @@ export class SceneManager {
     const hitPadMat = new THREE.MeshBasicMaterial({ visible: false });
     const hitPad = new THREE.Mesh(hitPadGeo, hitPadMat);
     hitPad.position.set(x, foundationHeight / 2, z);
-    hitPad.userData = { isFoundation: true, project, visualFoundation: foundation };
+    setUserData(hitPad, { isFoundation: true, project, visualFoundation: foundation });
     this.scene.add(hitPad);
     this.foundationHitPads.push(hitPad);
 
@@ -920,7 +931,7 @@ export class SceneManager {
     });
     const foundationWireframe = new THREE.LineSegments(foundationEdges, foundationLineMat);
     foundationWireframe.position.copy(foundation.position);
-    foundationWireframe.userData = { isFoundation: true, project };
+    setUserData(foundationWireframe, { isFoundation: true, project });
     this.scene.add(foundationWireframe);
 
     // Building silhouette: category-specific parametric shape where one is
@@ -954,7 +965,7 @@ export class SceneManager {
     mesh.position.set(x, foundationHeight, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.userData = { isBuilding: true, project };
+    setUserData(mesh, { isBuilding: true, project });
 
     // Store shader materials for animation updates
     if (isShaderMaterial) {
@@ -1001,7 +1012,7 @@ export class SceneManager {
     });
     const wireframe = new THREE.LineSegments(edges, lineMat);
     wireframe.position.copy(mesh.position);
-    wireframe.userData = { isBuilding: true, project, isEdgeGlow: true };
+    setUserData(wireframe, { isBuilding: true, project, isEdgeGlow: true });
     this.scene.add(wireframe);
     if (project.status === 'blocked') {
       this.blockedEdgeGlows.push(wireframe);
@@ -1033,7 +1044,7 @@ export class SceneManager {
       });
       const detailMesh = new THREE.Mesh(roof.detail, detailMat);
       detailMesh.castShadow = true;
-      detailMesh.userData = { isBuilding: true, project, isRoofDetail: true };
+      setUserData(detailMesh, { isBuilding: true, project, isRoofDetail: true });
       mesh.add(detailMesh);
     }
     if (roof.beaconPosition) {
@@ -1044,7 +1055,7 @@ export class SceneManager {
       });
       const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), beaconMat);
       beacon.position.copy(roof.beaconPosition);
-      beacon.userData = { isBuilding: true, project, isRoofDetail: true };
+      setUserData(beacon, { isBuilding: true, project, isRoofDetail: true });
       mesh.add(beacon);
       this.roofBeacons.push(beacon);
     }
@@ -1063,13 +1074,13 @@ export class SceneManager {
       const baseY = topY + 1.2;
       // Track the roof centerline — leaning presets move it well off local origin
       gem.position.set(build.topCenter.x, baseY, build.topCenter.z);
-      gem.userData = {
+      setUserData(gem, {
         isBuilding: true,
         project,
         isQuestMarker: true,
         baseY,
         bobPhase: (x * 7 + z * 13) % (Math.PI * 2),
-      };
+      });
       mesh.add(gem);
       this.questMarkers.push(gem);
     }
@@ -1291,7 +1302,7 @@ export class SceneManager {
         this.agentOrbs.delete(agent.id);
       }
 
-      const geo = building.geometry as THREE.BufferGeometry;
+      const geo = building.geometry;
       geo.computeBoundingBox();
       const baseY = (geo.boundingBox?.max.y ?? 5) + 1.8;
 
@@ -1308,7 +1319,7 @@ export class SceneManager {
       orb.position.set(0, baseY, 0);
       // isAgentOrb only (not isBuilding) so orb raycasts route to the agent
       // tooltip, not the building tooltip; carries its own session id.
-      orb.userData = { isAgentOrb: true, agentId: agent.id, project: building.userData.project };
+      setUserData(orb, { isAgentOrb: true, agentId: agent.id, project: projectOf(building) });
       building.add(orb);
       const entry: AgentOrbEntry = {
         orb,
@@ -1392,7 +1403,7 @@ export class SceneManager {
       if (existing && existing.severity === severity) continue;
       if (existing) { this.disposeRing(existing.mesh); this.conflictRings.delete(path); }
 
-      const project = building.userData.project as ProjectData;
+      const project = projectOf(building) as ProjectData;
       const half = (project.dimensions?.width ?? 3) / 2;
       const color = severity === 'high' ? 0xff3333 : 0xffaa33;
       const ring = new THREE.Mesh(
@@ -1404,7 +1415,7 @@ export class SceneManager {
       );
       ring.rotation.x = -Math.PI / 2;
       ring.position.set(building.position.x, 0.12, building.position.z);
-      ring.userData = { isConflictRing: true };
+      setUserData(ring, { isConflictRing: true });
       this.scene.add(ring);
       this.conflictRings.set(path, { mesh: ring, severity });
     }
@@ -1452,7 +1463,7 @@ export class SceneManager {
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(building.position.x, 0.15, building.position.z);
-    ring.userData = { isQuestBurst: true };
+    setUserData(ring, { isQuestBurst: true });
     this.scene.add(ring);
     this.questBursts.push({ mesh: ring, start: this.clock.getElapsedTime() });
   }
@@ -1517,7 +1528,7 @@ export class SceneManager {
       labelDiv.textContent = project.title;
       const label = new CSS2DObject(labelDiv);
       label.position.copy(labelPos);
-      label.userData = { isLabel: true };
+      setUserData(label, { isLabel: true });
       this.scene.add(label);
 
       this.labels.push({ project, buildingPos: buildingTop, labelPos, label });
@@ -1664,9 +1675,9 @@ export class SceneManager {
     }
     if (this.tooltipLeader) {
       this.tooltipLeader.traverse((child: THREE.Object3D) => {
-        const m = child as any;
-        if (m.geometry) m.geometry.dispose();
-        if (m.material) m.material.dispose();
+        // Only meshes/lines carry geometry+material; Object3D itself does not.
+        if (child instanceof THREE.Mesh) disposeRenderable(child);
+        else if (child instanceof THREE.Line) disposeRenderable(child);
       });
       this.scene.remove(this.tooltipLeader);
       this.tooltipLeader = null;
@@ -1682,7 +1693,7 @@ export class SceneManager {
       // three's raycaster ignores .visible — skip orbs of hidden buildings.
       const orbHit = orbHits.find((h) => isSceneVisible(h.object));
       if (orbHit) {
-        const agentId = orbHit.object.userData.agentId as string;
+        const agentId = ud(orbHit.object).agentId as string;
         const entry = this.agentOrbs.get(agentId);
         if (entry) {
           this.showAgentTooltip(entry);
@@ -1717,8 +1728,8 @@ export class SceneManager {
     );
     if (handleHits.length > 0 && handleHits[0].distance < nearestContent) {
       const hitBox = handleHits[0].object as THREE.Mesh;
-      if (hitBox.userData.isDragHandle) {
-        const visualHandle = (hitBox.userData.visualHandle ?? hitBox) as THREE.Mesh;
+      if (ud(hitBox).isDragHandle) {
+        const visualHandle = (ud(hitBox).visualHandle ?? hitBox) as THREE.Mesh;
         this.hoveredHandle = visualHandle;
         const mat = visualHandle.material as THREE.MeshStandardMaterial;
         if (mat.emissiveIntensity !== undefined) mat.emissiveIntensity = 0.8;
@@ -1735,16 +1746,16 @@ export class SceneManager {
 
     if (buildingHit) {
       const hit = buildingHit.object as THREE.Mesh;
-      if (hit.userData.isBuilding && hit.userData.project) {
-        hoveredProject = hit.userData.project as ProjectData;
+      if (ud(hit).isBuilding && projectOf(hit)) {
+        hoveredProject = projectOf(hit) as ProjectData;
         tooltipPos = hit.position;
         tooltipHeight = hoveredProject.dimensions!.height + 0.8;
       }
     } else if (foundationHit) {
       const hitPad = foundationHit.object as THREE.Mesh;
-      if (hitPad.userData.isFoundation && hitPad.userData.project) {
-        const visualFoundation = (hitPad.userData.visualFoundation ?? hitPad) as THREE.Mesh;
-        hoveredProject = hitPad.userData.project as ProjectData;
+      if (ud(hitPad).isFoundation && projectOf(hitPad)) {
+        const visualFoundation = (ud(hitPad).visualFoundation ?? hitPad) as THREE.Mesh;
+        hoveredProject = projectOf(hitPad) as ProjectData;
         tooltipPos = visualFoundation.position;
         tooltipHeight = 0.8;
         tooltipVariant = 'foundation';
@@ -1800,7 +1811,7 @@ export class SceneManager {
 
     if (handleHits.length > 0) {
       const hit = handleHits[0].object as THREE.Mesh;
-      const category = hit.userData.category as string;
+      const category = ud(hit).category as string;
       const block = this.blocks.get(category);
 
       if (block) {
@@ -1823,11 +1834,11 @@ export class SceneManager {
     this.movingBuildingOriginalPos.copy(building.position);
 
     // Visual feedback (bright glow) applied by HighlightManager via the store
-    const path = (building.userData.project as ProjectData | undefined)?.path;
+    const path = projectOf(building)?.path;
     if (path) this.store?.getState().enterMoveMode(path);
 
     // Highlight the parent block outline + fill
-    const cat = building.userData.project?.category;
+    const cat = projectOf(building)?.category;
     if (cat) {
       const block = this.blocks.get(cat);
       if (block) {
@@ -1849,7 +1860,7 @@ export class SceneManager {
     this.store?.getState().exitMoveMode();
 
     // Restore block outline + fill to default
-    const cat = this.movingBuilding.userData.project?.category;
+    const cat = projectOf(this.movingBuilding)?.category;
     if (cat) {
       const block = this.blocks.get(cat);
       if (block) {
@@ -1871,7 +1882,9 @@ export class SceneManager {
 
     const div = document.createElement('div');
     div.className = 'hypernovum-move-indicator';
-    div.textContent = 'MOVE MODE - Click elsewhere to exit';
+    // Sentence case in the string; the HUD's all-caps look comes from CSS
+    // text-transform, so the two don't have to disagree.
+    div.textContent = 'Move mode — click elsewhere to exit';
     div.id = 'hypernovum-move-indicator';
     this.container.appendChild(div);
   }
@@ -1933,7 +1946,7 @@ export class SceneManager {
   }
 
   private moveSingleBuilding(building: THREE.Mesh, deltaX: number, deltaZ: number): void {
-    const project = building.userData.project as ProjectData;
+    const project = projectOf(building) as ProjectData;
     if (!project) return;
 
     // Move the building mesh
@@ -1948,13 +1961,13 @@ export class SceneManager {
 
     // Move associated foundation and hit pads
     for (const foundation of this.foundations) {
-      if (foundation.userData.project === project) {
+      if (projectOf(foundation) === project) {
         foundation.position.x += deltaX;
         foundation.position.z += deltaZ;
       }
     }
     for (const hitPad of this.foundationHitPads) {
-      if (hitPad.userData.project === project) {
+      if (projectOf(hitPad) === project) {
         hitPad.position.x += deltaX;
         hitPad.position.z += deltaZ;
       }
@@ -1962,7 +1975,7 @@ export class SceneManager {
 
     // Move wireframes (foundation and building edges)
     this.scene.traverse((obj) => {
-      if (obj instanceof THREE.LineSegments && obj.userData.project === project) {
+      if (obj instanceof THREE.LineSegments && projectOf(obj) === project) {
         obj.position.x += deltaX;
         obj.position.z += deltaZ;
       }
@@ -1981,7 +1994,7 @@ export class SceneManager {
     }
 
     // Recalc block bounds after single building move
-    const cat = building.userData.project?.category;
+    const cat = projectOf(building)?.category;
     if (cat) this.recalcBlockBounds(cat);
   }
 
@@ -1993,7 +2006,7 @@ export class SceneManager {
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     let found = 0;
     for (const b of this.buildings) {
-      const p = b.userData.project as ProjectData;
+      const p = projectOf(b) as ProjectData;
       if (!p || p.category !== category) continue;
       found++;
       const pos = p.position;
@@ -2084,25 +2097,25 @@ export class SceneManager {
   private moveBlock(category: string, deltaX: number, deltaZ: number): void {
     // Move all buildings and foundations in this category
     for (const building of this.buildings) {
-      if (building.userData.project?.category === category) {
-        building.position.x += deltaX;
-        building.position.z += deltaZ;
-        // Update project position data
-        if (building.userData.project.position) {
-          building.userData.project.position.x += deltaX;
-          building.userData.project.position.z += deltaZ;
-        }
+      const project = projectOf(building);
+      if (project?.category !== category) continue;
+      building.position.x += deltaX;
+      building.position.z += deltaZ;
+      // Update project position data
+      if (project.position) {
+        project.position.x += deltaX;
+        project.position.z += deltaZ;
       }
     }
 
     for (const foundation of this.foundations) {
-      if (foundation.userData.project?.category === category) {
+      if (projectOf(foundation)?.category === category) {
         foundation.position.x += deltaX;
         foundation.position.z += deltaZ;
       }
     }
     for (const hitPad of this.foundationHitPads) {
-      if (hitPad.userData.project?.category === category) {
+      if (projectOf(hitPad)?.category === category) {
         hitPad.position.x += deltaX;
         hitPad.position.z += deltaZ;
       }
@@ -2110,9 +2123,9 @@ export class SceneManager {
 
     // Move foundation wireframes and building wireframes
     this.scene.traverse((obj) => {
-      if ((obj.userData.isFoundation || obj.userData.isBuilding) &&
+      if ((ud(obj).isFoundation || ud(obj).isBuilding) &&
         obj instanceof THREE.LineSegments &&
-        obj.userData.project?.category === category) {
+        projectOf(obj)?.category === category) {
         obj.position.x += deltaX;
         obj.position.z += deltaZ;
       }
@@ -2163,7 +2176,8 @@ export class SceneManager {
    */
   private showAgentTooltip(entry: AgentOrbEntry): void {
     const info = entry.info;
-    const project = this.buildingPathMap.get(entry.path)?.userData.project as ProjectData | undefined;
+    const building = this.buildingPathMap.get(entry.path);
+    const project = building ? projectOf(building) : undefined;
     const state = info.state ?? 'working';
     const fileBase = info.file ? info.file.split(/[\\/]/).pop() : null;
     const age = info.lastPing ? this.formatRelativeTime(info.lastPing) : null;
@@ -2541,8 +2555,8 @@ export class SceneManager {
     // Quest gems: slow spin + gentle bob
     for (const gem of this.questMarkers) {
       gem.rotation.y = motion * 1.2;
-      gem.position.y = (gem.userData.baseY as number) +
-        Math.sin(motion * 2 + (gem.userData.bobPhase as number)) * 0.15;
+      gem.position.y = (ud(gem).baseY as number) +
+        Math.sin(motion * 2 + (ud(gem).bobPhase as number)) * 0.15;
     }
 
     // Pulse critical-priority warning beacons (slow aircraft-light blink)
@@ -2603,7 +2617,7 @@ export class SceneManager {
     // full-scene traverse (that walked every object in the graph per frame).
     // Suppressed while the building is dimmed (resolver sets edgeGlowPulse).
     for (const glow of this.blockedEdgeGlows) {
-      const path = (glow.userData.project as ProjectData | undefined)?.path;
+      const path = projectOf(glow)?.path;
       const s = path ? this.parts.get(path)?.state : undefined;
       if (s && !s.edgeGlowPulse) continue;
       const mat = glow.material as THREE.LineBasicMaterial;
@@ -2687,7 +2701,7 @@ export class SceneManager {
   getCanvas(): HTMLCanvasElement { return this.renderer.domElement; }
 
   resetCamera(): void {
-    this.fitCameraToCity(this.buildings.map(b => b.userData.project).filter(Boolean));
+    this.fitCameraToCity(this.buildings.flatMap(b => projectOf(b) ?? []));
     this.store?.getState().select(null);
   }
 
@@ -2715,7 +2729,7 @@ export class SceneManager {
 
   /** Smoothly animate camera back to default overhead position */
   animateCameraToDefault(duration = 1000): void {
-    const projects = this.buildings.map(b => b.userData.project).filter(Boolean) as ProjectData[];
+    const projects = this.buildings.map(b => projectOf(b)).filter(Boolean) as ProjectData[];
     if (projects.length === 0) return;
 
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -2768,7 +2782,7 @@ export class SceneManager {
     const building = this.buildingPathMap.get(projectPath);
     if (!building) return;
 
-    const project = building.userData.project as ProjectData;
+    const project = projectOf(building) as ProjectData;
     if (!project || !project.dimensions) return;
 
     this.arteryManager.spawnArtery(
@@ -2806,7 +2820,7 @@ export class SceneManager {
       return;
     }
 
-    const project = building.userData.project as ProjectData;
+    const project = projectOf(building) as ProjectData;
     if (!project || !project.dimensions) return;
 
     debugLog('Starting stream to:', project.title);
@@ -2838,7 +2852,7 @@ export class SceneManager {
 
     // First try exact match on title
     for (const building of this.buildingPathMap.values()) {
-      const project = building.userData.project as ProjectData;
+      const project = projectOf(building) as ProjectData;
       if (project.title.toLowerCase() === lowerName) {
         return project;
       }
@@ -2846,7 +2860,7 @@ export class SceneManager {
 
     // Then try partial match
     for (const building of this.buildingPathMap.values()) {
-      const project = building.userData.project as ProjectData;
+      const project = projectOf(building) as ProjectData;
       if (project.title.toLowerCase().includes(lowerName) ||
         lowerName.includes(project.title.toLowerCase())) {
         return project;
@@ -2855,7 +2869,7 @@ export class SceneManager {
 
     // Try matching on path
     for (const [path, building] of this.buildingPathMap) {
-      const project = building.userData.project as ProjectData;
+      const project = projectOf(building) as ProjectData;
       if (path.toLowerCase().includes(lowerName)) {
         return project;
       }
@@ -2863,7 +2877,7 @@ export class SceneManager {
 
     // Try matching on projectDir folder name
     for (const building of this.buildingPathMap.values()) {
-      const project = building.userData.project as ProjectData;
+      const project = projectOf(building) as ProjectData;
       if (project.projectDir) {
         const dirName = project.projectDir.split(/[/\\]/).pop()?.toLowerCase();
         if (dirName && (dirName.includes(lowerName) || lowerName.includes(dirName))) {

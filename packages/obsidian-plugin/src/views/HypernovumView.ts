@@ -24,6 +24,7 @@ import {
   type WarningSeverity,
 } from '../monitors/WarningAggregator';
 import { BUILT_IN_LENSES, presetToState } from '../utils/lensPresets';
+import { asString, type Json } from '../utils/json';
 import type { LensPreset } from '../settings/SettingsTab';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
@@ -460,7 +461,7 @@ export class HypernovumView extends ItemView {
 
     // One-time notice for the 0.4 interaction-model change
     if (!this.settings.interactionHintShown) {
-      new Notice('Hypernovum: Click selects · Double-click opens · Move via right-click', 10000);
+      new Notice('Hypernovum: click selects · double-click opens · move via right-click', 10000);
       this.plugin.settings.interactionHintShown = true;
       await this.plugin.saveSettings();
     }
@@ -835,7 +836,7 @@ category: default
    */
   /** Vault backlinks between projects as undirected GraphEdges (EDG-002). */
   private computeLinkEdges(): GraphEdge[] {
-    const resolved = this.app.metadataCache.resolvedLinks as Record<string, Record<string, number>>;
+    const resolved = this.app.metadataCache.resolvedLinks;
     const projects = this.filteredProjects;
     const byNote = new Map(projects.map((p) => [p.path, p]));
     const owners = projects.map((p) => ({ prefix: p.path.replace(/\.md$/, '/'), project: p }));
@@ -1495,7 +1496,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     }
     const vaultToggle = panel.createEl('button', {
       cls: 'vault-mode-toggle',
-      text: 'VAULT MODE · OFF',
+      // Sentence case in the string; the all-caps HUD look is CSS text-transform.
+      text: 'Vault mode · off',
       attr: { title: 'Vault mode: pure 3D visualization, no AI agent features. Reloads the view.' },
     });
 
@@ -1559,7 +1561,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       });
     }
 
-    vaultToggle.textContent = `VAULT MODE · ${this.settings.vaultMode ? 'ON' : 'OFF'}`;
+    vaultToggle.textContent = `Vault mode · ${this.settings.vaultMode ? 'on' : 'off'}`;
     vaultToggle.classList.toggle('active', this.settings.vaultMode);
     vaultToggle.addEventListener('click', () => {
       // Reloads the view; the fresh view renders the new state
@@ -2638,9 +2640,14 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     }
 
     try {
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        // processFrontMatter hands back `any`; the file is the user's, so treat
+        // whatever is under `questions:` as untrusted (it may be a bare string).
+        const fm = frontmatter as Json;
         const existing = fm.questions;
-        const questions = Array.isArray(existing) ? existing.slice() : (existing ? [existing] : []);
+        const questions: string[] = Array.isArray(existing)
+          ? existing.map((q) => String(q))
+          : (asString(existing) ? [asString(existing) as string] : []);
         questions.push(question);
         fm.questions = questions;
       });
@@ -2893,8 +2900,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         return;
       }
 
-      await this.app.fileManager.processFrontMatter(file, (fm) => {
-        fm.projectDir = trimmed;
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        (frontmatter as Json).projectDir = trimmed;
       });
 
       // Drop the memoised resolution + Git snapshot so the next rebuild sees it.
@@ -3148,7 +3155,7 @@ class FolderInputModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.createEl('h3', { text: 'Launch Agent' });
+    contentEl.createEl('h3', { text: 'Launch agent' });
     contentEl.createEl('p', { text: 'Enter the project folder path:' });
 
     new Setting(contentEl)

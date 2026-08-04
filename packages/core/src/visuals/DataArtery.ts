@@ -83,7 +83,7 @@ export class DataArtery extends THREE.Group {
     const tempLine = new THREE.Line(geometry);
     tempLine.computeLineDistances();
     // Transfer the lineDistance attribute
-    const lineDistances = (tempLine.geometry as THREE.BufferGeometry).getAttribute('lineDistance');
+    const lineDistances = tempLine.geometry.getAttribute('lineDistance');
     geometry.setAttribute('lineDistance', lineDistances);
 
     // Custom shader material for animated dashed flow
@@ -162,7 +162,7 @@ export class DataArtery extends THREE.Group {
 
   /** Update the artery color */
   setColor(color: number): void {
-    this.material.uniforms.uColor.value.setHex(color);
+    (this.material.uniforms.uColor.value as THREE.Color).setHex(color);
   }
 
   /** Check if this is a persistent artery */

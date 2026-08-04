@@ -164,7 +164,7 @@ export class EdgeManager {
     if (path === 'core') return this.getCorePos();
     const mesh = this.buildingPathMap.get(path);
     if (!mesh) return null;
-    const geo = mesh.geometry as THREE.BufferGeometry;
+    const geo = mesh.geometry;
     geo.computeBoundingBox();
     return new THREE.Vector3(mesh.position.x, mesh.position.y + (geo.boundingBox?.max.y ?? 5) * 0.9, mesh.position.z);
   }

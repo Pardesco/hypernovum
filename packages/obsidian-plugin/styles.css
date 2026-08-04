@@ -422,6 +422,8 @@
   font-family: var(--font-monospace, monospace);
   font-size: 11px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: rgba(255, 255, 255, 0.95);
   letter-spacing: 1px;
   z-index: 200;
@@ -845,6 +847,7 @@
   font-family: var(--font-monospace, monospace);
   font-size: 10px;
   font-weight: 700;
+  text-transform: uppercase;
   letter-spacing: 1.5px;
   cursor: pointer;
   transition: all 0.15s ease;

@@ -161,7 +161,7 @@ export function presetForProject(input: TowerBuildInput): TowerBuildResult {
       // rotated 90° from the last — the only alternating cross-plan in the city.
       // Aspect has to be IMPOSED: the layout always hands us width === depth.
       const slabs = clamp(Math.round(floors / 2), 2, 4);
-      const spans = splitFloors(floors, new Array(slabs).fill(1));
+      const spans = splitFloors(floors, new Array<number>(slabs).fill(1));
       const chunky = input.category === 'desktop-apps';
       const segments: TowerSegment[] = spans.map((f, i) => ({
         floors: f,

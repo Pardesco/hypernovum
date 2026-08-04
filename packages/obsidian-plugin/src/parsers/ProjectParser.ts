@@ -1,5 +1,6 @@
 import { App, TFile } from 'obsidian';
 import type { HypernovumSettings, ProjectData } from '@hypernovum/core';
+import { asNumber, asString, asStringArray, type Json } from '../utils/json';
 
 export class ProjectParser {
   private app: App;
@@ -109,11 +110,13 @@ export class ProjectParser {
     const cache = this.app.metadataCache.getFileCache(file);
     if (!cache?.frontmatter) return null;
 
-    const fm = cache.frontmatter;
+    // Frontmatter is `any` at the Obsidian boundary; treat it as untrusted
+    // data from here on so the accessors below have to say what they expect.
+    const fm: Json = cache.frontmatter;
 
     // Check if this note is tagged as a project
     const projectTag = settings.projectTag || 'project';
-    const tags: string[] = fm.tags ?? [];
+    const tags = asStringArray(fm.tags) ?? [];
     const hasProjectTag =
       tags.includes(projectTag) ||
       tags.includes(`#${projectTag}`) ||
@@ -127,21 +130,21 @@ export class ProjectParser {
     // Extract project metadata from frontmatter
     return {
       path: file.path,
-      title: fm.title ?? file.basename,
-      status: this.normalizeStatus(fm.status),
-      priority: this.normalizePriority(fm.priority),
-      stage: this.normalizeStage(fm.stage ?? fm.status),
-      category: fm.category ?? fm.domain ?? 'uncategorized',
+      title: asString(fm.title) ?? file.basename,
+      status: this.normalizeStatus(asString(fm.status)),
+      priority: this.normalizePriority(asString(fm.priority)),
+      stage: this.normalizeStage(asString(fm.stage) ?? asString(fm.status)),
+      category: asString(fm.category) ?? asString(fm.domain) ?? 'uncategorized',
       scope: this.calculateScope(fm, file),
       lastModified: file.stat.mtime,
       recentActivity: this.isRecentlyActive(file.stat.mtime),
       health: this.calculateHealth(fm),
-      noteCount: fm.noteCount ?? 1,
+      noteCount: asNumber(fm.noteCount) ?? 1,
       ...taskData,
       stack: this.parseStack(fm.stack),
       questions: this.parseQuestions(fm.questions ?? fm.quests),
       answeredQuestions: this.parseQuestions(fm.answered ?? fm.quests_done),
-      projectDir: typeof fm.projectDir === 'string' ? fm.projectDir : undefined,
+      projectDir: asString(fm.projectDir),
       // Typed-graph frontmatter (Phase 4). parseQuestions normalizes string|array.
       blockedBy: this.parseQuestions(fm.blocked_by ?? fm.blockedBy),
       dependsOn: this.parseQuestions(fm.depends_on ?? fm.dependsOn),
@@ -235,7 +238,7 @@ export class ProjectParser {
       paused: 50,
       complete: 100,
     };
-    return statusHealth[String(fm.status ?? 'active').toLowerCase()] ?? 60;
+    return statusHealth[(asString(fm.status) ?? 'active').toLowerCase()] ?? 60;
   }
 
   private async parseTasks(

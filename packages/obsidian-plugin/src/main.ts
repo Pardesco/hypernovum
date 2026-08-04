@@ -284,7 +284,8 @@ export default class HypernovumPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const stored = await this.loadData();
+    // loadData() is `any`; treat it as the partial, possibly-stale object it is.
+    const stored = (await this.loadData()) as Partial<HypernovumSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
 
     // Migration: an install that predates the consent setting was already running
@@ -292,7 +293,7 @@ export default class HypernovumPlugin extends Plugin {
     // this, upgrading would silently switch Git scans, agent presence, and the
     // launch actions off — and because a restored leaf never goes through
     // activateView(), the user would never even see the prompt explaining why.
-    if (stored && (stored as Partial<HypernovumSettings>).agentFeaturesConsent === undefined) {
+    if (stored && stored.agentFeaturesConsent === undefined) {
       this.settings.agentFeaturesConsent = this.settings.vaultMode ? 'denied' : 'granted';
       await this.saveSettings();
     }
@@ -303,9 +304,8 @@ export default class HypernovumPlugin extends Plugin {
     // deliberately — it WAS the default and picking it was a no-op, so anyone
     // who touched the setting chose parametric. Carry them over once, and
     // record it, so that someone who then switches back to classic stays there.
-    const prior = stored as Partial<HypernovumSettings> | null;
-    if (prior && !prior.buildingStyleMigrated) {
-      if (prior.buildingStyle === 'classic') this.settings.buildingStyle = 'parametric';
+    if (stored && !stored.buildingStyleMigrated) {
+      if (stored.buildingStyle === 'classic') this.settings.buildingStyle = 'parametric';
       this.settings.buildingStyleMigrated = true;
       await this.saveSettings();
     }

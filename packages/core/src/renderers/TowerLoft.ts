@@ -141,7 +141,6 @@ function sampleProfile(profile: TowerProfile): { pts: { x: number; z: number }[]
  */
 export function loftTower(params: TowerLoftParams): THREE.BufferGeometry {
   const floors = Math.round(clamp(params.floors, CLAMP.floors[0], CLAMP.floors[1]));
-  const floorHeight = params.floorHeight > 0 ? params.floorHeight : 2.5;
   const taper = clamp(params.taper, CLAMP.taper[0], CLAMP.taper[1]);
   const twist = (clamp(params.twistDeg ?? 0, CLAMP.twistDeg[0], CLAMP.twistDeg[1]) * Math.PI) / 180;
   // Total height now comes from resolveParapet (`par.H`), which owns the
