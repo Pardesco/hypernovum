@@ -18,6 +18,14 @@ const prod = process.argv[2] === 'production';
 // Output to vault's plugin folder (two levels up from packages/obsidian-plugin)
 const vaultPluginDir = path.resolve(__dirname, '../../.obsidian/plugins/obsidian-hypernovum');
 
+// Obsidian's community scanner rebuilds a plugin from source and then looks for
+// the built main.js NEXT TO the manifest.json it read — i.e. the repo root, per
+// the sample-plugin layout. This monorepo emits into packages/obsidian-plugin/,
+// so the scanner found nothing and reported "build verification not available".
+// Mirroring the two build outputs to the root satisfies it. Both root copies are
+// gitignored; packages/obsidian-plugin/ remains the real output location.
+const repoRoot = path.resolve(__dirname, '../..');
+
 const context = await esbuild.context({
   banner: { js: banner },
   entryPoints: [path.resolve(__dirname, 'src/main.ts')],
@@ -32,14 +40,21 @@ const context = await esbuild.context({
       },
     },
     {
-      name: 'copy-to-dev-vault',
+      name: 'copy-outputs',
       setup(build) {
         build.onEnd(() => {
+          const built = path.resolve(__dirname, 'main.js');
+          if (!fs.existsSync(built)) return; // failed build — nothing to mirror
+
           if (fs.existsSync(vaultPluginDir)) {
-            fs.copyFileSync(path.resolve(__dirname, 'main.js'), path.resolve(vaultPluginDir, 'main.js'));
+            fs.copyFileSync(built, path.resolve(vaultPluginDir, 'main.js'));
             fs.copyFileSync(path.resolve(__dirname, 'manifest.json'), path.resolve(vaultPluginDir, 'manifest.json'));
             fs.copyFileSync(path.resolve(__dirname, 'styles.css'), path.resolve(vaultPluginDir, 'styles.css'));
           }
+
+          // Sample-plugin layout for the community scanner (see repoRoot above).
+          fs.copyFileSync(built, path.resolve(repoRoot, 'main.js'));
+          fs.copyFileSync(path.resolve(__dirname, 'styles.css'), path.resolve(repoRoot, 'styles.css'));
         });
       }
     }

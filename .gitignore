@@ -42,3 +42,9 @@ nul
 
 # Plugin build output (attached to GitHub releases by CI, not tracked)
 packages/obsidian-plugin/main.js
+
+# Root mirror of the build output. Written by esbuild so Obsidian's community
+# scanner — which rebuilds from source and looks for main.js next to the root
+# manifest.json — can verify the build. Generated, never edited, never tracked.
+/main.js
+/styles.css
