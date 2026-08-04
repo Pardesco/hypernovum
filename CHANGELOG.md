@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 — removal release (unreleased)
+## 0.5.0 — removal release (2026-08-04)
 
 A deliberate subtraction pass. Nothing here makes the city do more; it makes
 Hypernovum smaller, quieter about your filesystem, and honest about what it
