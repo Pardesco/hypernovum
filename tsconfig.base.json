@@ -10,6 +10,10 @@
     "importHelpers": true,
     "isolatedModules": true,
     "strictNullChecks": true,
+    // obsidian@1.13.x ships a .d.ts that isn't self-consistent (Menu/Modal/
+    // PopoverSuggest declare `implements HistoryHandler` without onHistoryBack).
+    // We can't fix a dependency's types, and checking them buys us nothing.
+    "skipLibCheck": true,
     "lib": ["DOM", "ES2018", "ES2021.String"],
     "sourceMap": false
   },
