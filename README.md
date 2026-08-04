@@ -87,10 +87,10 @@ backlink graph all still work.
 ### Interactions
 - **Single-click** a building to **select + focus** it — the city dims around your selection and connected neighbors stay lit; the camera doesn't move. **Double-click** opens the note. *(This changed in 0.4 — click no longer opens; a one-time hint appears.)*
 - **Esc** or a click on empty ground clears the selection; **Move building** is a right-click menu item.
-- **Right-click** menu: Launch agent · Inspect · Move building · **Trace impact** · Open folder · Open terminal · Copy path · Add quest · Open note · Focus camera.
+- **Right-click** menu: Launch agent · Set project folder · Inspect project · Move building · Open folder · Open terminal · Copy path · Add quest · **Trace impact** · Open note · Focus camera.
 - **Search and filters** narrow the city by title, status, priority, category, path, or stack — filtered-out buildings hide in place (no re-shuffling).
-- **Scan lenses** (dropdown): status, **Needs Attention** (triage), Git activity, memory-ready, task-progress ramp, recency heatmap, tech-stack — with an adaptive legend. A **⚠ badge** jumps to the attention lens.
-- **Saved lens presets**: three defaults (Active Work / Needs Attention / Agents) plus "Save current view".
+- **Scan lenses** (dropdown): status, **Needs Attention** (triage), Git activity, task-progress ramp, recency heatmap, tech-stack — with an adaptive legend. A **⚠ badge** jumps to the attention lens.
+- **Lens presets**: two one-click views — Active Work and Needs Attention.
 - **EDGES chips** toggle the typed project graph: Backlinks · Deps · Blocked · Agents.
 - **Project inspector**: git signals + recent commits, warnings, dependency sections (Depends on / Used by / Blocked by / Blocks), agent activity, and a last-session digest. **City overview** (nothing selected) shows district analytics, an attention list, and a recent-activity feed.
 - **Building style** (settings): **Parametric** data-true towers — seven silhouette families whose window rows equal their real floor count — or the original **Classic** set. Applies live.

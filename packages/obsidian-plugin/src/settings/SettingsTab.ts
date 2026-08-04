@@ -82,7 +82,8 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Project tag')
-      .setDesc('Frontmatter tag or type value used to identify project notes.')
+      .setDesc('Frontmatter tag or type value used to identify project notes.' +
+        ' Applies to city views opened after the change.')
       .addText((text) =>
         text
           .setPlaceholder('project')
@@ -95,7 +96,8 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Open the city in')
-      .setDesc('A main workspace tab gives the 3D view room to breathe. The right sidebar is cramped but stays docked.')
+      .setDesc('A main workspace tab gives the 3D view room to breathe. The right sidebar is cramped but stays docked.' +
+        ' Applies to city views opened after the change.')
       .addDropdown((dropdown) => {
         dropdown
           .addOption('tab', 'Main workspace tab')
@@ -109,7 +111,7 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Show labels')
-      .setDesc('Display building name labels above each building.')
+      .setDesc('Display building name labels above each building.' + ' Applies to city views opened after the change.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.showLabels).onChange(async (value) => {
           this.plugin.settings.showLabels = value;
@@ -119,7 +121,7 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Enable shadows')
-      .setDesc('Render shadows for buildings. Disable for better performance.')
+      .setDesc('Render shadows for buildings. Disable for better performance.' + ' Applies to city views opened after the change.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.enableShadows).onChange(async (value) => {
           this.plugin.settings.enableShadows = value;
@@ -129,7 +131,7 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Max buildings')
-      .setDesc('Maximum number of buildings to render (affects performance).')
+      .setDesc('Maximum number of buildings to render (affects performance).' + ' Applies to city views opened after the change.')
       .addSlider((slider) =>
         slider
           .setLimits(50, 500, 50)
@@ -156,7 +158,8 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Git activity layer')
-      .setDesc('Read local Git metadata from projectDir folders to show stale, hot, dirty, and branch status. Runs read-only git commands on your machine.')
+      .setDesc('Read local Git metadata from projectDir folders to show stale, hot, dirty, and branch status. Runs read-only git commands on your machine.' +
+        ' Applies to city views opened after the change.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.enableGitActivity).onChange(async (value) => {
           this.plugin.settings.enableGitActivity = value;
@@ -308,7 +311,7 @@ export class SettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Bloom intensity')
-      .setDesc('Strength of the bloom glow effect.')
+      .setDesc('Strength of the bloom glow effect.' + ' Applies to city views opened after the change.')
       .addSlider((slider) =>
         slider
           .setLimits(0.3, 2.0, 0.1)

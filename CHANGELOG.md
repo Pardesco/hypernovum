@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.5.0 — removal release (unreleased)
+
+A deliberate subtraction pass. Nothing here makes the city do more; it makes
+Hypernovum smaller, quieter about your filesystem, and honest about what it
+actually ships. Roughly 1,300 lines of source, 250 of CSS, two lenses, one
+panel and two command-palette entries are gone.
+
+### Removed — features
+
+- **ABILITIES panel.** It scanned `~/.claude/skills/` — a read of your whole
+  home directory, performed by an Obsidian plugin, to populate a list whose
+  only action was copying a sentence to the clipboard. **Hypernovum no longer
+  reads anything under your home directory.** Skills are still discovered, but
+  only inside the vault (`<vault>/.claude/skills/`), and only to tell a
+  launched agent what it already has via AGENTS.md.
+- **"Available to Install" section.** Copying `npm i -g` one-liners for other
+  vendors' CLIs was an advertisement, not a feature. Detection is unchanged:
+  agents you don't have still appear in the roster, dimmed.
+- **Memory-ready scan lens.** A whole lens keyed to a file
+  (`.hypernovum/MEMORY_CONTEXT.md`) essentially nobody creates. The Memory row
+  in the project inspector and the tooltip line both stay.
+- **"Save view" and "Delete" for lens presets**, and the built-in **"Agents"**
+  preset — which set every filter to "all" and was therefore identical to
+  *Clear filters*, and had been since it shipped. Presets you saved earlier are
+  still listed and still work.
+- **Plan-vs-action row.** It rendered only for agents passing
+  `--objective`/`--planned-files`, which nothing does. The heartbeat flags, the
+  event-log fields and the digest fields are gone with it; the session digest
+  line is unchanged.
+- **`T`**, an undocumented debug key that triggered a random data-flow
+  animation, and the unwired `1`/`2`/`3` keys.
+
+### Removed — internals
+
+- The legacy `.hypernovum-status.json` heartbeat path. Nothing has written that
+  file since 0.4.0, but every install still paid a file-existence check and
+  parse **twice a second** looking for it.
+- Eight unused `@hypernovum/core` modules (`FacetFilter`, `QueryEngine`,
+  `DecayEffect`, `GlowManager`, `VisualEncoder`, `projectStore`,
+  `CityLayoutEngine`, `MapController`) and the deprecated exports
+  `loftTopCenter`, `isParametricCategory`, `setClickHandler`,
+  `get`/`setFocusedProject`, `escapeHtml`. **This is a breaking change for
+  anything importing core directly**; the plugin itself used none of them.
+- `ActivityMonitor.simulateActivity`/`simulateStop` — test hooks with no
+  callers that were nonetheless shipping in `main.js`.
+- The `NeuralCore` `ERROR` state and the `GraphEdge` `'inferred'` source: both
+  declared, neither reachable.
+
+### Fixed
+
+- README and SCHEMA.md corrections: the "Neural Links toggle" is really the
+  **Backlinks** chip in the EDGES row (off by default); conflicts surface as
+  Attention warnings, not an inspector row; the right-click menu list was
+  missing **Set project folder**; and `projectDir` has not fallen back to the
+  vault directory since 0.4.0.
+- SCHEMA.md now documents the frontmatter aliases the parser has always
+  accepted — `quests`/`quests_done`, `blockedBy`/`dependsOn`/`noDeps`,
+  `domain` — and that `stage` falls back to `status`.
+- The nine settings that only take effect in city views opened afterwards now
+  say so.
+
+
 ## 0.4.4 — two rendering fixes (2026-08-03)
 
 ### Fixed

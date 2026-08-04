@@ -69,7 +69,7 @@ export interface Bounds {
 }
 
 /** City activity state for Neural Core visualization */
-export type CityState = 'IDLE' | 'STREAMING' | 'BULK_UPDATE' | 'ERROR';
+export type CityState = 'IDLE' | 'STREAMING' | 'BULK_UPDATE';
 
 /** Typed project-graph edge (Phase 4, §7.3). One model for all arc kinds. */
 export type EdgeType = 'backlink' | 'agent-working-on' | 'depends-on' | 'blocked-by';

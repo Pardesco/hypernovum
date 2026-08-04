@@ -29,24 +29,29 @@ The detection tag can be customized in plugin settings (default: `project`).
 
 ### Visual Encoding Fields (all optional)
 
-| Field | Type | Default | Visual Effect |
-|-------|------|---------|---------------|
-| `title` | `string` | filename | Building label |
-| `status` | `string` | `active` | **Building color** (see values below) |
-| `priority` | `string` | `medium` | **Building height** (taller = higher priority) |
-| `stage` | `string` | same as status | **X-axis position** (pipeline progression) |
-| `category` | `string` | `uncategorized` | **Z-axis position** (district clustering) |
-| `scope` | `number` | file size estimate | **Base footprint size** (larger = more complex) |
-| `health` | `number` (0-100) | derived from status | Health percentage for tooltip |
-| `noteCount` | `number` | `1` | Scope fallback + tooltip display |
-| `tasks` | `number` | parsed from checkboxes | **Window grid density** + total window count |
-| `tasks_done` | `number` | parsed from checkboxes | **Lit windows** (fill from bottom) |
-| `stack` | `string[]` or CSV | — | **Tech stack** shown on foundation hover |
-| `projectDir` | `string` | — | **Project directory** path for terminal launch (absolute or vault-relative). **Required for "Launch Claude" and "Open in Explorer" to work.** |
-| `questions` | `string[]` or `string` | — | Open research **quests** — floating gold gems above the building, published to agents. The city's "Add quest" action appends here. |
-| `blocked_by` | `string[]` or `string` | — | Projects that block this one → directed **blocked-by** edges + a "Blocked by X" warning. Refs may be `[[Wikilink]]`, a title, or a note path. |
-| `depends_on` | `string[]` or `string` | — | Explicit cross-language **depends-on** edges (for non-npm projects). Same ref forms as `blocked_by`. |
-| `no_deps` | `boolean` | `false` | Suppress automatic `package.json` dependency scanning for this project. |
+Several fields accept an alias, so notes written in either snake_case or
+camelCase — or under a name you already use — parse without rewriting them. The
+**Also accepts** column is exhaustive; when both are present the first name wins.
+
+| Field | Also accepts | Type | Default | Visual Effect |
+|-------|--------------|------|---------|---------------|
+| `title` | — | `string` | filename | Building label |
+| `status` | — | `string` | `active` | **Building color** (see values below) |
+| `priority` | — | `string` | `medium` | **Building height** (taller = higher priority) |
+| `stage` | — | `string` | **falls back to `status`** | **X-axis position** (pipeline progression) |
+| `category` | `domain` | `string` | `uncategorized` | **Z-axis position** (district clustering) |
+| `scope` | — | `number` | file size estimate | **Base footprint size** (larger = more complex) |
+| `health` | — | `number` (0-100) | derived from status | Health percentage for tooltip |
+| `noteCount` | — | `number` | `1` | Scope fallback + tooltip display |
+| `tasks` | — | `number` | parsed from checkboxes | **Window grid density** + total window count |
+| `tasks_done` | — | `number` | parsed from checkboxes | **Lit windows** (fill from bottom) |
+| `stack` | — | `string[]` or CSV | — | **Tech stack** shown on foundation hover |
+| `projectDir` | — | `string` | — | **Project directory** path for terminal launch (absolute or vault-relative). **Required for "Launch agent" and "Open folder" to work.** |
+| `questions` | `quests` | `string[]` or `string` | — | Open research **quests** — floating gold gems above the building, published to agents. The city's "Add quest" action appends here. |
+| `answered` | `quests_done` | `string[]` or `string` | — | Resolved quests. Moving an entry here from `questions` fires the emerald resolution shockwave. |
+| `blocked_by` | `blockedBy` | `string[]` or `string` | — | Projects that block this one → directed **blocked-by** edges + a "Blocked by X" warning. Refs may be `[[Wikilink]]`, a title, or a note path. |
+| `depends_on` | `dependsOn` | `string[]` or `string` | — | Explicit cross-language **depends-on** edges (for non-npm projects). Same ref forms as `blocked_by`. |
+| `no_deps` | `noDeps` | `boolean` | `false` | Suppress automatic `package.json` dependency scanning for this project. |
 
 ### Status Values → Building Color
 
@@ -74,6 +79,9 @@ The detection tag can be customized in plugin settings (default: `project`).
 | `active` | `in-progress` | Center |
 | `paused` | `on-hold` | Center-right |
 | `complete` | `done`, `archived` | Far right |
+
+Omitting `stage` is normal — it falls back to whatever `status` says, so a note
+only needs `stage` when its pipeline position differs from its health.
 
 ### Category → Z-Axis District
 
@@ -175,7 +183,7 @@ This keeps the plugin simple and avoids API key configuration. Any AI tool that 
 
 ### Critical: Always Set `projectDir`
 
-The `projectDir` field is **essential** for terminal-based features (right-click → "Launch Claude", "Open in Explorer"). Without it, the plugin cannot determine where the actual project source code lives on disk.
+The `projectDir` field is **essential** for terminal-based features (right-click → "Launch agent", "Open folder"). Without it, the plugin cannot determine where the actual project source code lives on disk, and those actions stay disabled — since 0.4.0 there is no fallback to the vault directory.
 
 **AI tools must always set `projectDir` to the absolute path of the project's root directory.** The vault note is just metadata — the real code is elsewhere on the filesystem.
 
@@ -186,5 +194,5 @@ projectDir: /home/user/projects/my-app
 # ALSO VALID — path relative to the vault root
 projectDir: ../../projects/my-app
 
-# WRONG — omitting projectDir means "Launch Claude" opens in the vault directory, not the project
+# WRONG — omitting projectDir disables "Launch agent" and "Open folder" for this project
 ```

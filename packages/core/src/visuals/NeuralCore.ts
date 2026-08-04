@@ -40,7 +40,6 @@ export class NeuralCore extends THREE.Group {
     IDLE:        { pulseSpeed: 0.5, ringSpeed: 0.3, rgbSpread: 0.15, rgbOscSpeed: 0.3 },
     STREAMING:   { pulseSpeed: 2.0, ringSpeed: 1.5, rgbSpread: 0.8,  rgbOscSpeed: 1.5 },
     BULK_UPDATE: { pulseSpeed: 3.0, ringSpeed: 2.5, rgbSpread: 1.5,  rgbOscSpeed: 3.0 },
-    ERROR:       { pulseSpeed: 8.0, ringSpeed: 0.5, rgbSpread: 2.0,  rgbOscSpeed: 8.0 },
   };
 
   constructor(options: NeuralCoreOptions = {}) {
@@ -190,13 +189,7 @@ export class NeuralCore extends THREE.Group {
       // Copy mid shell rotation so layers track
       layer.rotation.copy(this.midShell.rotation);
 
-      let offset: number;
-      if (this.state === 'ERROR') {
-        // Glitchy random offsets
-        offset = (Math.random() - 0.5) * spread * 2;
-      } else {
-        offset = Math.sin(this.pulsePhase * oscSpeed + i * 2.094) * spread;
-      }
+      const offset = Math.sin(this.pulsePhase * oscSpeed + i * 2.094) * spread;
 
       layer.position.set(
         axis.x * offset,
@@ -206,11 +199,7 @@ export class NeuralCore extends THREE.Group {
     }
 
     // --- State-based color on outer cage ---
-    if (this.state === 'ERROR') {
-      const glitch = Math.random() > 0.85 ? (Math.random() - 0.5) * 0.3 : 0;
-      this.outerCage.scale.setScalar(pulse + glitch);
-      this.outerMat.color.setRGB(1.5, 0.05, 0.05);
-    } else if (this.state === 'BULK_UPDATE') {
+    if (this.state === 'BULK_UPDATE') {
       this.outerMat.color.setRGB(0.8, 0.3, 1.2);
     } else if (this.state === 'STREAMING') {
       this.outerMat.color.setRGB(0.5, 0.1, 0.9);
@@ -234,8 +223,7 @@ export class NeuralCore extends THREE.Group {
     // Ring opacity pulsing
     for (let i = 0; i < this.ringMaterials.length; i++) {
       const baseOpacity = this.state === 'BULK_UPDATE' ? 0.95 :
-                          this.state === 'STREAMING' ? 0.85 :
-                          this.state === 'ERROR' ? 0.7 : 0.7;
+                          this.state === 'STREAMING' ? 0.85 : 0.7;
       this.ringMaterials[i].opacity = baseOpacity + Math.sin(this.pulsePhase + i) * 0.1;
     }
   }

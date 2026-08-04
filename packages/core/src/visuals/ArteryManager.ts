@@ -69,7 +69,6 @@ export class ArteryManager {
       IDLE: 0x00ffff,
       STREAMING: 0x00ffff,
       BULK_UPDATE: 0xffaa00,
-      ERROR: 0xff4444,
     };
 
     const artery = new DataArtery({
