@@ -13,8 +13,6 @@ export interface ActivityEvent {
   state?: string;
   tool?: string;
   file?: string;
-  objective?: string;
-  plannedFiles?: string[];
 }
 
 export interface SessionDigest {
@@ -25,8 +23,6 @@ export interface SessionDigest {
   endT: number;
   durationMs: number;
   filesTouched: string[];
-  objective?: string;
-  plannedFiles?: string[];
   ended: boolean;          // saw a stop event
 }
 
@@ -54,14 +50,10 @@ export function parseSessionDigest(events: ActivityEvent[]): SessionDigest | nul
   const files = new Set<string>();
   let name: string | undefined;
   let project: string | undefined;
-  let objective: string | undefined;
-  let plannedFiles: string[] | undefined;
   for (const e of sorted) {
     if (e.file) files.add(e.file);
     if (e.name) name = e.name;
     if (e.project) project = e.project;
-    if (e.objective) objective = e.objective;
-    if (e.plannedFiles && e.plannedFiles.length) plannedFiles = e.plannedFiles;
   }
 
   return {
@@ -72,8 +64,6 @@ export function parseSessionDigest(events: ActivityEvent[]): SessionDigest | nul
     endT: last.t,
     durationMs: Math.max(0, last.t - first.t),
     filesTouched: [...files],
-    objective,
-    plannedFiles,
     ended: sorted.some((e) => e.kind === 'stop'),
   };
 }

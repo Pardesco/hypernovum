@@ -1,6 +1,9 @@
 /**
- * Saved lens presets (LENS-001). Pure helpers so preset ↔ state round-tripping
- * is unit-testable; the view owns the UI wiring.
+ * Lens presets (LENS-001). Pure helpers so preset → state restoration is
+ * unit-testable; the view owns the UI wiring.
+ *
+ * 0.5 removed the save/delete UI. Presets a user saved before then are still
+ * listed and applied — the `savedLenses` setting is read, never written.
  */
 
 import type { LensPreset } from '../settings/SettingsTab';
@@ -15,7 +18,11 @@ export interface LensState {
   edgeTypes: string[];
 }
 
-/** Three shipped defaults (§Lens strategy). Agents = status, links off pre-Phase-4. */
+/**
+ * The shipped defaults. A third, "Agents", was removed in 0.5: it set
+ * layer=status with every filter at 'all', which made it byte-identical to
+ * Clear filters — a no-op that shipped through four releases unreported.
+ */
 export const BUILT_IN_LENSES: LensPreset[] = [
   {
     id: 'builtin-active', name: 'Active Work', builtIn: true,
@@ -25,24 +32,7 @@ export const BUILT_IN_LENSES: LensPreset[] = [
     id: 'builtin-attention', name: 'Needs Attention', builtIn: true,
     layer: 'attention', statusFilter: 'all', priorityFilter: 'all', categoryFilter: 'all', edgeTypes: [],
   },
-  {
-    id: 'builtin-agents', name: 'Agents', builtIn: true,
-    layer: 'status', statusFilter: 'all', priorityFilter: 'all', categoryFilter: 'all', edgeTypes: [],
-  },
 ];
-
-/** Capture the current view state as a named preset. */
-export function stateToPreset(id: string, name: string, s: LensState): LensPreset {
-  return {
-    id, name,
-    layer: s.layer,
-    statusFilter: s.statusFilter,
-    priorityFilter: s.priorityFilter,
-    categoryFilter: s.categoryFilter,
-    searchQuery: s.searchQuery || undefined,
-    edgeTypes: [...s.edgeTypes],
-  };
-}
 
 /** Restore the state a preset encodes. */
 export function presetToState(p: LensPreset): LensState {
@@ -54,12 +44,4 @@ export function presetToState(p: LensPreset): LensState {
     searchQuery: p.searchQuery ?? '',
     edgeTypes: [...p.edgeTypes],
   };
-}
-
-/** Stable id for a user-saved preset (no Date.now/random — derive from name + existing). */
-export function nextPresetId(existing: LensPreset[]): string {
-  let n = existing.length + 1;
-  const ids = new Set(existing.map((p) => p.id));
-  while (ids.has(`lens-${n}`)) n++;
-  return `lens-${n}`;
 }

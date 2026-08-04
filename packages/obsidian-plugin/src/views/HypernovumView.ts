@@ -23,13 +23,7 @@ import {
   type WarningItem,
   type WarningSeverity,
 } from '../monitors/WarningAggregator';
-import {
-  BUILT_IN_LENSES,
-  stateToPreset,
-  presetToState,
-  nextPresetId,
-  type LensState,
-} from '../utils/lensPresets';
+import { BUILT_IN_LENSES, presetToState } from '../utils/lensPresets';
 import type { LensPreset } from '../settings/SettingsTab';
 import { GitActivityCollector } from '../monitors/GitActivityCollector';
 import { TerminalLauncher } from '../utils/TerminalLauncher';
@@ -48,7 +42,13 @@ import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
 
-type VisualLayer = 'status' | 'git' | 'memory' | 'tasks' | 'recency' | 'stack' | 'attention';
+type VisualLayer = 'status' | 'git' | 'tasks' | 'recency' | 'stack' | 'attention';
+const VISUAL_LAYERS: readonly VisualLayer[] = ['status', 'git', 'tasks', 'recency', 'stack', 'attention'];
+
+/** Coerce a persisted/legacy layer id to a live one ('memory' was dropped in 0.5). */
+function toVisualLayer(value: unknown): VisualLayer {
+  return VISUAL_LAYERS.includes(value as VisualLayer) ? (value as VisualLayer) : 'status';
+}
 
 interface DirectoryDialog {
   showOpenDialog(options: {
@@ -206,7 +206,6 @@ export class HypernovumView extends ItemView {
   private degradedCount = 0;
   private attentionBadge: HTMLElement | null = null;
   private presetSelect: HTMLSelectElement | null = null;
-  private presetDeleteBtn: HTMLButtonElement | null = null;
   private gitCollector = new GitActivityCollector();
   private projects: ProjectData[] = [];
   private allProjects: ProjectData[] = [];
@@ -781,7 +780,6 @@ category: default
       status: this.statusFilter,
       priority: this.priorityFilter,
       category: this.categoryFilter,
-      memoryOnly: this.visualLayer === 'memory',
     });
 
     this.projects = this.filteredProjects;
@@ -1115,7 +1113,6 @@ category: default
       status: 'STATUS',
       attention: 'NEEDS ATTENTION',
       git: 'GIT ACTIVITY',
-      memory: 'MEMORY',
       tasks: 'TASK PROGRESS',
       recency: 'RECENCY',
       stack: 'TECH STACK',
@@ -1150,19 +1147,6 @@ category: default
         appendLegendItem(list, '#dd3333', 'Glitch — merge conflict');
         appendLegendItem(list, '#6b6b7a', 'Dim — stale repository');
         section.createDiv({ cls: 'legend-note', text: 'Status colors still apply beneath signals' });
-        break;
-      }
-
-      case 'memory': {
-        const ready = this.allProjects.filter((p) => p.hasMemoryContext).length;
-        const section = body.createDiv({ cls: 'legend-section' });
-        section.createDiv({ cls: 'legend-label', text: 'Filter · Memory' });
-        const list = section.createDiv({ cls: 'legend-list' });
-        appendLegendItem(list, '#66e0a3', 'Memory-ready projects only');
-        section.createDiv({
-          cls: 'legend-note',
-          text: `${ready} of ${this.allProjects.length} projects carry MEMORY_CONTEXT.md`,
-        });
         break;
       }
 
@@ -1473,7 +1457,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       ['status', 'Status'],
       ['attention', 'Needs attention'],
       ['git', 'Git activity'],
-      ['memory', 'Memory ready'],
       ['tasks', 'Task progress'],
       ['recency', 'Recency'],
       ['stack', 'Tech stack'],
@@ -1483,17 +1466,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     presetRow.createEl('label', { text: 'Preset' });
     const presetControls = presetRow.createDiv({ cls: 'preset-controls' });
     const presetSelect = presetControls.createEl('select', { cls: 'preset-select' });
-    const presetSave = presetControls.createEl('button', {
-      cls: 'preset-save',
-      text: 'Save view',
-      attr: { title: 'Save the current view as a preset' },
-    });
-    const presetDelete = presetControls.createEl('button', {
-      cls: 'preset-delete',
-      text: 'Delete',
-      attr: { title: 'Delete the selected preset' },
-    });
-    presetDelete.hidden = true;
 
     const filters = panel.createDiv({ cls: 'command-filters' });
     const statusSelect = filters.createEl('select', { cls: 'status-select' });
@@ -1543,13 +1515,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     // Lens presets (LENS-001)
     this.presetSelect = presetSelect;
-    this.presetDeleteBtn = presetDelete;
     this.renderPresetOptions();
     this.presetSelect.addEventListener('change', () => this.onPresetSelected());
-    presetSave.addEventListener('click', () => this.saveCurrentLens());
-    this.presetDeleteBtn.addEventListener('click', () => {
-      void this.deleteSelectedPreset();
-    });
 
     // Debounce so a rebuild fires once per typing pause, not per keystroke (PERF-001).
     const debouncedSearch = debounce(() => this.applyView(), 200, false);
@@ -1773,33 +1740,21 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     }
 
     select.value = '';
-    if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = true;
-  }
-
-  private currentLensState(): LensState {
-    return {
-      layer: this.visualLayer,
-      statusFilter: this.statusFilter,
-      priorityFilter: this.priorityFilter,
-      categoryFilter: this.categoryFilter,
-      searchQuery: this.searchQuery,
-      edgeTypes: [...this.edgeTypes],
-    };
   }
 
   private onPresetSelected(): void {
     const id = this.presetSelect?.value ?? '';
-    if (!id) { if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = true; return; }
+    if (!id) return;
     const preset = this.allPresets().find((p) => p.id === id);
     if (!preset) return;
     this.applyLensPreset(preset);
-    // Only custom (non-builtin) presets are deletable.
-    if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = !!preset.builtIn;
   }
 
   private applyLensPreset(preset: LensPreset): void {
     const s = presetToState(preset);
-    this.visualLayer = s.layer as VisualLayer;
+    // Coerce, don't cast: a preset saved before 0.5 can name the removed
+    // 'memory' lens, and an unknown layer would leave the city uncolored.
+    this.visualLayer = toVisualLayer(s.layer);
     // A category that no longer exists falls back to 'all' silently.
     const catExists = this.categorySelect?.querySelector(`option[value="${CSS.escape(s.categoryFilter)}"]`) != null;
     this.statusFilter = s.statusFilter;
@@ -1819,36 +1774,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     this.applyView(); // recomputes + renders edges, applies edgeTypes
   }
 
-  private saveCurrentLens(): void {
-    new TextInputModal(
-      this.app,
-      { title: 'Save lens preset', label: 'Preset name', placeholder: 'e.g. Blocked work', cta: 'Save' },
-      (name) => {
-        void this.persistCurrentLens(name);
-      },
-    ).open();
-  }
-
-  private async persistCurrentLens(name: string): Promise<void> {
-    const id = nextPresetId(this.settings.savedLenses);
-    this.plugin.settings.savedLenses.push(stateToPreset(id, name, this.currentLensState()));
-    await this.plugin.saveSettings();
-    this.renderPresetOptions();
-    if (this.presetSelect) this.presetSelect.value = id;
-    if (this.presetDeleteBtn) this.presetDeleteBtn.hidden = false;
-    new Notice(`Saved lens "${name}"`);
-  }
-
-  private async deleteSelectedPreset(): Promise<void> {
-    const id = this.presetSelect?.value ?? '';
-    const idx = this.settings.savedLenses.findIndex((p) => p.id === id);
-    if (idx < 0) return;
-    const [removed] = this.plugin.settings.savedLenses.splice(idx, 1);
-    await this.plugin.saveSettings();
-    this.renderPresetOptions();
-    new Notice(`Deleted lens "${removed.name}"`);
-  }
-
   /** Per-project severity color map for the Needs-Attention lens (visible projects only). */
   private attentionLensColors(): Map<string, number> {
     const severity = topSeverityByProject(this.warnings);
@@ -1863,10 +1788,9 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
   private updateSummary(): void {
     if (!this.summaryEl) return;
     const gitCount = this.allProjects.filter((p) => p.gitActivity).length;
-    const memoryCount = this.allProjects.filter((p) => p.hasMemoryContext).length;
     const questCount = this.allProjects.reduce((sum, p) => sum + (p.questions?.length ?? 0), 0);
     const questPart = questCount > 0 ? ` | ◆ ${questCount} quests` : '';
-    this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git | ${memoryCount} memory${questPart}`;
+    this.summaryEl.textContent = `${this.filteredProjects.length}/${this.allProjects.length} shown | ${gitCount} git${questPart}`;
     if (this.fallbackBanner) this.fallbackBanner.hidden = !this.vaultFallback;
   }
 
@@ -2041,15 +1965,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     const section = this.createSection(parent, 'Session');
     this.appendSignalRow(section, 'Last session', parts.join(' · '));
-
-    // Plan-vs-action lite (SES-003): only when the agent declared plannedFiles.
-    if (digest.plannedFiles && digest.plannedFiles.length) {
-      this.appendSignalRow(
-        section,
-        'Plan vs action',
-        `planned ${digest.plannedFiles.length} · touched ${files}`,
-      );
-    }
   }
 
   /** Depends on / Used by / Blocked by / Blocks sections for one project (EDG-007). */

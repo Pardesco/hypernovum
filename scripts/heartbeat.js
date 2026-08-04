@@ -45,8 +45,6 @@
  *   --action          human phrase, e.g. "Editing cart.ts"
  *   --tool            tool name (Edit/Read/Bash/…) — used to infer state
  *   --file            most recent file (project-relative preferred)
- *   --objective       optional intent statement (SES-003)
- *   --planned-files   optional comma-separated planned file list (SES-003)
  *   --session-start   epoch ms the session began (defaults to first-seen)
  *   --branch          working-tree branch snapshot (optional)
  *   --dirty-at-start  "true" if the tree was dirty when the session began
@@ -183,8 +181,6 @@ function logSessionEvent(vaultPath, snap, prior, isStop, now) {
     state: snap.state,
     tool: snap.tool ?? undefined,
     file: snap.file ?? undefined,
-    objective: snap.objective,
-    plannedFiles: snap.plannedFiles,
   };
 
   try {
@@ -382,10 +378,6 @@ function main() {
     action: inheritOnStop(strOrNull(params.action), prior && prior.action),
     tool: inheritOnStop(strOrNull(params.tool), prior && prior.tool),
     file: inheritOnStop(strOrNull(params.file), prior && prior.file),
-    objective: strOrUndef(params.objective) ?? (prior ? prior.objective : undefined),
-    plannedFiles: strOrUndef(params['planned-files'])
-      ? String(params['planned-files']).split(',').map((f) => f.trim()).filter(Boolean)
-      : (prior ? prior.plannedFiles : undefined),
     sessionStart: effectiveStart,
     lastPing: now,
     branch: strOrUndef(params.branch) ?? (prior ? prior.branch : undefined),

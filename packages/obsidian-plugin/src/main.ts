@@ -85,7 +85,6 @@ export default class HypernovumPlugin extends Plugin {
       { id: 'lens-status', name: 'Scan lens: status', run: (v) => v.commandSetLayer('status') },
       { id: 'lens-attention', name: 'Scan lens: needs attention', run: (v) => v.commandSetLayer('attention') },
       { id: 'lens-git', name: 'Scan lens: Git activity', run: (v) => v.commandSetLayer('git') },
-      { id: 'lens-memory', name: 'Scan lens: memory ready', run: (v) => v.commandSetLayer('memory') },
       { id: 'lens-tasks', name: 'Scan lens: task progress', run: (v) => v.commandSetLayer('tasks') },
       { id: 'lens-recency', name: 'Scan lens: recency', run: (v) => v.commandSetLayer('recency') },
       { id: 'lens-stack', name: 'Scan lens: tech stack', run: (v) => v.commandSetLayer('stack') },

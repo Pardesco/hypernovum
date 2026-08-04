@@ -34,14 +34,12 @@ describe('parseSessionDigest', () => {
     expect(d.ended).toBe(true);
   });
 
-  it('captures objective + plannedFiles for plan-vs-action (SES-003)', () => {
+  it('ignores unknown event fields left over from older heartbeats', () => {
     const d = parseSessionDigest([
       ev({ t: 1, kind: 'session-start', objective: 'ship cart', plannedFiles: ['x.ts', 'y.ts'] }),
       ev({ t: 2, file: 'x.ts' }),
       ev({ t: 3, file: 'z.ts' }),
     ])!;
-    expect(d.objective).toBe('ship cart');
-    expect(d.plannedFiles).toEqual(['x.ts', 'y.ts']);
     expect(d.filesTouched.sort()).toEqual(['x.ts', 'z.ts']);
   });
 

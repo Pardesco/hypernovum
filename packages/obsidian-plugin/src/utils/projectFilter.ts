@@ -11,7 +11,6 @@ export interface FilterCriteria {
   status: string;         // 'all' or a status
   priority: string;       // 'all' or a priority
   category: string;       // 'all' or a category
-  memoryOnly: boolean;    // memory lens → only projects with memory context
 }
 
 export function projectMatchesFilters(project: ProjectData, c: FilterCriteria): boolean {
@@ -25,7 +24,6 @@ export function projectMatchesFilters(project: ProjectData, c: FilterCriteria): 
   if (c.status !== 'all' && project.status !== c.status) return false;
   if (c.priority !== 'all' && project.priority !== c.priority) return false;
   if (c.category !== 'all' && project.category !== c.category) return false;
-  if (c.memoryOnly && !project.hasMemoryContext) return false;
   return true;
 }
 

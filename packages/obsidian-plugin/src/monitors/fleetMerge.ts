@@ -16,8 +16,6 @@ export interface HeartbeatSnapshotV2 {
   action: string | null;
   tool?: string | null;
   file?: string | null;
-  objective?: string;
-  plannedFiles?: string[];
   sessionStart: number;
   lastPing: number;
   branch?: string;
@@ -45,8 +43,6 @@ export interface AgentPresence {
   sessionStart?: number;
   dirtyAtStart?: boolean;
   branch?: string;
-  objective?: string;
-  plannedFiles?: string[];
   active: boolean;            // snapshot did not signal stop/complete
 }
 
@@ -87,10 +83,6 @@ export function parseSnapshotToPresence(value: unknown): AgentPresence | null {
     sessionStart: Number(raw.sessionStart) || lastPing,
     dirtyAtStart: typeof raw.dirtyAtStart === 'boolean' ? raw.dirtyAtStart : undefined,
     branch: str(raw.branch),
-    objective: str(raw.objective),
-    plannedFiles: Array.isArray(raw.plannedFiles)
-      ? raw.plannedFiles.filter((f: unknown): f is string => typeof f === 'string')
-      : undefined,
     active: state !== 'complete' && state !== 'failed' && raw.stoppedAt == null,
   };
 }

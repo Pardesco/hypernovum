@@ -9,7 +9,7 @@ function proj(over: Partial<ProjectData> = {}): ProjectData {
   } as ProjectData;
 }
 
-const all: FilterCriteria = { query: '', status: 'all', priority: 'all', category: 'all', memoryOnly: false };
+const all: FilterCriteria = { query: '', status: 'all', priority: 'all', category: 'all' };
 
 describe('projectMatchesFilters', () => {
   it('passes everything under the default (all) criteria', () => {
@@ -27,11 +27,6 @@ describe('projectMatchesFilters', () => {
     expect(projectMatchesFilters(proj({ priority: 'low' }), { ...all, priority: 'high' })).toBe(false);
     expect(projectMatchesFilters(proj({ category: 'art' }), { ...all, category: 'web-apps' })).toBe(false);
     expect(projectMatchesFilters(proj(), { ...all, status: 'active', priority: 'high', category: 'web-apps' })).toBe(true);
-  });
-
-  it('memory lens keeps only memory-ready projects', () => {
-    expect(projectMatchesFilters(proj({ hasMemoryContext: true }), { ...all, memoryOnly: true })).toBe(true);
-    expect(projectMatchesFilters(proj({ hasMemoryContext: false }), { ...all, memoryOnly: true })).toBe(false);
   });
 
   it('combines predicates with AND', () => {
