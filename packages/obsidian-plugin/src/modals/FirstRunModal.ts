@@ -34,7 +34,7 @@ export class FirstRunModal extends Modal {
       'Runs read-only git commands in folders you link with projectDir.',
       'Checks whether claude / codex / agy are installed on your PATH.',
       'Opens a terminal and launches your chosen agent CLI when you ask it to.',
-      'Reads SKILL.md files in your vault and in ~/.claude/skills/.',
+      'Reads SKILL.md files inside your vault, in .claude/skills/.',
       'Writes a .hypernovum/SETUP.md into a project folder when you launch an agent there.',
     ]) {
       list.createEl('li', { text: item });

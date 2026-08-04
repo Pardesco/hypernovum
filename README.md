@@ -116,7 +116,7 @@ backlink graph all still work.
 
 ### Git and memory signals
 - **Read-only Git activity layer** shows recent commit velocity, branch, working-tree state, stale projects, and merge conflict signals
-- **Memory-ready filter** finds projects that already have `.hypernovum/MEMORY_CONTEXT.md`
+- **Memory signal** — the project inspector and the building tooltip show whether a project already has `.hypernovum/MEMORY_CONTEXT.md`
 
 ![Git activity lens — commit churn, merge conflicts and stale repositories rendered onto the skyline](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/git-activity.png)
 
