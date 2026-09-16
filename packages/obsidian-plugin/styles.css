@@ -2,6 +2,8 @@
 
 .hypernovum-container {
   position: relative;
+  container-type: inline-size;
+  container-name: hypernovum;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -1358,7 +1360,7 @@
   }
 }
 
-@media (max-width: 920px) {
+@container hypernovum (max-width: 920px) {
   .hypernovum-command-panel {
     top: 58px;
     left: 12px;
