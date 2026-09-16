@@ -492,6 +492,12 @@ export class SettingsTab extends PluginSettingTab {
           }),
       );
 
+    new Setting(containerEl)
+      .setName('Obsidian format skills')
+      .setDesc('Install pinned MIT skills by Steph Ango for Markdown, Bases, and Canvas in this vault. Offline; existing skill folders are preserved. Includes license and source revision.')
+      .addButton(button => button.setButtonText('Install for Codex').onClick(() => this.plugin.installBundledSkills('codex')))
+      .addButton(button => button.setButtonText('Install for Claude').onClick(() => this.plugin.installBundledSkills('claude')));
+
     new Setting(containerEl).setName('Vault mode').setHeading();
 
     new Setting(containerEl)

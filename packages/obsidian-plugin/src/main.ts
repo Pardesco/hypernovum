@@ -3,6 +3,7 @@ import { HypernovumView, VIEW_TYPE } from './views/HypernovumView';
 import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
 import { ProjectParser } from './parsers/ProjectParser';
 import { prepareVaultForAgents } from './utils/VaultAgentSetup';
+import { installObsidianSkills } from './utils/BundledSkills';
 import { scanSkills } from './utils/SkillsScanner';
 import { generateDailyBriefing } from './utils/BriefingGenerator';
 import {
@@ -62,10 +63,24 @@ export default class HypernovumPlugin extends Plugin {
       callback: () => { void this.toggleVaultMode(); },
     });
 
+    for (const provider of ['codex', 'claude'] as const) {
+      this.addCommand({ id: `install-obsidian-skills-${provider}`, name: `Install bundled Obsidian skills for ${provider === 'codex' ? 'Codex' : 'Claude Code'}`,
+        callback: () => this.installBundledSkills(provider) });
+    }
+
     this.registerViewCommands();
 
     // Settings tab
     this.addSettingTab(new SettingsTab(this.app, this));
+  }
+
+  installBundledSkills(provider: 'codex' | 'claude'): void {
+    const vaultPath = getVaultBasePath(this.app);
+    if (!vaultPath) { new Notice('Local skills require a desktop vault.'); return; }
+    try {
+      const result = installObsidianSkills(vaultPath, provider);
+      new Notice(`Obsidian skills: ${result.installed.length} installed, ${result.skipped.length} existing folders preserved. Restart your agent to discover new skills.`);
+    } catch (error) { new Notice(`Could not install skills: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
   /**

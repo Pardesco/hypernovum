@@ -46,7 +46,7 @@ const context = await esbuild.context({
           const built = path.resolve(__dirname, 'main.js');
           if (!fs.existsSync(built)) return; // failed build — nothing to mirror
 
-          if (fs.existsSync(vaultPluginDir)) {
+          if (process.env.HYPERNOVUM_SKIP_VAULT_COPY !== '1' && fs.existsSync(vaultPluginDir)) {
             fs.copyFileSync(built, path.resolve(vaultPluginDir, 'main.js'));
             fs.copyFileSync(path.resolve(__dirname, 'manifest.json'), path.resolve(vaultPluginDir, 'manifest.json'));
             fs.copyFileSync(path.resolve(__dirname, 'styles.css'), path.resolve(vaultPluginDir, 'styles.css'));

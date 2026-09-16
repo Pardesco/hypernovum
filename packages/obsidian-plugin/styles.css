@@ -1514,3 +1514,7 @@
   border-radius: 3px;
 }
 .fallback-banner-action:hover { background: rgba(255, 170, 40, 0.22); }
+.hypernovum-fallback-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; margin: 12px 0; }
+.hypernovum-fallback-list button { text-align: left; white-space: normal; height: auto; padding: 8px; }
+.hypernovum-container button:focus-visible, .hypernovum-container select:focus-visible, .hypernovum-container input:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 3px; }
+button.dep-row { width: 100%; height: auto; text-align: left; }

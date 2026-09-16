@@ -39,9 +39,12 @@ function isWorking(s: AgentSession): boolean {
 
 /** Normalize a file key against the project dir so relative/absolute forms match. */
 function normalize(file: string, projectDir?: string): string {
-  let f = file.replace(/\\/g, '/').toLowerCase().trim();
+  let f = file.replace(/\\/g, '/').trim();
+  const insensitive = /^[a-z]:/i.test(projectDir ?? file);
+  if (insensitive) f = f.toLowerCase();
   if (projectDir) {
-    const dir = projectDir.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '');
+    const rawDir = projectDir.replace(/\\/g, '/').replace(/\/+$/, '');
+    const dir = insensitive ? rawDir.toLowerCase() : rawDir;
     if (dir && f.startsWith(dir + '/')) f = f.slice(dir.length + 1);
   }
   return f.replace(/^\.\//, '').replace(/^\/+/, '');
@@ -49,7 +52,7 @@ function normalize(file: string, projectDir?: string): string {
 
 /** Files a session touched on a given project, normalized. */
 function normalizedFiles(s: AgentSession, projectPath: string, projectDir?: string): Set<string> {
-  const raw = s.filesTouched.get(projectPath);
+  const raw = s.filesWritten?.get(projectPath);
   if (!raw) return new Set();
   return new Set([...raw].map((f) => normalize(f, projectDir)));
 }
@@ -87,11 +90,18 @@ export function detectConflicts(sessions: AgentSession[], projects: ProjectData[
       const project = byPath.get(projectPath);
       const pair = [a.sessionId, b.sessionId].sort();
 
-      const filesA = normalizedFiles(a, projectPath, project?.projectDir);
-      const filesB = normalizedFiles(b, projectPath, project?.projectDir);
+      const filesA = normalizedFiles(a, projectPath, a.checkoutPath || project?.projectDir);
+      const filesB = normalizedFiles(b, projectPath, b.checkoutPath || project?.projectDir);
       const shared = intersect(filesA, filesB);
 
-      if (shared.length >= 1) {
+      const checkoutA = a.checkoutPath || project?.projectDir;
+      const checkoutB = b.checkoutPath || project?.projectDir;
+      const sameCheckout = !!checkoutA && !!checkoutB && normalize(checkoutA) === normalize(checkoutB);
+      if (shared.length >= 1 && !sameCheckout) {
+        add({ key: `overlapping-files|${pair.join('|')}|isolated`, kind: 'overlapping-files', severity: 'info',
+          sessions: pair, projectPaths: [projectPath], files: shared.slice(0, MAX_FILES_LISTED),
+          message: `${displayName(a)} and ${displayName(b)} edited common files in different or unknown checkouts; review before integration` });
+      } else if (shared.length >= 1) {
         // A lone shared file is always the acute same-file (high) signal;
         // broad overlap (≥3 files, or ≥2 at ≥30% of the smaller set) is the
         // softer overlapping-files (medium) awareness signal.
@@ -107,7 +117,7 @@ export function detectConflicts(sessions: AgentSession[], projects: ProjectData[
             sessions: pair,
             projectPaths: [projectPath],
             files: shared.slice(0, MAX_FILES_LISTED),
-            message: `${displayName(a)} and ${displayName(b)} both touched ${shared[0]}`,
+            message: `${displayName(a)} and ${displayName(b)} both edited ${shared[0]} in the same checkout`,
           });
         } else {
           add({
@@ -154,14 +164,14 @@ export function detectConflicts(sessions: AgentSession[], projects: ProjectData[
     }
 
     // complete-while-conflicted: session finished while the repo is mid-merge.
-    if (s.state === 'complete' && git?.hasMergeConflicts) {
+    if (s.state === 'complete' && git?.hasMergeConflicts && (!s.checkoutPath || (project.projectDir && normalize(s.checkoutPath) === normalize(project.projectDir)))) {
       add({
         key: `complete-while-conflicted|${s.sessionId}|${s.projectPath}`,
         kind: 'complete-while-conflicted',
         severity: 'high',
         sessions: [s.sessionId],
         projectPaths: [s.projectPath],
-        message: `${displayName(s)} completed while ${project.title} has an unresolved merge`,
+        message: `${displayName(s)} stopped while ${project.title} has an unresolved merge`,
       });
     }
   }

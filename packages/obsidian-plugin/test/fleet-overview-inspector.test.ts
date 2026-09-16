@@ -192,9 +192,9 @@ describe('city overview fleet summary (AGT-009 regression)', () => {
     expect(panel.findAll('fleet-summary')[0].text).toBe('1 active · 0 waiting · 0 conflicts');
 
     // Same session, but pings stopped 30s ago → §10 age ladder puts it in
-    // 'waiting'; the overview must follow without any selection happening.
+    // 'stale'; the overview must follow without any selection happening.
     (view as unknown as FleetUpdate).onFleetUpdate([presence({ lastPing: now - 30_000 })]);
-    expect(panel.findAll('fleet-summary')[0].text).toBe('0 active · 1 waiting · 0 conflicts');
+    expect(panel.findAll('fleet-summary')[0].text).toBe('0 active · 0 waiting · 0 conflicts');
   });
 
   it('agent-derived warnings reach the overview Attention list', () => {

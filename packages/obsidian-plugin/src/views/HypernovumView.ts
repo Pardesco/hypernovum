@@ -316,7 +316,7 @@ export class HypernovumView extends ItemView {
     // Fail visibly rather than showing a black rectangle when WebGL is off
     // (hardware acceleration disabled, blocklisted GPU, remote session).
     if (!SceneManager.isWebGLAvailable()) {
-      this.renderWebGLUnavailable(container);
+      await this.renderWebGLUnavailable(container);
       return;
     }
 
@@ -532,19 +532,34 @@ category: default
   }
 
   /** Explain a missing WebGL context instead of leaving an empty black panel. */
-  private renderWebGLUnavailable(container: HTMLElement): void {
+  private async renderWebGLUnavailable(container: HTMLElement): Promise<void> {
     const panel = container.createDiv({ cls: 'hypernovum-webgl-missing' });
     panel.createDiv({ cls: 'empty-kicker', text: 'NO SIGNAL' });
-    panel.createEl('h3', { text: 'WebGL is unavailable' });
+    panel.createEl('h3', { text: 'Project list' });
     panel.createEl('p', {
       text:
-        'Hypernovum renders with WebGL, which this Obsidian window cannot start. ' +
-        'This is almost always hardware acceleration being switched off.',
+        'The 3D view is unavailable. You can still search projects and open notes below.',
     });
     const steps = panel.createEl('ul');
     steps.createEl('li', { text: 'Settings → Appearance → turn on hardware acceleration, then restart Obsidian.' });
     steps.createEl('li', { text: 'On a remote/virtual desktop, GPU access may not be available at all.' });
     steps.createEl('li', { text: 'Otherwise, update your graphics drivers.' });
+
+    let projects = await this.parser.parseProjects(this.settings);
+    if (projects.length === 0) projects = await this.parser.parseVaultAsCity(this.settings);
+    const search = panel.createEl('input', { attr: { type: 'search', placeholder: 'Search notes and projects', 'aria-label': 'Search notes and projects' } });
+    const list = panel.createDiv({ cls: 'hypernovum-fallback-list' });
+    const render = () => {
+      list.empty();
+      const query = search.value.trim().toLowerCase();
+      for (const project of projects.filter(p => `${p.title} ${p.path}`.toLowerCase().includes(query)).slice(0, 200)) {
+        const row = list.createEl('button', { text: `${project.title} - ${project.status}`, attr: { type: 'button', title: project.path } });
+        row.addEventListener('click', () => { void this.app.workspace.openLinkText(project.path, '', false); });
+      }
+      if (!list.children.length) list.createEl('p', { text: 'No matching notes or projects.' });
+    };
+    search.addEventListener('input', render);
+    render();
 
     const retry = panel.createEl('button', { text: 'Try again' });
     retry.addEventListener('click', () => {
@@ -1453,7 +1468,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
     const layerRow = panel.createDiv({ cls: 'command-row' });
     layerRow.createEl('label', { text: 'Layer' });
-    const layerSelect = layerRow.createEl('select', { cls: 'layer-select' });
+    const layerSelect = layerRow.createEl('select', { cls: 'layer-select', attr: { 'aria-label': 'Color projects by' } });
     for (const [value, label] of [
       ['status', 'Status'],
       ['attention', 'Needs attention'],
@@ -1678,7 +1693,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     targetPath: string,
     decorate: (row: HTMLElement) => void,
   ): void {
-    const row = parent.createDiv({ cls: 'dep-row' });
+    const row = parent.createEl('button', { cls: 'dep-row', attr: { type: 'button' } });
     decorate(row);
     row.addEventListener('click', () => this.runWarningAction('focus', targetPath));
   }
@@ -1725,7 +1740,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     // Saved preset names are user input, so these options are built as elements.
     const select = this.presetSelect;
     select.empty();
-    select.createEl('option', { value: '', text: 'Presets…' });
+    select.createEl('option', { value: '', text: 'Views…' });
 
     const defaults = select.createEl('optgroup');
     defaults.label = 'Defaults';
@@ -1798,7 +1813,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   /** State chip reusing the agent-state CSS classes. */
   private appendAgentStateChip(parent: HTMLElement, state: string): void {
-    parent.createSpan({ cls: `agent-state agent-state-${state}`, text: state });
+    parent.createSpan({ cls: `agent-state agent-state-${state}`, text: state === 'complete' ? 'Stopped - unverified' : state === 'stale' ? 'Telemetry stale' : state });
   }
 
   /** Inspector "Agents" section for one project (AGT-009). */
@@ -1837,7 +1852,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (completed.length > 0) {
       section.createDiv({
         cls: 'agent-completed',
-        text: `${completed.length} completed session${completed.length > 1 ? 's' : ''} · last 24h`,
+        text: `${completed.length} stopped session${completed.length > 1 ? 's' : ''} · last 24h`,
       });
     }
   }
@@ -2302,7 +2317,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     for (const s of this.fleetSessions) {
       if (s.state === 'complete' && now - s.lastPing <= DAY) {
         const title = s.projectPath ? this.allProjects.find((p) => p.path === s.projectPath)?.title ?? '' : '';
-        rows.push({ ts: s.lastPing, label: `${title ? `${title} — ` : ''}${s.name} session complete` });
+        rows.push({ ts: s.lastPing, label: `${title ? `${title} — ` : ''}${s.name} session stopped; outcome unverified` });
       }
     }
 
@@ -2376,7 +2391,7 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (topWarnings.length === 0) {
       attention.createDiv({
         cls: 'inspector-empty-inline',
-        text: 'City is healthy — nothing needs you',
+        text: 'No current attention signals',
       });
     } else {
       const shown = topWarnings.slice(0, 8);

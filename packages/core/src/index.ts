@@ -49,3 +49,5 @@ export type { InteractionState, InteractionStore, TraceImpactState } from './sto
 
 // Utils
 export { debugLog } from './utils/log';
+
+export { agentCommandWithContext } from './utils/agentHandoff';

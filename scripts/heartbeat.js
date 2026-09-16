@@ -375,6 +375,7 @@ function main() {
     /** Agent working directory — matched against resolved project dirs by the plugin. */
     cwd: strOrNull(params.cwd) ?? (prior ? prior.cwd ?? null : null),
     state,
+    outcome: 'unverified', // A Stop hook is not a test result or acceptance signal.
     action: inheritOnStop(strOrNull(params.action), prior && prior.action),
     tool: inheritOnStop(strOrNull(params.tool), prior && prior.tool),
     file: inheritOnStop(strOrNull(params.file), prior && prior.file),
@@ -400,7 +401,7 @@ function main() {
   logSessionEvent(vaultPath, snapshot, prior, !!params.stop, now);
 
   if (params.stop) {
-    console.log(`Hypernovum: session ${sessionId} marked complete`);
+    console.log(`Hypernovum: session ${sessionId} stopped (outcome unverified)`);
   }
   // Silent success for hook usage otherwise.
 }

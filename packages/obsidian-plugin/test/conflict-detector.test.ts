@@ -22,6 +22,8 @@ function sess(over: Partial<AgentSession> = {}): AgentSession {
     state: 'editing' as AgentState,
     action: null,
     filesTouched: new Map(),
+    filesWritten: new Map(),
+    checkoutPath: 'C:/repos/app',
     sessionStart: 0,
     lastPing: 0,
     legacy: false,
@@ -31,6 +33,7 @@ function sess(over: Partial<AgentSession> = {}): AgentSession {
 
 function withFiles(s: AgentSession, project: string, files: string[]): AgentSession {
   s.filesTouched.set(project, new Set(files));
+  s.filesWritten!.set(project, new Set(files));
   return s;
 }
 
@@ -105,7 +108,7 @@ describe('detectConflicts', () => {
 
   it('flags complete-while-conflicted when repo has a merge conflict', () => {
     const p = [proj('app.md', { title: 'App', gitActivity: { hasMergeConflicts: true } as any })];
-    const a = sess({ sessionId: 'a', state: 'complete' });
+    const a = sess({ sessionId: 'a', state: 'complete', checkoutPath: null });
     const cw = detectConflicts([a], p).find((c) => c.kind === 'complete-while-conflicted')!;
     expect(cw.severity).toBe('high');
   });
@@ -116,5 +119,27 @@ describe('detectConflicts', () => {
     const first = detectConflicts([a, b], projects);
     const second = detectConflicts([a, b], projects);
     expect(first.map((c) => c.key)).toEqual(second.map((c) => c.key));
+  });
+});
+
+
+describe('checkout and access evidence', () => {
+  const projects = [proj('app.md', { projectDir: 'C:/repos/app' })];
+  it('does not report read-read overlap as a write conflict', () => {
+    const a = sess({ sessionId: 'a', state: 'reading' });
+    const b = sess({ sessionId: 'b', state: 'reading' });
+    a.filesTouched.set('app.md', new Set(['README.md']));
+    b.filesTouched.set('app.md', new Set(['README.md']));
+    expect(detectConflicts([a, b], projects).every(c => c.severity === 'info')).toBe(true);
+  });
+  it('marks isolated write overlap informational until integration', () => {
+    const a = withFiles(sess({ sessionId: 'a', checkoutPath: 'C:/worktrees/a' }), 'app.md', ['x.ts']);
+    const b = withFiles(sess({ sessionId: 'b', checkoutPath: 'C:/worktrees/b' }), 'app.md', ['x.ts']);
+    expect(detectConflicts([a, b], projects)[0].severity).toBe('info');
+  });
+  it('does not apply original checkout merge conflicts to another checkout', () => {
+    const a = sess({ state: 'complete', checkoutPath: 'C:/worktrees/a' });
+    const p = proj('app.md', { projectDir: 'C:/repos/app', gitActivity: { hasMergeConflicts: true } as any });
+    expect(detectConflicts([a], [p])).toHaveLength(0);
   });
 });

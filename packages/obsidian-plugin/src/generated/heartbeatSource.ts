@@ -6,7 +6,7 @@
 // vault. See scripts/gen-heartbeat-source.mjs for why.
 
 /** Short content hash of scripts/heartbeat.js — used to detect a stale copy in a vault. */
-export const HEARTBEAT_SOURCE_SHA = '82a21a25b96a';
+export const HEARTBEAT_SOURCE_SHA = '3360b49b0495';
 
 /** Verbatim contents of scripts/heartbeat.js. */
 export const HEARTBEAT_SOURCE = `#!/usr/bin/env node
@@ -386,6 +386,7 @@ function main() {
     /** Agent working directory — matched against resolved project dirs by the plugin. */
     cwd: strOrNull(params.cwd) ?? (prior ? prior.cwd ?? null : null),
     state,
+    outcome: 'unverified', // A Stop hook is not a test result or acceptance signal.
     action: inheritOnStop(strOrNull(params.action), prior && prior.action),
     tool: inheritOnStop(strOrNull(params.tool), prior && prior.tool),
     file: inheritOnStop(strOrNull(params.file), prior && prior.file),
@@ -411,7 +412,7 @@ function main() {
   logSessionEvent(vaultPath, snapshot, prior, !!params.stop, now);
 
   if (params.stop) {
-    console.log(\`Hypernovum: session \${sessionId} marked complete\`);
+    console.log(\`Hypernovum: session \${sessionId} stopped (outcome unverified)\`);
   }
   // Silent success for hook usage otherwise.
 }

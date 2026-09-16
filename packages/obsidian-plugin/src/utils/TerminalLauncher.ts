@@ -1,3 +1,4 @@
+import { agentCommandWithContext } from '@hypernovum/core';
 import { spawn } from 'child_process';
 import { Platform } from 'obsidian';
 import * as path from 'path';
@@ -65,7 +66,8 @@ export class TerminalLauncher {
    * Launch a terminal with Claude Code in the specified project directory.
    */
   static async launch(options: LaunchOptions): Promise<LaunchResult> {
-    const { projectPath, command = 'claude', projectName } = options;
+    const { projectPath, command: configuredCommand = 'claude', projectName } = options;
+    const command = agentCommandWithContext(configuredCommand);
     const platform = this.getPlatform();
 
 

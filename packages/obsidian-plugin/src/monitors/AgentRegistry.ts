@@ -32,6 +32,10 @@ export interface AgentSession {
   sessionStart: number;
   lastPing: number;
   dirtyAtStart?: boolean;
+  checkoutPath?: string | null;
+  connection?: 'fresh' | 'stale' | 'disconnected';
+  outcome?: 'unverified' | 'failed';
+  filesWritten?: Map<string, Set<string>>;
 }
 
 // §10 timing bands
@@ -81,7 +85,7 @@ export function deriveAgentState(presence: AgentPresence, now: number): AgentSta
   }
 
   // 10s–120s → waiting (rule 3); 120s–15min → stale (rule 4).
-  return age <= WAITING_MAX_MS ? 'waiting' : 'stale';
+  return 'stale'; // Silence is missing telemetry, not evidence of waiting for a person.
 }
 
 /** Forward-slash + trim; conflict detection normalizes further against project dir. */
@@ -124,6 +128,7 @@ export class AgentRegistry {
           tool: p.tool,
           file: p.file,
           filesTouched: new Map(),
+          filesWritten: new Map(),
           sessionStart: start ?? p.lastPing,
           lastPing: p.lastPing,
           dirtyAtStart: p.dirtyAtStart,
@@ -141,12 +146,21 @@ export class AgentRegistry {
       s.lastPing = p.lastPing;
       if (s.dirtyAtStart === undefined && p.dirtyAtStart !== undefined) s.dirtyAtStart = p.dirtyAtStart;
       s.state = deriveAgentState(p, now);
+      s.checkoutPath = p.cwd;
+      s.connection = now - p.lastPing > DISCONNECT_MS ? 'disconnected' : now - p.lastPing > FRESH_MS ? 'stale' : 'fresh';
+      s.outcome = p.state === 'failed' ? 'failed' : 'unverified';
 
       // Accumulate filesTouched per (session, project).
       if (p.file && projectPath) {
         let set = s.filesTouched.get(projectPath);
         if (!set) { set = new Set(); s.filesTouched.set(projectPath, set); }
         set.add(normalizeFile(p.file));
+        if (p.tool === 'Edit' || p.tool === 'Write' || p.tool === 'NotebookEdit' || p.state === 'editing') {
+          const written = s.filesWritten ?? (s.filesWritten = new Map<string, Set<string>>());
+          let files = written.get(projectPath);
+          if (!files) { files = new Set<string>(); written.set(projectPath, files); }
+          files.add(normalizeFile(p.file));
+        }
       }
     }
 

@@ -70,14 +70,14 @@ describe('deriveAgentState (§10 matrix)', () => {
   });
 
   it('age ladder: waiting → stale → disconnected', () => {
-    expect(deriveAgentState(presence({ lastPing: NOW - (FRESH_MS + 5_000) }), NOW)).toBe('waiting');
+    expect(deriveAgentState(presence({ lastPing: NOW - (FRESH_MS + 5_000) }), NOW)).toBe('stale');
     expect(deriveAgentState(presence({ lastPing: NOW - (WAITING_MAX_MS + 5_000) }), NOW)).toBe('stale');
     expect(deriveAgentState(presence({ lastPing: NOW - (DISCONNECT_MS + 5_000) }), NOW)).toBe('disconnected');
   });
 
   it('explicit fresh state overrides the age ladder only when fresh', () => {
     // stale-aged snapshot with an explicit editing state → age ladder wins (waiting)
-    expect(deriveAgentState(presence({ state: 'editing', lastPing: NOW - 60_000 }), NOW)).toBe('waiting');
+    expect(deriveAgentState(presence({ state: 'editing', lastPing: NOW - 60_000 }), NOW)).toBe('stale');
   });
 });
 
