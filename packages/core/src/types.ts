@@ -20,6 +20,8 @@ export interface ProjectData {
   recentActivity: boolean;
   /** Health percentage 0-100 */
   health: number;
+  /** Neutral rendering defaults are not measured quality. */
+  healthSource?: 'user' | 'unknown';
   /** Number of notes in the project */
   noteCount: number;
   /** Total task count (from frontmatter or checkbox parsing) */
