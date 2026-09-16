@@ -1,3 +1,4 @@
+import { scanSkills } from './SkillsScanner';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ProjectData, WeatherData } from '@hypernovum/core';
@@ -35,10 +36,12 @@ export function generateAgentContext(
 
     const vaultAgentsPath = path.join(vaultPath, 'AGENTS.md');
     const vaultAgentsNote = fs.existsSync(vaultAgentsPath)
-      ? `Vault-level agent instructions live at \`${vaultAgentsPath.replace(/\\/g, '/')}\` — read that file first. It contains the project frontmatter schema and a live inventory of every project in this second brain.`
+      ? `Vault-level agent instructions live at \`${vaultAgentsPath.replace(/\\/g, '/')}\` — consult it only when the task needs vault-wide context. Start with this project note and repository instructions.`
       : 'No vault-level AGENTS.md was found. The user can generate one in Obsidian via the command palette: "Prepare vault for AI agents".';
 
     const projectName = opts?.project?.title || path.basename(projectDir);
+    const localSkills = scanSkills(projectDir).slice(0, 12);
+    const skillsSection = localSkills.length ? `## Project skills\n\nRead only skills relevant to your task:\n${localSkills.map(skill => `- ${skill.name}: ${skill.description.slice(0, 240)} (${skill.path.replace(/\\/g, '/')})`).join('\n')}` : '';
     const heartbeatSection = buildHeartbeatSection(opts?.heartbeat ?? null, projectName);
 
     const setupMd = `# HYPERNOVUM — Setup Context
@@ -103,6 +106,8 @@ projectDir: "${projectDir.replace(/\\/g, '/')}"
 - **high** — tall buildings
 - **medium** — medium buildings
 - **low** — short buildings
+
+${skillsSection}
 
 ${heartbeatSection}
 
