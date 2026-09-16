@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0 - 2026-09-16
+
+### Added
+- Optional, offline installation of MIT-licensed Obsidian Markdown, Bases, and JSON Canvas skills for Codex and Claude Code. Existing skill folders are preserved.
+- A review queue for waiting, blocked, and stopped agent sessions that need attention.
+- A searchable project list with note opening when WebGL is unavailable.
+
+### Improved
+- Explicit project-context handoff for built-in Codex and Claude commands, including locally scoped skill references. Custom commands keep their existing behavior.
+- Agent polling and log reading: bounded work, cached unchanged logs, no overlapping polls, and support for up to 128 fleet entries.
+- Skill discovery in both `.agents/skills` and `.claude/skills`, with bounded reads and symlink safeguards.
+- Agent controls, keyboard accessibility, and city layout inside narrow Obsidian panes.
+
+### Fixed
+- Quiet agents are marked stale instead of being assumed to be waiting; stopped sessions require verification rather than implying success.
+- Conflict reporting distinguishes known writes, reads, and separate checkouts.
+- Missing health evidence remains unknown instead of displaying an inferred quality score.
+- Updated dependencies and release validation.
+
+### Compatibility
+- Desktop only; Obsidian 1.6.0 or later.
+- Existing custom agent commands and skills are preserved. No automatic migration of legacy memory or adoption of external worktrees.
+- This release updates the free Obsidian plugin; Hypernovum Pro has a separate release cycle.
+
 ## 0.5.0 — removal release (2026-08-04)
 
 A deliberate subtraction pass. Nothing here makes the city do more; it makes
