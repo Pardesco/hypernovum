@@ -1,0 +1,23 @@
+name: Validate plugin release
+on:
+  push:
+    branches: [audit-optimization-2026-09-16]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HYPERNOVUM_SKIP_VAULT_COPY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check:versions && npm run typecheck && npm test && npm run lint && npm run build
+      - name: Check generated source consistency
+        run: test -z "$(git status --porcelain -- packages/obsidian-plugin/src/generated)"
