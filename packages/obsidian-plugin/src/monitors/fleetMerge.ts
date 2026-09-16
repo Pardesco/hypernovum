@@ -47,7 +47,7 @@ export interface AgentPresence {
 }
 
 /** Max sessions surfaced to the UI per poll (freshest first). */
-export const FLEET_CAP = 32;
+export const FLEET_CAP = 128;
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;

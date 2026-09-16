@@ -204,7 +204,7 @@ function buildSkillsRoster(skills: AgentSkill[]): string {
   if (skills.length === 0) {
     return `### Available skills
 
-No SKILL.md files found in \`.claude/skills/\` in this vault.`;
+No SKILL.md files found in \`.agents/skills/\` or \`.claude/skills/\` in this vault.`;
   }
 
   const rows = skills.map((s) =>

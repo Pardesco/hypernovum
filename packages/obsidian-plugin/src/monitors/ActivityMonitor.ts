@@ -45,6 +45,8 @@ export class ActivityMonitor {
   private pollTimer: number | null = null;
   private lastStatus: ActivityStatus | null = null;
   private isActive = false;
+  private polling = false;
+  private generation = 0;
   private agentsDirPath = '.hypernovum/agents';
 
   /**
@@ -83,6 +85,7 @@ export class ActivityMonitor {
 
   /** Stop monitoring */
   stop(): void {
+    this.generation++;
     if (this.pollTimer !== null) {
       window.clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -91,15 +94,19 @@ export class ActivityMonitor {
 
   /** Check current activity status */
   private async poll(): Promise<void> {
+    if (this.polling) return;
+    this.polling = true;
+    const generation = this.generation;
     try {
       const now = Date.now();
 
       // Per-session snapshots in .hypernovum/agents/*.json
       const { presences, skipped } = await this.readAgentSnapshots();
 
+      if (generation !== this.generation) return;
       const agents = mergeFleet(presences);
       // Emit every poll (incl. 0) so consumers can clear a prior degraded state.
-      this.callbacks.onDegradedData?.(skipped);
+      this.callbacks.onDegradedData?.(skipped + Math.max(0, presences.length - agents.length));
 
       // Full fleet (incl. stale/complete) drives the registry (AGT-003).
       this.callbacks.onFleetUpdate?.(agents);
@@ -146,7 +153,7 @@ export class ActivityMonitor {
 
     } catch {
       // File read error - ignore, might not exist yet
-    }
+    } finally { this.polling = false; }
   }
 
   /** Transition from active to idle state */

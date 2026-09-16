@@ -1078,10 +1078,11 @@ category: default
       for (const agent of agentsToRender) {
         const detected = detectedMap[agent.command] !== false;
         const tint = detected ? agent.color : `${agent.color}55`;
-        const item = list.createDiv({ cls: detected ? 'agents-item' : 'agents-item not-detected' });
+        const item = list.createEl('button', { cls: detected ? 'agents-item' : 'agents-item not-detected', attr: { type: 'button', 'aria-pressed': String(detected && currentCommand === agent.command) } });
+        item.disabled = !detected;
         item.classList.toggle('active', detected && currentCommand === agent.command);
         item.setCssProps({ '--hypernovum-agent-color': tint });
-        const iconCircle = item.createDiv({ cls: 'agents-icon-circle', text: agent.icon });
+        const iconCircle = item.createSpan({ cls: 'agents-icon-circle', text: agent.icon });
         iconCircle.setCssProps({ '--hypernovum-agent-color': tint });
         item.createSpan({ cls: 'agents-item-name', text: agent.name });
         if (!detected) {
@@ -2400,6 +2401,18 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       if (moreCount > 0) {
         attention.createDiv({ cls: 'inspector-empty-inline', text: `+${moreCount} more` });
       }
+    }
+
+    const reviewQueue = sessions.filter(session => ['waiting', 'blocked', 'complete'].includes(session.state));
+    if (reviewQueue.length > 0) {
+      const queue = this.createSection(panel, 'Review and decisions');
+      for (const session of reviewQueue.slice(0, 8)) {
+        const label = session.state === 'complete' ? 'Stopped - verify the result' : session.state === 'blocked' ? 'Blocked - resolve the blocker' : 'Waiting for input';
+        if (session.projectPath) {
+          this.appendFocusRow(queue, session.projectPath, row => { row.createSpan({ text: `${session.name}: ${label}` }); });
+        } else queue.createDiv({ text: `${session.name}: ${label}` });
+      }
+      if (reviewQueue.length > 8) queue.createDiv({ text: `${reviewQueue.length - 8} more sessions need review` });
     }
 
     this.appendActivityFeed(panel);
