@@ -36,12 +36,40 @@ import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFr
 import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
 import { fitShadowFrustum } from './shadowFit';
 import {
+  AUTO_PROBE_MIN_SAMPLES,
+  AUTO_PROBE_MS,
+  AUTO_START_TIER,
+  AdaptiveResolution,
+  TIER_CONFIG,
+  effectivePixelRatio,
+  isQualitySetting,
+  pickAutoTier,
+  type QualitySetting,
+  type QualityTier,
+  type TierConfig,
+} from './qualityTiers';
+import {
   HORIZON_COLOR,
   VignetteShader,
   createContactShadowMesh,
   createGridMaterial,
   createHorizonBackground,
 } from './atmosphere';
+
+/**
+ * Bloom pass that can run below the composer's resolution (GFX-009: the
+ * Balanced tier blooms at half size). Only the internal blur targets shrink;
+ * the result is still composited at full resolution.
+ */
+class ScaledBloomPass extends UnrealBloomPass {
+  /** Fraction of the composer size the blur targets use. Read during super() too. */
+  scale?: number;
+
+  setSize(width: number, height: number): void {
+    const s = this.scale ?? 1;
+    super.setSize(Math.max(1, Math.round(width * s)), Math.max(1, Math.round(height * s)));
+  }
+}
 
 /** Release the GPU resources a mesh or line owns. */
 function disposeRenderable(obj: {
@@ -83,7 +111,28 @@ interface SceneManagerOptions {
    * city (CAM-001). Omit for the default overview.
    */
   initialCamera?: CameraState | null;
+  /**
+   * Called when a graphics-tier change (the Auto probe settling on a lower
+   * tier) needs geometry rebuilt, e.g. wide lines on/off. The host re-packs and
+   * calls buildCity(); without it the change lands on the next natural rebuild.
+   */
+  onRequestRebuild?: () => void;
 }
+
+/**
+ * Renderer configuration when the host passes no graphicsQuality setting —
+ * exactly the pre-tier behaviour (device pixel ratio up to 2, full effects),
+ * so hosts that don't opt in (Pro) are unaffected by GFX-009.
+ */
+const UNTIERED_CONFIG: TierConfig = {
+  pixelRatioCap: 2,
+  msaaSamples: 4,
+  bloom: 'full',
+  shadows: 'static',
+  shadowMapSize: 2048,
+  wideLines: true,
+  reflections: true,
+};
 
 /**
  * A ground-level polyline — district outline, leader line, handle bracket. Wide
@@ -226,9 +275,23 @@ export class SceneManager {
   private buildingShader: BuildingShader;
   private shaderMaterials: Map<THREE.Mesh, THREE.ShaderMaterial> = new Map();
   private composer: EffectComposer | null = null;
-  private bloomPass: UnrealBloomPass | null = null;
-  /** MSAA samples for the composer's scene target (GFX-001). */
+  private bloomPass: ScaledBloomPass | null = null;
+  /** MSAA samples for the composer's scene target (GFX-001); set by the tier. */
   private msaaSamples = 4;
+
+  // Graphics quality tiers + adaptive resolution (GFX-009).
+  private qualitySetting: QualitySetting | null = null;
+  private tierConfig: TierConfig = UNTIERED_CONFIG;
+  private tier: QualityTier | null = null;
+  private autoProbe: { startAt: number; stats: FrameStats } | null = null;
+  private autoProbeDone = false;
+  private adaptive = new AdaptiveResolution();
+  private lastCameraMoveAt = 0;
+  private lastDevicePixelRatio = 1;
+  private lastDprCheck = 0;
+  /** Bloom pass resolution factor: 0.5 on the Balanced tier. */
+  private bloomScale = 1;
+  private onRequestRebuild?: () => void;
   /**
    * Luminance above which the bloom pass picks a pixel up (GFX-002). At 0.7
    * whole lit facades bloomed and washed out the building shading; at 1.0 only
@@ -309,6 +372,7 @@ export class SceneManager {
     this.onSaveLayout = options?.onSaveLayout;
     this.store = options?.interactionStore ?? null;
     this.initialCamera = options?.initialCamera ?? null;
+    this.onRequestRebuild = options?.onRequestRebuild;
     this.highlight = new HighlightManager(this.parts, this.store, {
       bloom: options?.settings?.enableBloom ?? false,
     });
@@ -327,6 +391,7 @@ export class SceneManager {
       this.showLabels = options.settings.showLabels;
       this.useShadows = options.settings.enableShadows;
       this.buildingStyle = options.settings.buildingStyle;
+      if (isQualitySetting(options.settings.graphicsQuality)) this.qualitySetting = options.settings.graphicsQuality;
       if (options.settings.toneMapping === 'agx') this.toneMapping = 'agx';
       const exposure = options.settings.toneMappingExposure;
       if (typeof exposure === 'number' && Number.isFinite(exposure) && exposure > 0) this.toneMappingExposure = exposure;
@@ -339,6 +404,18 @@ export class SceneManager {
     } catch {
       this.reducedMotion = false;
     }
+
+    // Tier (GFX-009): an explicit tier applies from the first frame; Auto
+    // starts on High and probes after the first build.
+    if (this.qualitySetting) {
+      this.tier = this.qualitySetting === 'auto' ? AUTO_START_TIER : this.qualitySetting;
+      this.tierConfig = TIER_CONFIG[this.tier];
+    }
+    this.msaaSamples = this.tierConfig.msaaSamples;
+    this.wideLines = this.tierConfig.wideLines;
+    this.reflections = this.tierConfig.reflections;
+    this.bloomScale = this.tierConfig.bloom === 'half' ? 0.5 : 1;
+    this.updateTierLabel();
 
     this.initScene();
     this.initCamera();
@@ -422,12 +499,13 @@ export class SceneManager {
     // the canvas only receives the final full-screen pass, so canvas MSAA would
     // be pure cost (GFX-001). Without bloom the canvas is the scene target.
     this.renderer = new THREE.WebGLRenderer({ antialias: !this.useBloom, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.lastDevicePixelRatio = window.devicePixelRatio;
+    this.renderer.setPixelRatio(effectivePixelRatio(window.devicePixelRatio, this.tierConfig.pixelRatioCap));
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     this.lineResolution.set(this.container.clientWidth, this.container.clientHeight);
     // Honor the enableShadows setting (PERF-004). With the shadow map off the
     // per-mesh cast/receive flags are inert, so gating here is sufficient.
-    this.renderer.shadowMap.enabled = this.useShadows;
+    this.renderer.shadowMap.enabled = this.shadowsActive();
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // The city is static between rebuilds, so the shadow map is rendered on
     // demand (GFX-007) instead of re-drawing every caster every frame. Anything
@@ -470,6 +548,7 @@ export class SceneManager {
       MIDDLE: THREE.MOUSE.DOLLY,
       RIGHT: THREE.MOUSE.PAN,
     };
+    controls.addEventListener('change', () => { this.lastCameraMoveAt = performance.now(); });
     return controls;
   }
 
@@ -480,8 +559,8 @@ export class SceneManager {
     const directional = new THREE.DirectionalLight(0xffffff, 0.9);
     directional.position.copy(SceneManager.KEY_LIGHT_DIR).multiplyScalar(150);
     directional.castShadow = true;
-    directional.shadow.mapSize.width = 2048;
-    directional.shadow.mapSize.height = 2048;
+    directional.shadow.mapSize.width = this.tierConfig.shadowMapSize;
+    directional.shadow.mapSize.height = this.tierConfig.shadowMapSize;
     directional.shadow.camera.near = 10;
     directional.shadow.camera.far = 300;
     directional.shadow.camera.left = -150;
@@ -523,12 +602,13 @@ export class SceneManager {
       const renderPass = new RenderPass(this.scene, this.camera);
       this.composer.addPass(renderPass);
 
-      this.bloomPass = new UnrealBloomPass(
+      this.bloomPass = new ScaledBloomPass(
         new THREE.Vector2(width, height),
         this.bloomIntensity,  // strength
         0.4,                   // radius
         SceneManager.BLOOM_THRESHOLD,
       );
+      this.bloomPass.scale = this.bloomScale; // half-size blur on Balanced (GFX-009)
       this.composer.addPass(this.bloomPass);
 
       // Gentle vignette (GFX-006), in linear space before tone mapping.
@@ -565,12 +645,22 @@ export class SceneManager {
    * to gain and the canvas would just clip them.
    */
   private hdrScale(): number {
-    return this.bloomPass ? SceneManager.HDR_EMISSIVE : 1;
+    return this.bloomActive() ? SceneManager.HDR_EMISSIVE : 1;
+  }
+
+  /** Bloom runs: the user enabled it and the tier allows it (GFX-009). */
+  private bloomActive(): boolean {
+    return this.bloomPass !== null && this.tierConfig.bloom !== 'off';
+  }
+
+  /** Shadow map runs: the user enabled it and the tier allows it (GFX-009). */
+  private shadowsActive(): boolean {
+    return this.useShadows && this.tierConfig.shadows !== 'off';
   }
 
   /** Render one frame through the composer (or straight to screen without bloom). */
   private renderFrame(): void {
-    if (this.composer) {
+    if (this.composer && this.bloomActive()) {
       // Pin RenderPass to the multisampled target (see initComposer): a host
       // can insert passes that swap buffers an odd number of times per frame.
       this.composer.readBuffer = this.composer.renderTarget2;
@@ -1818,6 +1908,11 @@ export class SceneManager {
     }
     this.initialCamera = null; // only ever applies to the first build
     this.lastProjectCount = projects.length;
+
+    // Auto quality (GFX-009): measure ~2 s of frames once a city is on screen.
+    if (this.qualitySetting === 'auto' && !this.autoProbeDone && !this.autoProbe && projects.length > 0) {
+      this.autoProbe = { startAt: performance.now() + 300, stats: new FrameStats(600) };
+    }
   }
 
   /**
@@ -2692,9 +2787,11 @@ export class SceneManager {
     this.animationId = window.requestAnimationFrame(this.animate);
 
     const frameStart = performance.now();
-    if (this.lastFrameAt > 0) this.frameStats.push(frameStart - this.lastFrameAt);
+    const frameInterval = this.lastFrameAt > 0 ? frameStart - this.lastFrameAt : 0;
+    if (frameInterval > 0) this.frameStats.push(frameInterval);
     this.lastFrameAt = frameStart;
     this.renderer.info.reset();
+    this.updateQuality(frameStart, frameInterval);
 
     const elapsed = this.clock.getElapsedTime();
     const delta = this.clock.getDelta();
@@ -2945,6 +3042,127 @@ export class SceneManager {
       this.paintPerfOverlay();
     }
   };
+
+  /** Active graphics tier, or null when the host doesn't use tiers (GFX-009). */
+  getQualityTier(): QualityTier | null {
+    return this.tier;
+  }
+
+  private updateTierLabel(): void {
+    if (!this.qualitySetting || !this.tier) { this.tierLabel = null; return; }
+    const probing = this.qualitySetting === 'auto' && !this.autoProbeDone;
+    this.tierLabel = this.qualitySetting === 'auto'
+      ? `auto ${probing ? '(probing) ' : ''}→ ${this.tier}`
+      : this.tier;
+  }
+
+  /** Per-frame quality bookkeeping: Auto probe, adaptive resolution, DPR changes. */
+  private updateQuality(now: number, frameInterval: number): void {
+    const probe = this.autoProbe;
+    if (probe && now >= probe.startAt) {
+      if (frameInterval > 0) probe.stats.push(frameInterval);
+      if (now - probe.startAt >= AUTO_PROBE_MS && probe.stats.count >= AUTO_PROBE_MIN_SAMPLES) {
+        const picked = pickAutoTier(probe.stats.median());
+        debugLog('Auto quality probe', { medianMs: probe.stats.median(), picked });
+        this.autoProbe = null;
+        this.autoProbeDone = true;
+        if (picked !== this.tier) this.applyQualityTier(picked);
+        else this.updateTierLabel();
+      }
+    }
+
+    if (this.qualitySetting && frameInterval > 0) {
+      const changed = this.adaptive.update(frameInterval, now - this.lastCameraMoveAt);
+      if (changed !== null) this.applyPixelRatio();
+    }
+
+    // Moving the window to a monitor with another scale changes the DPR
+    // without resizing the container, so poll it (cheaply) once a second.
+    if (now - this.lastDprCheck > 1000) {
+      this.lastDprCheck = now;
+      if (window.devicePixelRatio !== this.lastDevicePixelRatio) {
+        this.lastDevicePixelRatio = window.devicePixelRatio;
+        this.applyPixelRatio();
+      }
+    }
+  }
+
+  /** Renderer + composer pixel ratio from the DPR, the tier cap and the adaptive scale. */
+  private applyPixelRatio(): void {
+    const pr = effectivePixelRatio(window.devicePixelRatio, this.tierConfig.pixelRatioCap, this.adaptive.scale);
+    if (Math.abs(pr - this.renderer.getPixelRatio()) < 1e-3) return;
+    this.renderer.setPixelRatio(pr);
+    if (this.composer) {
+      this.composer.setPixelRatio(pr);
+      this.composer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+  }
+
+  /**
+   * Switch graphics tier at runtime (GFX-009) — used when the Auto probe
+   * settles. Pixel ratio, MSAA, bloom resolution, shadows and reflections
+   * change in place; wide lines need new geometry, so the host is asked to
+   * rebuild.
+   */
+  private applyQualityTier(tier: QualityTier): void {
+    const prev = this.tierConfig;
+    const cfg = TIER_CONFIG[tier];
+    const bloomWasActive = this.bloomActive();
+    const shadowsWereActive = this.shadowsActive();
+    this.tier = tier;
+    this.tierConfig = cfg;
+    this.updateTierLabel();
+
+    this.applyPixelRatio();
+
+    if (this.composer) {
+      const caps = this.renderer.capabilities;
+      const samples = caps.isWebGL2 ? Math.min(cfg.msaaSamples, caps.maxSamples) : 0;
+      if (this.composer.renderTarget2.samples !== samples) {
+        // Releasing the target makes three re-create it with the new count.
+        this.composer.renderTarget2.dispose();
+        this.composer.renderTarget2.samples = samples;
+      }
+      this.bloomScale = cfg.bloom === 'half' ? 0.5 : 1;
+      if (this.bloomPass) this.bloomPass.scale = this.bloomScale;
+      this.composer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+    this.msaaSamples = cfg.msaaSamples;
+
+    const shadowsOn = this.shadowsActive();
+    if (shadowsOn !== shadowsWereActive) {
+      this.renderer.shadowMap.enabled = shadowsOn;
+      // Shadow support is compiled into each program: rebuild them.
+      this.scene.traverse((obj) => {
+        const mat = (obj as THREE.Mesh).material;
+        if (!mat) return;
+        for (const m of Array.isArray(mat) ? mat : [mat]) m.needsUpdate = true;
+      });
+    }
+    if (cfg.shadowMapSize !== prev.shadowMapSize) {
+      this.keyLight.shadow.mapSize.set(cfg.shadowMapSize, cfg.shadowMapSize);
+      this.keyLight.shadow.map?.dispose();
+      this.keyLight.shadow.map = null;
+    }
+    this.invalidateShadows();
+
+    const bloomOn = this.bloomActive();
+    this.reflections = cfg.reflections;
+    for (const entry of this.parts.values()) {
+      const u = entry.shaderMaterial?.uniforms;
+      if (!u) continue;
+      if (u.uReflect) u.uReflect.value = cfg.reflections ? SceneManager.REFLECTION_STRENGTH : 0;
+      if (bloomOn !== bloomWasActive && u.uEmissive) u.uEmissive.value = bloomOn ? SceneManager.HDR_WINDOWS : 1;
+    }
+    if (bloomOn !== bloomWasActive) {
+      for (const entry of this.agentOrbs.values()) this.applyOrbState(entry);
+    }
+
+    if (cfg.wideLines !== this.wideLines) {
+      this.wideLines = cfg.wideLines;
+      this.onRequestRebuild?.();
+    }
+  }
 
   /** Current frame-timing and renderer numbers (overlay, QA scripts, Auto tier). */
   getPerfSnapshot(): PerfSnapshot {

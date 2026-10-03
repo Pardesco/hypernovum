@@ -25,6 +25,9 @@ export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbV
 export type { OrbVisual } from './scene/agentOrbVisual';
 export type { AgentOrbInput, CameraState, BuildCityOptions } from './scene/SceneManager';
 export { computeCityFrame, shouldFrameOnBuild } from './scene/cameraFraming';
+export { TIER_CONFIG, QUALITY_TIERS, pickAutoTier, effectivePixelRatio, isQualitySetting, AdaptiveResolution } from './scene/qualityTiers';
+export type { QualityTier, QualitySetting, TierConfig } from './scene/qualityTiers';
+export type { PerfSnapshot } from './scene/frameStats';
 export type { CityFrame } from './scene/cameraFraming';
 
 // Layout

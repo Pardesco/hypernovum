@@ -129,6 +129,12 @@ export interface HypernovumSettings {
   toneMapping?: ToneMappingChoice;
   /** Tone-mapping exposure. Default 1.0. */
   toneMappingExposure?: number;
+  /**
+   * Graphics quality tier (GFX-009): 'auto' probes frame times on first open
+   * and picks Low / Balanced / High; or a fixed tier. Omitted = no tiering,
+   * the pre-0.7 renderer configuration (hosts that don't opt in).
+   */
+  graphicsQuality?: 'auto' | 'low' | 'balanced' | 'high' | 'ultra';
 }
 
 /** Tone-mapping operators the scene supports (three r160: Neutral needs r162+). */

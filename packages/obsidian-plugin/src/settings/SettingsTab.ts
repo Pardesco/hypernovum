@@ -65,12 +65,24 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   agentFeaturesConsent: 'unset',
   outputFolder: '',
   buildingStyleMigrated: false,
+  // GFX-009: Auto probes frame times on first open and picks a tier.
+  graphicsQuality: 'auto',
 };
 
 export type { BlockPosition };
 
 /** Reopening a view is the only way these take effect; say so once, in one place. */
 const ON_REOPEN = ' Applies to city views opened after the change.';
+
+/** Graphics quality dropdown (GFX-009), shared by both settings renderers. */
+const GRAPHICS_QUALITY_OPTIONS: Record<string, string> = {
+  auto: 'Auto',
+  low: 'Low',
+  balanced: 'Balanced',
+  high: 'High',
+  ultra: 'Ultra',
+};
+const GRAPHICS_QUALITY_DESC = 'Auto measures frame times when the city opens and picks Low, Balanced or High. Low renders at native resolution without bloom, shadows, wide lines or reflections. Ultra uses full device resolution and sharper shadows. Applies immediately to open city views.';
 
 /** Shared by both settings renderers (1.13 definitions + the display() fallback). */
 const SKILLS_NAME = 'Obsidian format skills';
@@ -221,6 +233,12 @@ export class SettingsTab extends PluginSettingTab {
             },
           },
           {
+            name: 'Graphics quality',
+            desc: GRAPHICS_QUALITY_DESC,
+            aliases: ['gpu', 'quality', 'resolution', 'antialiasing', 'battery'],
+            control: { type: 'dropdown', key: 'graphicsQuality', options: GRAPHICS_QUALITY_OPTIONS },
+          },
+          {
             name: 'Performance mode',
             desc: 'Turn off procedural shaders, bloom, and fog together. Use this on integrated graphics or very large vaults.',
             aliases: ['gpu', 'slow', 'lag'],
@@ -336,8 +354,8 @@ export class SettingsTab extends PluginSettingTab {
         (s as unknown as Record<string, unknown>)[key] = value;
         await this.plugin.saveSettings();
         // These four are the ones the scene can adopt without a reopen.
-        if (key === 'buildingStyle' || key === 'enableShaders' || key === 'enableBloom' || key === 'enableAtmosphere') {
-          if (key !== 'buildingStyle') this.refreshDefinitions(); // may have flipped performance mode
+        if (key === 'buildingStyle' || key === 'graphicsQuality' || key === 'enableShaders' || key === 'enableBloom' || key === 'enableAtmosphere') {
+          if (key !== 'buildingStyle' && key !== 'graphicsQuality') this.refreshDefinitions(); // may have flipped performance mode
           await this.plugin.reloadOpenViews();
         }
     }
@@ -543,6 +561,20 @@ export class SettingsTab extends PluginSettingTab {
             this.plugin.settings.buildingStyle = value as 'classic' | 'parametric';
             await this.plugin.saveSettings();
             await this.plugin.reloadOpenViews(); // apply immediately
+          });
+      });
+
+    new Setting(containerEl)
+      .setName('Graphics quality')
+      .setDesc(GRAPHICS_QUALITY_DESC)
+      .addDropdown((dropdown) => {
+        for (const [value, label] of Object.entries(GRAPHICS_QUALITY_OPTIONS)) dropdown.addOption(value, label);
+        dropdown
+          .setValue(this.plugin.settings.graphicsQuality ?? 'auto')
+          .onChange(async (value) => {
+            this.plugin.settings.graphicsQuality = value as HypernovumSettings['graphicsQuality'];
+            await this.plugin.saveSettings();
+            await this.plugin.reloadOpenViews();
           });
       });
 

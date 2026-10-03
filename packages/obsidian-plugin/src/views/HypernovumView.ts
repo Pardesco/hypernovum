@@ -330,6 +330,8 @@ export class HypernovumView extends ItemView {
       interactionStore: this.interactionStore,
       // Non-null only when this view replaces one reloaded for a setting change.
       initialCamera: this.plugin.takePendingCameraState(),
+      // The Auto quality probe can switch wide lines off (GFX-009): re-pack.
+      onRequestRebuild: () => this.rebuildCity(),
     });
 
     // Add legend overlay
