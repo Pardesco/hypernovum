@@ -73,11 +73,12 @@ backlink graph all still work.
 ## Features
 
 ### City visualization
-- **Bin-packed layout** with category districts, block outlines, and drag handles for rearranging
+- **Compact district layout** with block outlines and drag handles for rearranging; **Reset city layout** (command palette) returns to the compact layout
 - **Procedural architecture** — seven silhouette families, one per category: spiral towers, stacked slabs, telescoping tiers, spires, sheared blades, hex clusters, and a quiet block for everything else
 - **Cyberpunk shader system** with procedural windows, decay dithering, and bloom post-processing
 - **Smart labels** with CSS2D rendering and leader lines
 - **Hover tooltips** showing status, priority, health, and tech stack
+- **Graphics quality** (settings): Auto, Low, Balanced, High, or Ultra. Auto picks a tier from measured frame times; Low suits older GPUs. The city also eases to about 30 fps when idle and about 5 fps while Obsidian is in the background
 
 ### Second brain and agent ops
 - **Prepare vault for AI agents** — one click writes a marker-fenced `AGENTS.md` at the vault root: project schema, live inventory, quest board, skills roster, and heartbeat protocol, so any CLI agent instantly understands your second brain
@@ -130,6 +131,7 @@ backlink graph all still work.
 - **Adaptive SCAN-MODE legend** that re-renders per visual layer (status chips, gradient ramps, live stack roster)
 - **Controls hint** overlay with all mouse and keyboard shortcuts
 - **Save Layout** and **Snapshot** buttons
+- **Collapsible panels**: each panel has a chevron, and **H** (or **Toggle HUD**) hides everything except the title and legend
 
 ## Platform support
 

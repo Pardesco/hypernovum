@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.7.0 - 2026-10-03
+
+### Added
+- A **Graphics quality** setting: Auto, Low, Balanced, High, or Ultra. Auto measures frame times when the city first opens and picks a tier. Low turns off post-processing, shadows, wide lines, and reflections for older GPUs.
+- Collapsible HUD panels. Each panel has a chevron, and **H** (or the **Toggle HUD** command) hides everything except the title and legend. Camera framing now leaves room for the panels that are open.
+- A **Reset city layout** command that clears saved district positions and switches to the compact layout.
+- A **Toggle performance overlay** command that shows frame rate, frame time, draw calls, and pixel ratio.
+
+### Improved
+- Districts pack into a compact block instead of one long column.
+- Rendering:
+  - Real antialiasing and selective HDR bloom on windows, orbs, gems, and beacons.
+  - Antialiased building edges and district outlines.
+  - Fresnel and window shading, with status-tinted windows.
+  - A grid ground with a horizon glow, contact shadows, and a vignette.
+- City labels no longer overlap. District names, the selection, and critical projects win when space is tight.
+- Quest gems and agent orbs stay readable at overview zoom.
+- Lighter on an always-open notes app:
+  - Shadows render only when the city changes.
+  - The city drops to about 30 fps after 5 seconds without input, and to about 5 fps while Obsidian is in the background.
+  - Each view uses one WebGL context instead of three.
+  - Dependency arcs are merged into a few draw calls.
+  - Shaders compile before the first frame.
+- The Vault Mode toggle is a compact switch in the Projects header. Turning vault mode on while agents are live asks for confirmation.
+- Agents are named consistently as **Codex CLI**; a saved "GPT Codex" name is migrated once.
+- The documentation covers `heartbeat.js --cwd` and warns that a double-quoted Windows `projectDir` drops a note's whole frontmatter.
+
+### Fixed
+- The camera no longer jumps back to the overview when you save a note, change a lens, run Prepare vault, or toggle vault mode. Space still resets it.
+- Busy agents no longer flicker to "stale" between tool calls; live states last 90 seconds.
+- The "Last session" digest now appears for sessions that ping with `--cwd` but no `--project`.
+- The Obsidian format skills setting was missing on Obsidian 1.13 and later.
+
+### Compatibility
+- Desktop only; Obsidian 1.6.0 or later.
+- Cities with hand-placed districts keep their saved layout. Run **Reset city layout** to switch to the compact layout.
+- Graphics quality defaults to Auto. On HiDPI screens, High caps the pixel ratio at 1.5 (antialiasing makes up the difference); choose Ultra for full device resolution.
+- `@hypernovum/core` changes are additive. Hypernovum Pro has a separate release cycle.
+
 ## 0.6.0 - 2026-09-16
 
 ### Added
