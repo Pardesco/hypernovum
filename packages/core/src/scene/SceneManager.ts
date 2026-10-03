@@ -27,6 +27,7 @@ import type { InteractionStore } from '../stores/interactionStore';
 import { ud, projectOf, setUserData } from './sceneUserData';
 import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFraming';
 import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
+import { fitShadowFrustum } from './shadowFit';
 
 /** Release the GPU resources a mesh or line owns. */
 function disposeRenderable(obj: {
@@ -219,6 +220,11 @@ export class SceneManager {
   /** Gate for the requestAnimationFrame loop — see setRenderingEnabled. */
   private renderingEnabled = true;
 
+  /** Shadow-casting key light; its shadow camera is fitted to the city (GFX-007). */
+  private keyLight!: THREE.DirectionalLight;
+  /** Key-light direction (from target toward light) — unchanged since 0.1: (50, 100, 50). */
+  private static readonly KEY_LIGHT_DIR = new THREE.Vector3(50, 100, 50).normalize();
+
   // Frame timing + the debug performance overlay ("measure first").
   private frameStats = new FrameStats(120);
   private cpuStats = new FrameStats(120);
@@ -359,6 +365,11 @@ export class SceneManager {
     // per-mesh cast/receive flags are inert, so gating here is sufficient.
     this.renderer.shadowMap.enabled = this.useShadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // The city is static between rebuilds, so the shadow map is rendered on
+    // demand (GFX-007) instead of re-drawing every caster every frame. Anything
+    // that moves a caster calls invalidateShadows().
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     // Count draw calls across a whole frame — every composer pass, the shadow
@@ -401,7 +412,7 @@ export class SceneManager {
     this.scene.add(ambient);
 
     const directional = new THREE.DirectionalLight(0xffffff, 0.9);
-    directional.position.set(50, 100, 50);
+    directional.position.copy(SceneManager.KEY_LIGHT_DIR).multiplyScalar(150);
     directional.castShadow = true;
     directional.shadow.mapSize.width = 2048;
     directional.shadow.mapSize.height = 2048;
@@ -412,6 +423,8 @@ export class SceneManager {
     directional.shadow.camera.top = 150;
     directional.shadow.camera.bottom = -150;
     this.scene.add(directional);
+    this.scene.add(directional.target);
+    this.keyLight = directional;
 
     const fill = new THREE.DirectionalLight(0x6688cc, 0.3);
     fill.position.set(-40, 60, -40);
@@ -505,6 +518,9 @@ export class SceneManager {
 
     // Apply saved positions after initial layout
     this.applySavedPositions();
+
+    // Static shadow map (GFX-007): fit to the final layout and render it once.
+    this.fitShadowCamera();
 
     // Position Neural Core at city center
     this.positionNeuralCore(projects);
@@ -1266,6 +1282,7 @@ export class SceneManager {
   setVisible(path: string, visible: boolean): void {
     const parts = this.parts.get(path);
     if (!parts) return;
+    if (parts.building.visible !== visible) this.invalidateShadows(); // hidden casters drop their shadow
     parts.building.visible = visible;
     parts.edgeGlow.visible = visible;
     parts.foundation.visible = visible;
@@ -1651,6 +1668,47 @@ export class SceneManager {
     this.lastProjectCount = projects.length;
   }
 
+  /**
+   * Re-render the static shadow map on the next frame (GFX-007). Core calls
+   * this whenever it moves or hides a shadow caster; a host that moves casters
+   * itself (animated decor, lifted districts) must call it too.
+   */
+  invalidateShadows(): void {
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /** Fit the key light's shadow camera to the current buildings (GFX-007). */
+  private fitShadowCamera(): void {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = 0;
+    for (const b of this.buildings) {
+      const p = projectOf(b);
+      if (!p?.position || !p.dimensions) continue;
+      const half = Math.max(p.dimensions.width, p.dimensions.depth) / 2 + 1;
+      minX = Math.min(minX, b.position.x - half);
+      maxX = Math.max(maxX, b.position.x + half);
+      minZ = Math.min(minZ, b.position.z - half);
+      maxZ = Math.max(maxZ, b.position.z + half);
+      if (!b.geometry.boundingBox) b.geometry.computeBoundingBox();
+      maxY = Math.max(maxY, b.position.y + (b.geometry.boundingBox?.max.y ?? p.dimensions.height));
+    }
+    if (minX === Infinity) return;
+
+    const f = fitShadowFrustum({ minX, maxX, minZ, maxZ, maxY });
+    const light = this.keyLight;
+    light.target.position.set(f.center.x, f.center.y, f.center.z);
+    light.target.updateMatrixWorld();
+    light.position.copy(SceneManager.KEY_LIGHT_DIR).multiplyScalar(f.distance).add(light.target.position);
+    const cam = light.shadow.camera;
+    cam.left = -f.halfSize;
+    cam.right = f.halfSize;
+    cam.top = f.halfSize;
+    cam.bottom = -f.halfSize;
+    cam.near = f.near;
+    cam.far = f.far;
+    cam.updateProjectionMatrix();
+    this.invalidateShadows();
+  }
+
   /** Current camera pose, for a host to restore after a view reload (CAM-001). */
   getCameraState(): CameraState {
     const p = this.camera.position;
@@ -1998,6 +2056,8 @@ export class SceneManager {
   private onMouseUp(_event: MouseEvent): void {
     if (this.isDragging) {
       this.dragEndAt = performance.now();
+      // A drag can grow the city past the shadow frustum (GFX-007).
+      this.fitShadowCamera();
       if (this.draggedBlock) {
         // Persist the internal state immediately so background rebuilds (e.g. file edits)
         // do not revert the user's manual dragging before they hit the Save Layout button.
@@ -2023,6 +2083,7 @@ export class SceneManager {
   private moveSingleBuilding(building: THREE.Mesh, deltaX: number, deltaZ: number): void {
     const project = projectOf(building) as ProjectData;
     if (!project) return;
+    this.invalidateShadows();
 
     // Move the building mesh
     building.position.x += deltaX;
@@ -2170,6 +2231,7 @@ export class SceneManager {
   }
 
   private moveBlock(category: string, deltaX: number, deltaZ: number): void {
+    this.invalidateShadows();
     // Move all buildings and foundations in this category
     for (const building of this.buildings) {
       const project = projectOf(building);
