@@ -5,6 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
@@ -34,6 +35,13 @@ import { ud, projectOf, setUserData } from './sceneUserData';
 import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFraming';
 import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
 import { fitShadowFrustum } from './shadowFit';
+import {
+  HORIZON_COLOR,
+  VignetteShader,
+  createContactShadowMesh,
+  createGridMaterial,
+  createHorizonBackground,
+} from './atmosphere';
 
 /** Release the GPU resources a mesh or line owns. */
 function disposeRenderable(obj: {
@@ -258,6 +266,10 @@ export class SceneManager {
   private static readonly EDGE_WIDTH_PX = 1.5;
   private static readonly OUTLINE_WIDTH_PX = 2;
 
+  /** Instanced contact-shadow decals, one per building (GFX-006); built in addGround. */
+  private contactShadows: THREE.InstancedMesh | null = null;
+  private contactShadowsDirty = false;
+
   /** Shadow-casting key light; its shadow camera is fitted to the city (GFX-007). */
   private keyLight!: THREE.DirectionalLight;
   /** Key-light direction (from target toward light) — unchanged since 0.1: (50, 100, 50). */
@@ -363,11 +375,13 @@ export class SceneManager {
   }
 
   private initScene(): void {
-    this.scene.background = new THREE.Color(0x0c0c18);
+    // Horizon glow instead of a flat colour (GFX-006); fog fades distant
+    // buildings into that glow rather than into a void.
+    this.scene.background = createHorizonBackground();
 
     // Add atmospheric fog for depth effect
     if (this.useAtmosphere) {
-      this.scene.fog = new THREE.FogExp2(0x0c0c18, 0.006);
+      this.scene.fog = new THREE.FogExp2(HORIZON_COLOR, 0.006);
     }
   }
 
@@ -511,6 +525,9 @@ export class SceneManager {
         SceneManager.BLOOM_THRESHOLD,
       );
       this.composer.addPass(this.bloomPass);
+
+      // Gentle vignette (GFX-006), in linear space before tone mapping.
+      this.composer.addPass(new ShaderPass(VignetteShader));
 
       const outputPass = new OutputPass();
       this.composer.addPass(outputPass);
@@ -705,6 +722,7 @@ export class SceneManager {
     this.dragHandles = [];
     this.handleHitBoxes = [];
     this.foundationHitPads = [];
+    this.contactShadows = null;
     this.shaderMaterials.clear();
     this.buildingPathMap.clear();
     this.parts.clear();
@@ -735,74 +753,52 @@ export class SceneManager {
     setUserData(ground, { isGround: true });
     this.scene.add(ground);
 
-    // Square grid lines clipped to circular boundary
-    const gridColor = this.useAtmosphere ? 0x00ffff : 0x1a1a2e;
-    const gridGroup = new THREE.Group();
-    gridGroup.position.set(0, 0.01, 0);
-    setUserData(gridGroup, { isGround: true });
-    const gridSpacing = 5;
+    // Grid (GFX-006): one plane with a procedural, fwidth-antialiased grid that
+    // fades out where cells get too small to resolve, instead of 1 px line
+    // segments that moired at the default angle. Same colours, spacing and
+    // radial fade into the dark as the line grid it replaces.
+    const gridGeo = new THREE.CircleGeometry(radius, 96);
+    gridGeo.rotateX(-Math.PI / 2);
+    const grid = new THREE.Mesh(gridGeo, createGridMaterial({
+      color: this.useAtmosphere ? 0x00ffff : 0x1a1a2e,
+      opacity: this.useAtmosphere ? 0.3 : 1.0,
+      spacing: 5,
+      origin: -radius,
+      fadeStart: radius * 0.52,
+      radius,
+    }));
+    grid.position.set(0, 0.01, 0);
+    setUserData(grid, { isGround: true });
+    this.scene.add(grid);
 
-    // The grid dissolves into the dark instead of stopping at a drawn circle.
-    // Alpha comes from radial distance in the shader, so it is smooth in world
-    // space rather than per-line; the chords are subdivided because a 2-point
-    // line would interpolate the fade linearly between its endpoints and dim
-    // the middle of a long chord that should still be at full strength.
-    const fadeStart = radius * 0.52;
-    const gridMat = new THREE.ShaderMaterial({
-      uniforms: {
-        uColor: { value: new THREE.Color(gridColor) },
-        uOpacity: { value: this.useAtmosphere ? 0.3 : 1.0 },
-        uFadeStart: { value: fadeStart },
-        uRadius: { value: radius },
-      },
-      vertexShader: `
-        varying float vFade;
-        uniform float uFadeStart;
-        uniform float uRadius;
-        void main() {
-          float r = length(position.xz);
-          vFade = 1.0 - smoothstep(uFadeStart, uRadius, r);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: `
-        uniform vec3 uColor;
-        uniform float uOpacity;
-        varying float vFade;
-        void main() {
-          float a = uOpacity * vFade;
-          if (a < 0.004) discard;
-          gl_FragColor = vec4(uColor, a);
-        }`,
-      transparent: true,
-      depthWrite: false,
-    });
+    // Contact shadows (GFX-006): created here so a host that replaces the
+    // ground (Pro's floating islands) gets none. Synced after layout moves.
+    this.contactShadows = createContactShadowMesh(projects.length);
+    setUserData(this.contactShadows, { isGround: true });
+    this.scene.add(this.contactShadows);
+    this.contactShadowsDirty = true;
+  }
 
-    // One LineSegments for the whole grid — also drops ~40 draw calls.
-    const STEPS = 32;
-    const verts: number[] = [];
-    const addChord = (fixed: number, half: number, alongX: boolean) => {
-      for (let i = 0; i < STEPS; i++) {
-        const t0 = -half + (2 * half * i) / STEPS;
-        const t1 = -half + (2 * half * (i + 1)) / STEPS;
-        if (alongX) verts.push(t0, 0, fixed, t1, 0, fixed);
-        else verts.push(fixed, 0, t0, fixed, 0, t1);
-      }
-    };
-    const rSq = radius * radius;
-    for (let z = -radius; z <= radius; z += gridSpacing) {
-      if (z * z >= rSq) continue;
-      addChord(z, Math.sqrt(rSq - z * z), true);
+  /** Place one soft dark decal under every visible building (GFX-006). */
+  private syncContactShadows(): void {
+    this.contactShadowsDirty = false;
+    const mesh = this.contactShadows;
+    if (!mesh) return;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    let i = 0;
+    for (const entry of this.parts.values()) {
+      if (i >= mesh.instanceMatrix.count) break;
+      const dims = entry.project.dimensions;
+      const size = entry.building.visible && dims ? Math.max(dims.width, dims.depth) * 2.6 + 2 : 0;
+      pos.set(entry.building.position.x, 0.02, entry.building.position.z);
+      scale.set(size, 1, size);
+      mesh.setMatrixAt(i++, m.compose(pos, q, scale));
     }
-    for (let x = -radius; x <= radius; x += gridSpacing) {
-      if (x * x >= rSq) continue;
-      addChord(x, Math.sqrt(rSq - x * x), false);
-    }
-    const gridGeo = new THREE.BufferGeometry();
-    gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    const gridLines = new THREE.LineSegments(gridGeo, gridMat);
-    setUserData(gridLines, { isGround: true });
-    gridGroup.add(gridLines);
-    this.scene.add(gridGroup);
+    mesh.count = i;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   private addBlockOutlines(districts: Map<string, District>): void {
@@ -1359,7 +1355,10 @@ export class SceneManager {
   setVisible(path: string, visible: boolean): void {
     const parts = this.parts.get(path);
     if (!parts) return;
-    if (parts.building.visible !== visible) this.invalidateShadows(); // hidden casters drop their shadow
+    if (parts.building.visible !== visible) {
+      this.invalidateShadows(); // hidden casters drop their shadow
+      this.contactShadowsDirty = true;
+    }
     parts.building.visible = visible;
     parts.edgeGlow.visible = visible;
     parts.foundation.visible = visible;
@@ -2209,6 +2208,7 @@ export class SceneManager {
     const project = projectOf(building) as ProjectData;
     if (!project) return;
     this.invalidateShadows();
+    this.contactShadowsDirty = true;
 
     // Move the building mesh
     building.position.x += deltaX;
@@ -2352,6 +2352,7 @@ export class SceneManager {
 
   private moveBlock(category: string, deltaX: number, deltaZ: number): void {
     this.invalidateShadows();
+    this.contactShadowsDirty = true;
     // Move all buildings and foundations in this category
     for (const building of this.buildings) {
       const project = projectOf(building);
@@ -2901,6 +2902,8 @@ export class SceneManager {
     }
 
     this.controls.update();
+
+    if (this.contactShadowsDirty) this.syncContactShadows();
 
     // Render with composer (bloom) or direct renderer
     this.renderFrame();
