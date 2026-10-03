@@ -39,6 +39,11 @@ The city rebuilds as you save. `projectDir` is the field that matters most: with
 project has no Git activity, no dependency edges, and no **Launch agent** action. See
 [SCHEMA.md](SCHEMA.md) for every field.
 
+> **Windows paths:** leave `projectDir` unquoted (as above) or use single quotes. A
+> double-quoted `"C:\Users\..."` is invalid YAML (`\U` is read as an escape), and
+> Obsidian then drops the note's *whole* frontmatter, so the project silently
+> disappears from the city.
+
 ![Whole-vault fallback — an untagged vault rendered as districts by folder, with hub notes towering](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/whole-vault-fallback.png)
 
 ## What this plugin does on your machine

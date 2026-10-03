@@ -96,7 +96,7 @@ questions:              # optional open research questions — rendered as quest
 - **status** → building color: active = green, blocked = red, paused = blue, complete = purple.
 - **priority** → building height: critical is tallest, low is shortest.
 - **category** → free-form; identical values share a city district.
-- **projectDir** → lets Hypernovum read Git activity and launch agents in the right folder.
+- **projectDir** → lets Hypernovum read Git activity and launch agents in the right folder. On Windows, write it unquoted, single-quoted or with forward slashes — never a double-quoted backslash path like \`"C:\\Users\\..."\`: that is invalid YAML and Obsidian drops the note's whole frontmatter.
 
 Keep frontmatter values current as work progresses (e.g. flip \`status\` to \`blocked\` when a project stalls) — the city is only as truthful as the notes.
 
