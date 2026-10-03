@@ -14,6 +14,7 @@ import {
 } from './utils/HeartbeatInstaller';
 import { HeartbeatHooksModal } from './modals/HeartbeatHooksModal';
 import { FirstRunModal } from './modals/FirstRunModal';
+import { migrateAgentName } from './settings/settingsMigrations';
 
 export default class HypernovumPlugin extends Plugin {
   settings: HypernovumSettings = DEFAULT_SETTINGS;
@@ -337,6 +338,15 @@ export default class HypernovumPlugin extends Plugin {
     if (stored && !stored.buildingStyleMigrated) {
       if (stored.buildingStyle === 'classic') this.settings.buildingStyle = 'parametric';
       this.settings.buildingStyleMigrated = true;
+      await this.saveSettings();
+    }
+
+    // Migration (TXT-001): the agent is identified by its command; the name is a
+    // stored display string, so a renamed preset ("GPT Codex" → "Codex CLI")
+    // would otherwise keep the old label in every "Launch …" menu item.
+    const renamedAgent = migrateAgentName(this.settings.agentCommand, this.settings.agentName);
+    if (renamedAgent) {
+      this.settings.agentName = renamedAgent;
       await this.saveSettings();
     }
   }

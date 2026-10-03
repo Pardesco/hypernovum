@@ -7,7 +7,7 @@ import type { BlockPosition, HypernovumSettings as CoreSettings } from '@hyperno
 /** Known CLI agents — users can also enter a custom command */
 const KNOWN_AGENTS = [
   { name: 'Claude Code', command: 'claude' },
-  { name: 'GPT Codex', command: 'codex' },
+  { name: 'Codex CLI', command: 'codex' },
   { name: 'Antigravity CLI', command: 'agy' },
   { name: 'Custom...', command: '' },
 ];

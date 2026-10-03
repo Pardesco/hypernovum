@@ -6,7 +6,7 @@ agents from it and watch them work.
 Each project note becomes a building. Status maps to color, priority to height, category
 to district, and vault backlinks to glowing **Neural Link** arcs. A central **Neural Core**
 pulses as you work, **Data Arteries** flow to buildings when files change, and every active
-agent (Claude Code, GPT Codex, Antigravity CLI) orbits its building as a colored orb.
+agent (Claude Code, Codex CLI, Antigravity CLI) orbits its building as a colored orb.
 
 ![The code city — 27 project notes rendered as buildings, grouped into category districts](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/city.png)
 
@@ -110,7 +110,7 @@ backlink graph all still work.
 - **Activity Monitor** polls `.hypernovum/agents/` (per-session snapshots) for real-time agent status
 - **Persistent streaming artery** while an agent is actively working on a project
 - **Activity indicator overlay** shows current project and action
-- **Terminal Launcher** for launching Claude Code, GPT Codex, Antigravity CLI, or a custom agent command
+- **Terminal Launcher** for launching Claude Code, Codex CLI, Antigravity CLI, or a custom agent command
 - **Agent context handoff** writes `.hypernovum/SETUP.md` with project metadata, Git signals, and memory context pointers before launch
 - **Heartbeat script** installed into your vault at `.hypernovum/heartbeat.js` by the **Install agent heartbeat hooks** command, which also prints ready-to-paste hook JSON with every path already resolved
 

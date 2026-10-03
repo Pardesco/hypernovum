@@ -1020,7 +1020,7 @@ category: default
   private addAgentSwitcher(container: HTMLElement): void {
     const KNOWN_AGENTS = [
       { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b' },
-      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77' },
+      { id: 'codex', name: 'Codex CLI', command: 'codex', icon: 'C', color: '#6bcb77' },
       { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', icon: 'A', color: '#4d96ff' },
     ];
 
