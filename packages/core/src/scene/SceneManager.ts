@@ -375,9 +375,10 @@ export class SceneManager {
   }
 
   private initScene(): void {
-    // Horizon glow instead of a flat colour (GFX-006); fog fades distant
-    // buildings into that glow rather than into a void.
-    this.scene.background = createHorizonBackground();
+    // Horizon glow instead of a flat colour (GFX-006) when atmosphere is on;
+    // fog fades distant buildings into that glow rather than into a void.
+    // Atmosphere off (performance mode) keeps the flat 0.x backdrop.
+    this.scene.background = this.useAtmosphere ? createHorizonBackground() : new THREE.Color(0x0c0c18);
 
     // Add atmospheric fog for depth effect
     if (this.useAtmosphere) {
@@ -740,7 +741,10 @@ export class SceneManager {
 
     const radius = Math.max(maxExtent, 50);
     // Circular ground plane centered at origin
-    const groundGeo = new THREE.CircleGeometry(radius, 64);
+    // With atmosphere on, the ground runs far past the grid so fog carries its
+    // edge into the horizon glow; a disc edge against the glow read as a planet.
+    const groundRadius = this.useAtmosphere ? Math.max(radius * 4, 400) : radius;
+    const groundGeo = new THREE.CircleGeometry(groundRadius, 64);
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x0a0a14,
       roughness: 0.95,
