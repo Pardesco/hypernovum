@@ -185,12 +185,19 @@ node "<vault>/.hypernovum/heartbeat.js" --vault="<vault>" --hook \
 
 # by hand or from your own wrapper: reuse one --id for the whole session
 node "<vault>/.hypernovum/heartbeat.js" --vault="<vault>" --id="my-session" \
-  --name="Claude Code" --agent-type=claude --project="my-project" \
+  --name="Claude Code" --agent-type=claude --cwd="C:/code/my-project" \
   --state=editing --tool=Edit --file=src/x.ts
 
 # on finish
 node "<vault>/.hypernovum/heartbeat.js" --vault="<vault>" --id="my-session" --stop
 ```
+
+**Pass `--cwd`** (the agent's working directory) when you ping by hand or from a
+wrapper. It is the most reliable way to put a session on the right building: the
+plugin compares it with each project's `projectDir` *before* trying names, so it
+works even when a project's title differs from its folder name. `--project` is the
+fallback, matched against project titles and folder names. `--hook` fills in `cwd`
+for you.
 
 **Heartbeat v2** gives every session its own snapshot file
 (`.hypernovum/agents/<sessionId>.json`), so any number of agents run concurrently

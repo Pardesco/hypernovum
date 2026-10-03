@@ -18,7 +18,7 @@
  *
  * Usage — by hand or from a wrapper, passing values explicitly:
  *   node heartbeat.js --vault="/path/to/vault" --id="my-session" \
- *        --name="Claude Code" --agent-type=claude --project="my-app" \
+ *        --name="Claude Code" --agent-type=claude --cwd="/path/to/my-app" \
  *        --state=editing --action="Edit src/x.ts" --tool=Edit --file=src/x.ts
  *
  *   node heartbeat.js --vault="/path/to/vault" --id="my-session" --stop
@@ -39,7 +39,13 @@
  *   --id              stable session id (supplied automatically by --hook)
  *   --name            display name, e.g. "Claude Code"
  *   --agent-type      claude | codex | agy | custom
- *   --project         project name or path hint (cwd basename by convention)
+ *   --cwd             the agent's working directory. The plugin checks it FIRST,
+ *                     against each project's resolved projectDir, so it is the
+ *                     most reliable way to attach a session to a project — it
+ *                     works even when the project's title differs from its
+ *                     folder name. --hook fills it from the hook payload.
+ *   --project         project name or path hint (cwd basename by convention);
+ *                     matched against project titles when --cwd doesn't match
  *   --state           starting|planning|reading|editing|running|testing|
  *                     reviewing|waiting|blocked|complete|failed
  *   --action          human phrase, e.g. "Editing cart.ts"

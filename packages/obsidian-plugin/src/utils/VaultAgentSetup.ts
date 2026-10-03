@@ -145,7 +145,7 @@ ${buildStopExample(heartbeat)}
 - Reuse one \`--id\` for every ping in a session so they all update the same orb — pick any stable string. (From a Claude Code hook, pass \`--hook\` instead: the script then reads the real \`session_id\` from the hook's stdin JSON. There is no \`$CLAUDE_SESSION_ID\` environment variable.)
 - \`--state\`: starting | planning | reading | editing | running | testing | reviewing | waiting | blocked | complete | failed (inferred from \`--tool\`/\`--action\` if omitted).
 - \`--file\` (project-relative) enables same-file conflict detection between agents.
-- \`--project\` should match the project note's title.
+- \`--cwd\` (your working directory) is the most reliable way to attach a session to a project: it is matched against each project's \`projectDir\` first. \`--project\` is the fallback and should match the project note's title.
 - Snapshots land in \`<vault>/.hypernovum/agents/<sessionId>.json\`; a ping keeps its working state for 90s; after that the session shows as stale, and it is dropped after 15 minutes of silence.
 
 The script itself lives at \`${heartbeat.scriptPath}\` — Hypernovum installs and updates it, so don't edit it by hand.
