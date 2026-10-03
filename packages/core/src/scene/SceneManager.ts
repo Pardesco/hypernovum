@@ -206,8 +206,16 @@ export class SceneManager {
   private bloomPass: UnrealBloomPass | null = null;
   /** MSAA samples for the composer's scene target (GFX-001). */
   private msaaSamples = 4;
-  /** Luminance above which the bloom pass picks a pixel up. */
-  private static readonly BLOOM_THRESHOLD = 0.7;
+  /**
+   * Luminance above which the bloom pass picks a pixel up (GFX-002). At 0.7
+   * whole lit facades bloomed and washed out the building shading; at 1.0 only
+   * true emitters — driven above 1.0 in the half-float target — glow.
+   */
+  private static readonly BLOOM_THRESHOLD = 1.0;
+  /** Emissive multiplier for light sources when bloom is on (orbs, gems, beacons, rings). */
+  private static readonly HDR_EMISSIVE = 2.0;
+  /** Lit-window multiplier when bloom is on (building shader uEmissive). */
+  private static readonly HDR_WINDOWS = 1.3;
 
   // Neural Core and Data Arteries
   private neuralCore: NeuralCore | null = null;
@@ -496,6 +504,15 @@ export class SceneManager {
       this.composer = null;
       this.bloomPass = null;
     }
+  }
+
+  /**
+   * Multiplier for light-source emissives (GFX-002): with a bloom pass they are
+   * pushed above 1.0 so they clear the threshold; without one there is nothing
+   * to gain and the canvas would just clip them.
+   */
+  private hdrScale(): number {
+    return this.bloomPass ? SceneManager.HDR_EMISSIVE : 1;
   }
 
   /** Render one frame through the composer (or straight to screen without bloom). */
@@ -1059,6 +1076,7 @@ export class SceneManager {
         floors: build.floors,
         diagrid: build.diagrid,
         sides: build.sides,
+        emissive: this.hdrScale() > 1 ? SceneManager.HDR_WINDOWS : 1,
       });
       if (shaderMat) {
         material = shaderMat;
@@ -1178,7 +1196,7 @@ export class SceneManager {
       const questMat = new THREE.MeshStandardMaterial({
         color: 0xffcc44,
         emissive: 0xffaa22,
-        emissiveIntensity: 1.2,
+        emissiveIntensity: 1.2 * this.hdrScale(),
         flatShading: true,
       });
       const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), questMat);
@@ -1484,7 +1502,7 @@ export class SceneManager {
     const mat = entry.orb.material as THREE.MeshStandardMaterial;
     mat.color.copy(color);
     mat.emissive.copy(color);
-    mat.emissiveIntensity = visual.emissiveBase;
+    mat.emissiveIntensity = visual.emissiveBase * this.hdrScale();
     const wantTransparent = visual.opacity < 1;
     if (mat.transparent !== wantTransparent) {
       mat.transparent = wantTransparent;
@@ -1517,7 +1535,7 @@ export class SceneManager {
 
       const project = projectOf(building) as ProjectData;
       const half = (project.dimensions?.width ?? 3) / 2;
-      const color = severity === 'high' ? 0xff3333 : 0xffaa33;
+      const color = new THREE.Color(severity === 'high' ? 0xff3333 : 0xffaa33).multiplyScalar(this.hdrScale());
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(half + 0.4, half + 0.9, 48),
         new THREE.MeshBasicMaterial({
@@ -1565,7 +1583,7 @@ export class SceneManager {
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.9, 1.15, 40),
       new THREE.MeshBasicMaterial({
-        color: colorHex,
+        color: new THREE.Color(colorHex).multiplyScalar(this.hdrScale()),
         transparent: true,
         opacity: 0.85,
         side: THREE.DoubleSide,
@@ -2674,6 +2692,7 @@ export class SceneManager {
     }
 
     // Agent orbs: orbit + pulse + complete-fade around their AGT-005 baselines.
+    const hdr = this.hdrScale();
     for (const entry of this.agentOrbs.values()) {
       const v = entry.visual;
       const mat = entry.orb.material as THREE.MeshStandardMaterial;
@@ -2692,7 +2711,7 @@ export class SceneManager {
 
       // Pulse: modulate emissive around the published baseline.
       if (v.pulseSpeed > 0) {
-        mat.emissiveIntensity = v.emissiveBase + Math.sin(motion * v.pulseSpeed + entry.phase) * v.pulseAmplitude;
+        mat.emissiveIntensity = (v.emissiveBase + Math.sin(motion * v.pulseSpeed + entry.phase) * v.pulseAmplitude) * hdr;
       }
 
       // Complete fade: ramp opacity 1→0 over 60s, then hide the orb.
@@ -2753,7 +2772,7 @@ export class SceneManager {
     // Pulse critical-priority warning beacons (slow aircraft-light blink)
     if (this.roofBeacons.length > 0) {
       const blink = (Math.sin(motion * 2.4) + 1) / 2;
-      const intensity = 0.3 + blink * 2.0;
+      const intensity = (0.3 + blink * 2.0) * this.hdrScale();
       for (const beacon of this.roofBeacons) {
         (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
       }

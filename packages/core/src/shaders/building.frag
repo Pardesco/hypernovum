@@ -10,6 +10,7 @@ uniform float uDimFactor;     // 1.0 = normal, <1 = dimmed (focus mode unrelated
 uniform float uFloors;        // 0 = legacy auto-density; >0 = real floor count (parametric)
 uniform float uDiagrid;       // 0 = off; >0 = draw a diagrid facade (preset D)
 uniform float uWindowCols;    // 0 = legacy per-face density; >0 = explicit column count
+uniform float uEmissive;      // window light multiplier: >1 drives lit windows into HDR for bloom (GFX-002); 0 = unset → 1
 
 varying vec2 vUv;
 varying vec3 vNormal;         // object-space (legacy classic rim)
@@ -70,7 +71,10 @@ void main() {
 
   // Per-window brightness variation — occupied floors, not a light switch
   float winVar = 0.7 + 0.3 * random(windowID + vec2(3.7, 9.1));
-  vec3 windowColor = windowBaseColor * (0.8 + terminalPulse) * lightOn * winVar;
+  // Lit windows are light sources: with bloom on they are driven above 1.0 so
+  // they (and not the facade) clear the bloom threshold (GFX-002).
+  float emissive = uEmissive > 0.0 ? uEmissive : 1.0;
+  vec3 windowColor = windowBaseColor * (0.8 + terminalPulse) * lightOn * winVar * emissive;
 
   // === WALL COLOR ===
   vec3 decayColor = vec3(0.3, 0.25, 0.2);
