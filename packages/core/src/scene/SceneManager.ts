@@ -650,6 +650,25 @@ export class SceneManager {
       this.arteryManager?.stopStream();
       this.startStreaming(streamingPath);
     }
+
+    this.warmUpShaders();
+  }
+
+  /**
+   * GFX-011: start compiling every material program the new city needs right
+   * away. With KHR_parallel_shader_compile (see BuildingShader.testCompilation)
+   * the driver links them off the main thread while the next frame is still
+   * being scheduled, instead of the first frames that draw them stalling on a
+   * synchronous compile. Programs are cached, so later rebuilds are no-ops.
+   */
+  private warmUpShaders(): void {
+    try {
+      this.renderer.compileAsync(this.scene, this.camera).catch(() => {
+        // Nothing to do: the first render compiles synchronously, as before.
+      });
+    } catch {
+      // compile() threw (lost context); rendering handles it.
+    }
   }
 
   private applySavedPositions(): void {
