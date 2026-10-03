@@ -38,6 +38,7 @@ import { fitShadowFrustum } from './shadowFit';
 import { minFrameInterval, shouldRenderFrame } from './framePacing';
 import { frameBoxInRect, type FramingBox, type ScreenRect } from './viewFraming';
 import { markerScale } from './markerScale';
+import { LABEL_PRIORITY, labelPriority, resolveLabelCollisions, type LabelBox } from './labelCollision';
 import {
   AUTO_PROBE_MIN_SAMPLES,
   AUTO_PROBE_MS,
@@ -1835,14 +1836,69 @@ export class SceneManager {
     const camPos = this.camera.position;
     // Threshold scales with city radius so labels cull relative to city size.
     const threshold = Math.max(this.cityBounds.radius * 2.2, 60);
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const st = this.store?.getState();
+    // LBL-001: labels that pass the policy compete for screen space below.
+    const boxes: LabelBox[] = [];
+    const contenders = new Map<string, CSS2DObject>();
+    const contend = (id: string, label: CSS2DObject, priority: number) => {
+      const box = this.labelScreenBox(id, label, w, h, priority);
+      if (box) {
+        boxes.push(box);
+        contenders.set(id, label);
+      } else {
+        label.visible = true; // off-screen / behind the camera: CSS2DRenderer handles it
+      }
+    };
+
+    for (const [category, block] of this.blocks) {
+      if (block.label) contend(`category:${category}`, block.label, LABEL_PRIORITY.category);
+    }
     for (const entry of this.parts.values()) {
       if (!entry.label) continue;
       // A filtered-out (hidden) building never shows its label (PERF-002).
       if (!entry.building.visible) { entry.label.visible = false; continue; }
       const tier: LabelTier = entry.state?.labelTier ?? 'normal';
       const dist = camPos.distanceTo(entry.label.position);
-      entry.label.visible = labelVisible(tier, this.showLabels, dist, threshold);
+      if (!labelVisible(tier, this.showLabels, dist, threshold)) { entry.label.visible = false; continue; }
+      contend(entry.path, entry.label, labelPriority({
+        selected: st?.selectedPath === entry.path,
+        hovered: st?.hoveredPath === entry.path,
+        pinned: tier === 'always',
+        projectPriority: entry.project.priority,
+      }));
     }
+
+    const visible = resolveLabelCollisions(boxes);
+    for (const [id, label] of contenders) label.visible = visible.has(id);
+  }
+
+  /** Label sizes, measured once from the DOM (text never changes). */
+  private labelSizes = new WeakMap<HTMLElement, { width: number; height: number }>();
+  private labelProjection = new THREE.Vector3();
+
+  /**
+   * A label's centred screen rect (CSS2DObject centres its element on the
+   * projected point), or null when the anchor is off-screen or behind the
+   * camera. A label never shown yet has no layout size, so its size is
+   * estimated from its text until it can be measured.
+   */
+  private labelScreenBox(id: string, label: CSS2DObject, w: number, h: number, priority: number): LabelBox | null {
+    const v = label.getWorldPosition(this.labelProjection).project(this.camera);
+    if (v.z < -1 || v.z > 1 || v.x < -1.2 || v.x > 1.2 || v.y < -1.2 || v.y > 1.2) return null;
+    const el = label.element;
+    let size = this.labelSizes.get(el);
+    if (!size) {
+      const width = el.offsetWidth;
+      if (width > 0) {
+        size = { width, height: el.offsetHeight };
+        this.labelSizes.set(el, size);
+      }
+    }
+    const estimate = { width: (el.textContent?.length ?? 8) * 6.5 + 14, height: 18 };
+    const { width, height } = size ?? estimate;
+    return { id, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, width, height, priority };
   }
 
   private getStatusColor(status: string): THREE.Color {
