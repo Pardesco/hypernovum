@@ -2,13 +2,13 @@ import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Plat
 import { existsSync, statSync } from 'fs';
 import { execFile } from 'child_process';
 import * as path from 'path';
-import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, createInteractionStore } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult } from '@hypernovum/core';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, createInteractionStore, freeRectAvoiding } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult, CameraState, ScreenRect } from '@hypernovum/core';
 import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
 import { SessionReader } from '../monitors/SessionReader';
-import type { SessionDigest } from '../monitors/sessionDigest';
+import { digestMatchesProject, type SessionDigest } from '../monitors/sessionDigest';
 import { filterProjects } from '../utils/projectFilter';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
@@ -38,7 +38,7 @@ import {
   type ResolvedProjectDir,
 } from '../utils/projectPaths';
 import { createBinaryVaultFile } from '../utils/vaultFiles';
-import type { HypernovumSettings } from '../settings/SettingsTab';
+import type { HudCollapsed, HypernovumSettings } from '../settings/SettingsTab';
 import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
@@ -320,6 +320,9 @@ export class HypernovumView extends ItemView {
       return;
     }
 
+    // Non-null only when this view replaces one reloaded for a setting change.
+    const restoredCamera = this.plugin.takePendingCameraState();
+
     // Initialize 3D scene with save callback and settings
     this.sceneManager = new SceneManager(container, {
       savedPositions: this.settings.blockPositions,
@@ -328,6 +331,9 @@ export class HypernovumView extends ItemView {
       },
       settings: this.settings,
       interactionStore: this.interactionStore,
+      initialCamera: restoredCamera,
+      // The Auto quality probe can switch wide lines off (GFX-009): re-pack.
+      onRequestRebuild: () => this.rebuildCity(),
     });
 
     // Add legend overlay
@@ -407,13 +413,34 @@ export class HypernovumView extends ItemView {
         if (this.sceneManager?.exitMoveModeIfActive()) return;
         this.interactionStore.getState().clearSelection();
       },
+      onToggleHud: () => this.toggleHud(),
     });
 
     // Inspector mirrors the selection — single subscription, no manual calls
     this.registerStoreSubscription();
 
+    // HUD-001: frame the first overview into the area the panels leave free,
+    // and keep that area current as the pane resizes.
+    this.cityContainer = container;
+    container.classList.toggle('hud-hidden', this.plugin.hudHidden);
+    this.updateFramingRect();
+    this.framingObserver = new ResizeObserver(() => this.updateFramingRect());
+    this.framingObserver.observe(container);
+    for (const el of [this.hudTopLeft, this.commandPanelEl, this.inspectorOuterEl]) {
+      if (el) this.framingObserver.observe(el);
+    }
+
     // Parse projects and build city
     await this.buildCity();
+
+    // The panels only reach their real size once the first build has filled
+    // them (the inspector renders its overview after the scene is built), so a
+    // fresh open frames once more against the final layout. A view restoring a
+    // camera after a reload keeps that camera (CAM-001).
+    if (!restoredCamera) {
+      this.updateFramingRect();
+      this.sceneManager.resetCamera();
+    }
 
     // Watch for vault changes and rebuild on update
     this.metadataExtractor = new MetadataExtractor(
@@ -456,6 +483,8 @@ export class HypernovumView extends ItemView {
     // Add HUD title
     this.addHudTitle(container);
 
+    if (this.plugin.perfOverlay) this.sceneManager.setPerfOverlay(true);
+
     // Stop rendering when the view isn't on screen (P1-2).
     this.setupRenderGating(container);
 
@@ -476,6 +505,8 @@ export class HypernovumView extends ItemView {
     this.storeUnsubscribe = null;
     this.visibilityObserver?.disconnect();
     this.visibilityObserver = null;
+    this.framingObserver?.disconnect();
+    this.framingObserver = null;
 
     if (this.sceneManager) {
       this.sceneManager.dispose();
@@ -782,11 +813,33 @@ category: default
    */
   private rebuildCity(): void {
     if (this.sceneManager) {
-      const districts = this.binPacker.packDistricts(this.allProjects);
+      // LAY-001: shelf-packed toward ~1.8:1; configs whose saved offsets are
+      // relative to the 0.x column layout keep it (layoutVersion 1).
+      const districts = this.binPacker.packDistricts(this.allProjects, {
+        layout: this.settings.layoutVersion === 1 ? 'legacy' : 'shelf',
+      });
       this.sceneManager.clearAllWeather();
-      this.sceneManager.buildCity(this.allProjects, districts);
+      // The camera keeps its pose across rebuilds (CAM-001); re-frame only when
+      // the city switches between whole-vault fallback and project mode, since
+      // the old pose then points at a layout that no longer exists.
+      const refit = this.lastBuiltFallback !== null && this.lastBuiltFallback !== this.vaultFallback;
+      this.lastBuiltFallback = this.vaultFallback;
+      this.sceneManager.buildCity(this.allProjects, districts, { refit });
     }
     this.applyView();
+  }
+
+  /** Fallback mode of the previous build; null before the first one. */
+  private lastBuiltFallback: boolean | null = null;
+
+  /** Current camera pose, carried across a reload by the plugin (CAM-001). */
+  getCameraState(): CameraState | null {
+    return this.sceneManager?.getCameraState() ?? null;
+  }
+
+  /** Show or hide the debug performance overlay (frame ms, draw calls, pixel ratio). */
+  setPerfOverlay(enabled: boolean): void {
+    this.sceneManager?.setPerfOverlay(enabled);
   }
 
   /** Apply filters/search/lens as a visibility + retint pass — no repack. */
@@ -1005,7 +1058,7 @@ category: default
   private addAgentSwitcher(container: HTMLElement): void {
     const KNOWN_AGENTS = [
       { id: 'claude', name: 'Claude Code', command: 'claude', icon: '>', color: '#ff922b' },
-      { id: 'codex', name: 'GPT Codex', command: 'codex', icon: 'C', color: '#6bcb77' },
+      { id: 'codex', name: 'Codex CLI', command: 'codex', icon: 'C', color: '#6bcb77' },
       { id: 'antigravity', name: 'Antigravity CLI', command: 'agy', icon: 'A', color: '#4d96ff' },
     ];
 
@@ -1014,6 +1067,7 @@ category: default
     const heading = header.createDiv();
     heading.createSpan({ cls: 'agents-title', text: 'AGENTS' });
     heading.createDiv({ cls: 'agents-subtitle', text: 'Right-click a building to launch' });
+    this.addCollapseToggle(header, panel, 'agents', 'agents panel');
     const list = panel.createDiv({ cls: 'agents-list' });
     const prepareBtn = panel.createEl('button', {
       cls: 'agents-prepare-btn',
@@ -1266,6 +1320,7 @@ category: default
       ['Scroll', 'Zoom'],
       ['B / S', 'Cycle blocked / stale'],
       ['Space', 'Reset camera'],
+      ['H', 'Hide / show HUD'],
     ] as const) {
       const row = controls.createDiv({ cls: 'controls-row' });
       row.createEl('kbd', { text: key });
@@ -1444,6 +1499,23 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
     attentionBadge.hidden = true;
     const summary = header.createSpan({ cls: 'command-panel-summary', text: 'Loading...' });
+    // UX-001: a compact switch in the header, not a full-width bar under the
+    // filters — a stray click there turned the whole agent layer off and
+    // reloaded the city.
+    const vaultToggle = header.createEl('button', {
+      cls: 'vault-mode-switch',
+      attr: {
+        type: 'button',
+        role: 'switch',
+        'aria-checked': String(this.settings.vaultMode),
+        'aria-label': 'Vault mode',
+        title: 'Vault mode: pure 3D visualization, no AI agent features. Reloads the view.',
+      },
+    });
+    vaultToggle.createSpan({ cls: 'vault-mode-switch-label', text: 'Vault' });
+    vaultToggle.createSpan({ cls: 'vault-mode-switch-track' }).createSpan({ cls: 'vault-mode-switch-thumb' });
+    this.commandPanelEl = panel;
+    this.addCollapseToggle(header, panel, 'command', 'projects panel');
 
     // Shown only while the city is standing in for an untagged vault. Built with
     // DOM APIs, never innerHTML — the vault name is user content.
@@ -1510,13 +1582,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         attr: { 'data-edge': type },
       }));
     }
-    const vaultToggle = panel.createEl('button', {
-      cls: 'vault-mode-toggle',
-      // Sentence case in the string; the all-caps HUD look is CSS text-transform.
-      text: 'Vault mode · off',
-      attr: { title: 'Vault mode: pure 3D visualization, no AI agent features. Reloads the view.' },
-    });
-
     this.searchInput = searchInput;
     this.layerSelect = layerSelect;
     this.statusSelect = statusSelect;
@@ -1577,18 +1642,106 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       });
     }
 
-    vaultToggle.textContent = `Vault mode · ${this.settings.vaultMode ? 'on' : 'off'}`;
     vaultToggle.classList.toggle('active', this.settings.vaultMode);
     vaultToggle.addEventListener('click', () => {
-      // Reloads the view; the fresh view renders the new state
-      void this.plugin.toggleVaultMode();
+      // Reloads the view; the fresh view renders the new state.
+      const live = this.fleetSessions.filter((s) => HypernovumView.LIVE_AGENT_STATES.has(s.state)).length;
+      if (this.settings.vaultMode || live === 0) {
+        void this.plugin.toggleVaultMode();
+        return;
+      }
+      // Turning it ON hides every live agent — confirm rather than act on a
+      // click that may have been meant for the city underneath.
+      new ConfirmModal(this.app, {
+        title: 'Turn on vault mode?',
+        body: `${live} agent session${live === 1 ? ' is' : 's are'} live. Vault mode hides agent orbs, `
+          + 'stops reading agent activity and reloads the city.',
+        cta: 'Turn on vault mode',
+      }, () => { void this.plugin.toggleVaultMode(); }).open();
     });
   }
 
   private addInspectorPanel(container: HTMLElement): void {
     const panel = container.createDiv({ cls: 'hypernovum-project-inspector' });
-    panel.createDiv({ cls: 'inspector-empty', text: 'Select a project' });
-    this.inspectorPanel = panel;
+    // The body re-renders on every inspector update; the collapse toggle lives
+    // outside it so it survives those renders (HUD-001).
+    this.addCollapseToggle(panel, panel, 'inspector', 'inspector', 'inspector-collapse');
+    const body = panel.createDiv({ cls: 'inspector-body' });
+    body.createDiv({ cls: 'inspector-empty', text: 'Select a project' });
+    this.inspectorPanel = body;
+    this.inspectorOuterEl = panel;
+  }
+
+  // --- HUD collapse + hide (HUD-001) ---------------------------------------
+
+  private commandPanelEl: HTMLElement | null = null;
+  private inspectorOuterEl: HTMLElement | null = null;
+  private cityContainer: HTMLElement | null = null;
+  private framingObserver: ResizeObserver | null = null;
+
+  /**
+   * A chevron that collapses `panel` to its header. The state is saved in
+   * settings so it survives a reload, and the camera framing is told about
+   * the panel's new size.
+   */
+  private addCollapseToggle(
+    host: HTMLElement,
+    panel: HTMLElement,
+    key: keyof HudCollapsed,
+    label: string,
+    extraCls = '',
+  ): void {
+    const collapsed = this.settings.hudCollapsed?.[key] ?? false;
+    const btn = host.createEl('button', {
+      cls: extraCls ? `hud-collapse ${extraCls}` : 'hud-collapse',
+      attr: { type: 'button' },
+    });
+    const render = (isCollapsed: boolean) => {
+      panel.classList.toggle('is-collapsed', isCollapsed);
+      btn.textContent = isCollapsed ? '▸' : '▾';
+      btn.setAttribute('aria-expanded', String(!isCollapsed));
+      btn.setAttribute('aria-label', `${isCollapsed ? 'Expand' : 'Collapse'} ${label}`);
+      btn.setAttribute('title', `${isCollapsed ? 'Expand' : 'Collapse'} ${label}`);
+    };
+    render(collapsed);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = !panel.classList.contains('is-collapsed');
+      render(next);
+      this.plugin.settings.hudCollapsed = {
+        ...{ agents: false, command: false, inspector: false },
+        ...this.plugin.settings.hudCollapsed,
+        [key]: next,
+      };
+      void this.plugin.saveSettings();
+      this.updateFramingRect();
+    });
+  }
+
+  /** Hide every HUD overlay except the title and legend (H key, command). */
+  toggleHud(): void {
+    this.plugin.hudHidden = !this.plugin.hudHidden;
+    this.cityContainer?.classList.toggle('hud-hidden', this.plugin.hudHidden);
+    this.updateFramingRect();
+  }
+
+  /**
+   * Report the canvas area the HUD panels leave free, so the overview framing
+   * (first open, Space) puts the city there instead of under the panels.
+   */
+  private updateFramingRect(): void {
+    if (!this.sceneManager) return;
+    const canvasRect = this.sceneManager.getCanvas().getBoundingClientRect();
+    if (canvasRect.width < 10 || canvasRect.height < 10) return;
+    const obstacles: ScreenRect[] = [];
+    for (const el of [this.hudTopLeft, this.commandPanelEl, this.inspectorOuterEl]) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue; // hidden (HUD off, narrow layout)
+      obstacles.push({ x: r.left - canvasRect.left, y: r.top - canvasRect.top, width: r.width, height: r.height });
+    }
+    const canvas = { width: canvasRect.width, height: canvasRect.height };
+    this.sceneManager.setFramingRect(freeRectAvoiding(canvas, obstacles) ?? { x: 0, y: 0, ...canvas });
   }
 
   private storeUnsubscribe: (() => void) | null = null;
@@ -1954,12 +2107,12 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (!vaultBase) return null;
 
     const sessionsDir = path.join(vaultBase, '.hypernovum', 'sessions');
-    const dirBase = this.projectDirOf(project)?.split(/[\\/]/).pop()?.toLowerCase();
-    const digest = this.sessionReader.readLatestForProject(sessionsDir, (proj) => {
-      if (!proj) return false;
-      const p = proj.toLowerCase();
-      return p === project.title.toLowerCase() || p === dirBase;
-    }) ?? null;
+    // Working directory first, then title / folder name (AGT-011).
+    const target = { title: project.title, dir: this.projectDirOf(project) };
+    const digest = this.sessionReader.readLatestForProject(
+      sessionsDir,
+      (_proj, d) => digestMatchesProject(d, target),
+    ) ?? null;
 
     this.sessionDigestCache.set(project.path, { at: now, digest });
     return digest;
@@ -3220,6 +3373,33 @@ class FolderInputModal extends Modal {
     }
     this.close();
     this.onSubmit(trimmed);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** Yes/no confirmation (UX-001). `minAppVersion` predates Obsidian's own one. */
+class ConfirmModal extends Modal {
+  constructor(
+    app: App,
+    private opts: { title: string; body: string; cta: string },
+    private onConfirm: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: this.opts.title });
+    contentEl.createEl('p', { text: this.opts.body });
+    new Setting(contentEl)
+      .addButton((btn) => btn.setButtonText('Cancel').onClick(() => this.close()))
+      .addButton((btn) => btn.setButtonText(this.opts.cta).setCta().onClick(() => {
+        this.close();
+        this.onConfirm();
+      }));
   }
 
   onClose(): void {

@@ -836,35 +836,70 @@
 .edge-chip[data-edge="blocked-by"].active { border-color: #ff8844; background: rgba(90, 50, 20, 0.5); box-shadow: 0 0 8px rgba(255, 136, 68, 0.3); }
 .edge-chip[data-edge="agent-working-on"].active { border-color: #22d3ee; background: rgba(15, 70, 85, 0.5); box-shadow: 0 0 8px rgba(34, 211, 238, 0.3); }
 
-/* Vault-mode toggle — amber counterpart to the violet links toggle */
-.vault-mode-toggle {
-  width: 100%;
-  height: 26px;
-  margin-top: 6px;
-  border: 1px solid rgba(255, 190, 90, 0.22);
-  border-radius: 6px;
-  background: rgba(45, 34, 16, 0.5);
+/* Vault-mode switch (UX-001) — compact, in the command-panel header, so a
+   stray click on the panel can no longer turn the agent layer off. Scoped
+   under the header so it beats Obsidian's default button chrome. */
+.command-panel-header .vault-mode-switch {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  margin: 0;
+  padding: 0 3px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
   color: rgba(255, 210, 140, 0.55);
   font-family: var(--font-monospace, monospace);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-.vault-mode-toggle:hover {
-  border-color: rgba(255, 190, 90, 0.45);
+.command-panel-header .vault-mode-switch:hover {
+  border-color: rgba(255, 190, 90, 0.3);
   color: rgba(255, 222, 170, 0.85);
 }
 
-.vault-mode-toggle.active {
-  border-color: rgba(255, 190, 90, 0.6);
-  background: rgba(90, 65, 25, 0.6);
+.vault-mode-switch-track {
+  position: relative;
+  width: 24px;
+  height: 12px;
+  border: 1px solid rgba(255, 190, 90, 0.35);
+  border-radius: 6px;
+  background: rgba(45, 34, 16, 0.6);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.vault-mode-switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 210, 140, 0.6);
+  transition: transform 0.15s ease;
+}
+
+.command-panel-header .vault-mode-switch.active {
   color: #ffd9a0;
   text-shadow: 0 0 8px rgba(255, 190, 90, 0.6);
-  box-shadow: 0 0 12px rgba(255, 190, 90, 0.15), inset 0 0 12px rgba(255, 190, 90, 0.08);
+}
+
+.vault-mode-switch.active .vault-mode-switch-track {
+  border-color: rgba(255, 190, 90, 0.75);
+  background: rgba(160, 110, 30, 0.75);
+}
+
+.vault-mode-switch.active .vault-mode-switch-thumb {
+  transform: translateX(12px);
+  background: #ffd9a0;
 }
 
 /* Project inspector */
@@ -1521,3 +1556,97 @@
 .hypernovum-container button:focus-visible, .hypernovum-container select:focus-visible, .hypernovum-container input:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 3px; }
 button.dep-row { width: 100%; height: auto; text-align: left; }
 button.agents-item { width: 100%; text-align: left; height: auto; background: transparent; box-shadow: none; }
+
+/* Debug performance overlay ("Toggle performance overlay" command) */
+.hypernovum-perf-overlay {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 210;
+  padding: 6px 10px;
+  border: 1px solid rgba(120, 220, 160, 0.3);
+  border-radius: 6px;
+  background: rgba(4, 10, 8, 0.82);
+  color: rgba(170, 255, 200, 0.9);
+  font-family: var(--font-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* HUD collapse chevrons (HUD-001). Scoped under the container so they beat
+   Obsidian's default button chrome. */
+.hypernovum-container button.hud-collapse {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(170, 190, 220, 0.55);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hypernovum-container button.hud-collapse:hover {
+  background: rgba(120, 150, 190, 0.15);
+  color: rgba(240, 245, 255, 0.9);
+}
+
+.agents-panel.is-collapsed .agents-list,
+.agents-panel.is-collapsed .agents-prepare-btn,
+.agents-panel.is-collapsed .agents-subtitle {
+  display: none;
+}
+
+.agents-panel.is-collapsed .agents-header {
+  border-bottom: none;
+}
+
+.hypernovum-command-panel.is-collapsed > :not(.command-panel-header) {
+  display: none;
+}
+
+.hypernovum-command-panel.is-collapsed .command-panel-header {
+  margin-bottom: 0;
+}
+
+.hypernovum-project-inspector > .inspector-collapse {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+}
+
+/* Keep the project view's close button clear of the collapse chevron. */
+.hypernovum-project-inspector .inspector-close {
+  right: 18px;
+}
+
+.hypernovum-project-inspector.is-collapsed {
+  overflow: hidden;
+}
+
+.hypernovum-project-inspector.is-collapsed .inspector-body > :not(.inspector-header) {
+  display: none;
+}
+
+.hypernovum-project-inspector.is-collapsed .inspector-header {
+  margin-bottom: 0;
+}
+
+/* Hide HUD (H / "Toggle HUD"): only the title and the legend stay. */
+.hypernovum-container.hud-hidden .hypernovum-hud-topleft,
+.hypernovum-container.hud-hidden .hypernovum-command-panel,
+.hypernovum-container.hud-hidden .hypernovum-project-inspector,
+.hypernovum-container.hud-hidden .hypernovum-controls,
+.hypernovum-container.hud-hidden .hypernovum-save-btn {
+  display: none;
+}

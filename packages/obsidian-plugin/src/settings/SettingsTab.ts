@@ -3,11 +3,12 @@ import type { SettingDefinitionItem } from 'obsidian';
 import type HypernovumPlugin from '../main';
 import { DEFAULT_SETTINGS as CORE_DEFAULTS } from '@hypernovum/core';
 import type { BlockPosition, HypernovumSettings as CoreSettings } from '@hypernovum/core';
+import { CURRENT_LAYOUT_VERSION, type LayoutVersion } from './settingsMigrations';
 
 /** Known CLI agents — users can also enter a custom command */
 const KNOWN_AGENTS = [
   { name: 'Claude Code', command: 'claude' },
-  { name: 'GPT Codex', command: 'codex' },
+  { name: 'Codex CLI', command: 'codex' },
   { name: 'Antigravity CLI', command: 'agy' },
   { name: 'Custom...', command: '' },
 ];
@@ -52,6 +53,20 @@ export interface HypernovumSettings extends CoreSettings {
   outputFolder: string;
   /** The 0.4.2 classic→parametric default flip has already been applied once */
   buildingStyleMigrated: boolean;
+  /** Collapsed HUD panels (HUD-001), remembered across reloads. */
+  hudCollapsed: HudCollapsed;
+  /**
+   * City layout generation (LAY-001): 1 = one category per row (0.x, what
+   * pre-0.7 saved offsets are relative to), 2 = shelf packing.
+   */
+  layoutVersion: LayoutVersion;
+}
+
+/** Which HUD panels are collapsed to their header (HUD-001). */
+export interface HudCollapsed {
+  agents: boolean;
+  command: boolean;
+  inspector: boolean;
 }
 
 export const DEFAULT_SETTINGS: HypernovumSettings = {
@@ -65,12 +80,30 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   agentFeaturesConsent: 'unset',
   outputFolder: '',
   buildingStyleMigrated: false,
+  // GFX-009: Auto probes frame times on first open and picks a tier.
+  graphicsQuality: 'auto',
+  hudCollapsed: { agents: false, command: false, inspector: false },
+  layoutVersion: CURRENT_LAYOUT_VERSION,
 };
 
 export type { BlockPosition };
 
 /** Reopening a view is the only way these take effect; say so once, in one place. */
 const ON_REOPEN = ' Applies to city views opened after the change.';
+
+/** Graphics quality dropdown (GFX-009), shared by both settings renderers. */
+const GRAPHICS_QUALITY_OPTIONS: Record<string, string> = {
+  auto: 'Auto',
+  low: 'Low',
+  balanced: 'Balanced',
+  high: 'High',
+  ultra: 'Ultra',
+};
+const GRAPHICS_QUALITY_DESC = 'Auto measures frame times when the city opens and picks Low, Balanced or High. Low renders at native resolution without bloom, shadows, wide lines or reflections. Ultra uses full device resolution and sharper shadows. Applies immediately to open city views.';
+
+/** Shared by both settings renderers (1.13 definitions + the display() fallback). */
+const SKILLS_NAME = 'Obsidian format skills';
+const SKILLS_DESC = 'Install pinned MIT skills by Steph Ango for Markdown, Bases, and Canvas in this vault. Offline; existing skill folders are preserved. Includes license and source revision.';
 
 export class SettingsTab extends PluginSettingTab {
   plugin: HypernovumPlugin;
@@ -172,6 +205,22 @@ export class SettingsTab extends PluginSettingTab {
             aliases: ['heartbeat', 'hooks', 'presence'],
             action: () => { void this.plugin.installHeartbeatHooks(); },
           },
+          {
+            // QA-001: this row existed only in display(), so on 1.13+ (which
+            // renders these definitions instead) the two install buttons were
+            // missing from the settings tab entirely. Two buttons on one row
+            // need `render`; `action` makes the whole row a single click target.
+            name: SKILLS_NAME,
+            desc: SKILLS_DESC,
+            aliases: ['skills', 'markdown', 'bases', 'canvas', 'steph ango'],
+            render: (setting) => {
+              setting
+                .setName(SKILLS_NAME)
+                .setDesc(SKILLS_DESC)
+                .addButton((button) => button.setButtonText('Install for Codex').onClick(() => this.plugin.installBundledSkills('codex')))
+                .addButton((button) => button.setButtonText('Install for Claude').onClick(() => this.plugin.installBundledSkills('claude')));
+            },
+          },
         ],
       },
       {
@@ -199,6 +248,12 @@ export class SettingsTab extends PluginSettingTab {
               key: 'buildingStyle',
               options: { parametric: 'Parametric', classic: 'Classic' },
             },
+          },
+          {
+            name: 'Graphics quality',
+            desc: GRAPHICS_QUALITY_DESC,
+            aliases: ['gpu', 'quality', 'resolution', 'antialiasing', 'battery'],
+            control: { type: 'dropdown', key: 'graphicsQuality', options: GRAPHICS_QUALITY_OPTIONS },
           },
           {
             name: 'Performance mode',
@@ -316,8 +371,8 @@ export class SettingsTab extends PluginSettingTab {
         (s as unknown as Record<string, unknown>)[key] = value;
         await this.plugin.saveSettings();
         // These four are the ones the scene can adopt without a reopen.
-        if (key === 'buildingStyle' || key === 'enableShaders' || key === 'enableBloom' || key === 'enableAtmosphere') {
-          if (key !== 'buildingStyle') this.refreshDefinitions(); // may have flipped performance mode
+        if (key === 'buildingStyle' || key === 'graphicsQuality' || key === 'enableShaders' || key === 'enableBloom' || key === 'enableAtmosphere') {
+          if (key !== 'buildingStyle' && key !== 'graphicsQuality') this.refreshDefinitions(); // may have flipped performance mode
           await this.plugin.reloadOpenViews();
         }
     }
@@ -493,8 +548,8 @@ export class SettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Obsidian format skills')
-      .setDesc('Install pinned MIT skills by Steph Ango for Markdown, Bases, and Canvas in this vault. Offline; existing skill folders are preserved. Includes license and source revision.')
+      .setName(SKILLS_NAME)
+      .setDesc(SKILLS_DESC)
       .addButton(button => button.setButtonText('Install for Codex').onClick(() => this.plugin.installBundledSkills('codex')))
       .addButton(button => button.setButtonText('Install for Claude').onClick(() => this.plugin.installBundledSkills('claude')));
 
@@ -523,6 +578,20 @@ export class SettingsTab extends PluginSettingTab {
             this.plugin.settings.buildingStyle = value as 'classic' | 'parametric';
             await this.plugin.saveSettings();
             await this.plugin.reloadOpenViews(); // apply immediately
+          });
+      });
+
+    new Setting(containerEl)
+      .setName('Graphics quality')
+      .setDesc(GRAPHICS_QUALITY_DESC)
+      .addDropdown((dropdown) => {
+        for (const [value, label] of Object.entries(GRAPHICS_QUALITY_OPTIONS)) dropdown.addOption(value, label);
+        dropdown
+          .setValue(this.plugin.settings.graphicsQuality ?? 'auto')
+          .onChange(async (value) => {
+            this.plugin.settings.graphicsQuality = value as HypernovumSettings['graphicsQuality'];
+            await this.plugin.saveSettings();
+            await this.plugin.reloadOpenViews();
           });
       });
 

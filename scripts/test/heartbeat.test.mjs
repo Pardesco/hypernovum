@@ -341,4 +341,32 @@ describe('heartbeat.js records the working directory', () => {
     hookPing(vault, { session_id: 'cwd-stop', cwd, hook_event_name: 'Stop' });
     expect(JSON.parse(readFileSync(join(agentsDir(vault), 'cwd-stop.json'), 'utf8')).cwd).toBe(cwd);
   });
+
+  it('AGT-011: a hand ping with --cwd and no --project still names the project and logs cwd', () => {
+    // Project-from-cwd defaulting used to exist only on the --hook path, so this
+    // ping logged session events with no project and no cwd, and the inspector's
+    // "Last session" digest could never be matched to a building.
+    const vault = newVault();
+    const cwd = join(vault, 'code', 'flux-portal');
+    ping(vault, 'hand-1', [`--cwd=${cwd}`, '--name=Codex', '--state=editing', '--tool=Edit', '--file=src/a.ts']);
+    ping(vault, 'hand-1', [`--cwd=${cwd}`, '--state=editing', '--tool=Edit', '--file=src/b.ts']);
+
+    const snap = JSON.parse(readFileSync(join(agentsDir(vault), 'hand-1.json'), 'utf8'));
+    expect(snap.project).toBe('flux-portal');
+    expect(snap.cwd).toBe(cwd);
+
+    const events = readFileSync(join(vault, '.hypernovum', 'sessions', 'hand-1.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l));
+    expect(events.length).toBeGreaterThan(0);
+    for (const e of events) {
+      expect(e.project).toBe('flux-portal');
+      expect(e.cwd).toBe(cwd);
+    }
+  });
+
+  it('AGT-011: an explicit --project still wins over the cwd basename', () => {
+    const vault = newVault();
+    ping(vault, 'hand-2', [`--cwd=${join(vault, 'flux-portal')}`, '--project=Flux Portal']);
+    expect(JSON.parse(readFileSync(join(agentsDir(vault), 'hand-2.json'), 'utf8')).project).toBe('Flux Portal');
+  });
 });

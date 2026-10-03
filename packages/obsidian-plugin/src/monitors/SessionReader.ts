@@ -11,7 +11,7 @@ export class SessionReader {
   /** Most recent session digest whose events reference the project, or null. */
   readLatestForProject(
     sessionsDir: string,
-    matches: (project: string | undefined) => boolean,
+    matches: (project: string | undefined, digest: SessionDigest) => boolean,
   ): SessionDigest | null {
     if (!existsSync(sessionsDir)) return null;
     let files: string[];
@@ -33,7 +33,7 @@ export class SessionReader {
           ? cached.digest : parseSessionDigest(parseSessionLines(readFileSync(file, 'utf8')));
         this.cache.set(file, { size: stat.size, mtime: stat.mtimeMs, digest });
         if (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value!);
-        if (!digest || !matches(digest.project)) continue;
+        if (!digest || !matches(digest.project, digest)) continue;
         if (!best || digest.endT > best.endT) best = digest;
       } catch { /* skip unreadable log */ }
     }

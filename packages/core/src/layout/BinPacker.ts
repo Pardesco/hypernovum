@@ -1,5 +1,27 @@
 import type { ProjectData, District } from '../types';
 
+/** Options for {@link BinPacker.packDistricts}. */
+export interface PackOptions {
+  /**
+   * 'legacy' (default): one category per row along Z — the 0.x layout, which
+   * saved block offsets (BlockPosition) are relative to.
+   * 'shelf' (LAY-001): category blocks packed into rows toward `targetAspect`.
+   */
+  layout?: 'legacy' | 'shelf';
+  /** Footprint width:depth the shelf layout aims for. Default 1.8. */
+  targetAspect?: number;
+}
+
+/** One category's districts laid out together, and their footprint. */
+interface CategoryBlock {
+  category: string;
+  districts: District[];
+  minX: number;
+  minZ: number;
+  width: number;
+  depth: number;
+}
+
 /**
  * Spatial bin-packing layout engine.
  * Groups projects by category into city blocks with roads between them.
@@ -11,12 +33,17 @@ export class BinPacker {
   private blockGap = 15; // Gap between category blocks (multiple of grid)
   private stageGap = 10;  // Gap between stages within a block (multiple of grid)
   private gridSize = 5;  // Grid snap size - must match SceneManager
+  /**
+   * Shelf layout: horizontal gap between neighbouring category blocks. Wider
+   * than blockGap because each district's label sits left of its outline.
+   */
+  private shelfGapX = 20;
 
   private snapToGrid(value: number): number {
     return Math.round(value / this.gridSize) * this.gridSize;
   }
 
-  packDistricts(projects: ProjectData[]): Map<string, District> {
+  packDistricts(projects: ProjectData[], options?: PackOptions): Map<string, District> {
     const districts = new Map<string, District>();
 
     // 1. Group projects by (stage, category)
@@ -33,52 +60,175 @@ export class BinPacker {
       districts.get(key)!.buildings.push(project);
     }
 
-    // 2. Get unique categories and stages
+    // 2. Get unique categories
     const categories = [...new Set(projects.map(p => p.category))].sort();
-    const stages = ['backlog', 'active', 'paused', 'complete'];
 
-    // 3. Layout each category as a city block (grid-aligned)
+    if (options?.layout === 'shelf') {
+      this.packShelves(categories, districts, options.targetAspect ?? 1.8);
+      return districts;
+    }
+
+    // 3. Legacy: each category is one row of blocks along Z (grid-aligned)
     let currentZ = this.gridSize; // Start at grid position
-
     for (const category of categories) {
-      const categoryDistricts = [...districts.values()].filter(d => d.category === category);
-      if (categoryDistricts.length === 0) continue;
-
-      let currentX = this.gridSize; // Start at grid position
-      let maxDepthInCategory = 0;
-
-      // Sort by stage order
-      categoryDistricts.sort((a, b) => stages.indexOf(a.stage) - stages.indexOf(b.stage));
-
-      for (const district of categoryDistricts) {
-        // Calculate block dimensions based on building count
-        const buildingCount = district.buildings.length;
-        const cols = Math.min(buildingCount, this.buildingsPerRow);
-        const rows = Math.ceil(buildingCount / this.buildingsPerRow);
-
-        // Arrange buildings (grid-aligned start positions)
-        this.arrangeGridLayout(district, currentX, currentZ);
-
-        // Calculate actual bounds (snap to grid)
-        const avgBuildingSize = this.gridSize;
-        const blockWidth = this.snapToGrid(cols * (avgBuildingSize + this.buildingSpacing));
-        const blockDepth = this.snapToGrid(rows * (avgBuildingSize + this.buildingSpacing));
-
-        district.bounds = {
-          x: currentX,
-          z: currentZ,
-          width: Math.max(blockWidth, this.gridSize),
-          depth: Math.max(blockDepth, this.gridSize),
-        };
-
-        currentX = this.snapToGrid(currentX + blockWidth + this.stageGap);
-        maxDepthInCategory = Math.max(maxDepthInCategory, blockDepth);
-      }
-
-      currentZ = this.snapToGrid(currentZ + maxDepthInCategory + this.blockGap);
+      const block = this.layoutCategory(category, districts, this.gridSize, currentZ);
+      if (!block) continue;
+      currentZ = this.snapToGrid(currentZ + block.depth + this.blockGap);
     }
 
     return districts;
+  }
+
+  /**
+   * Lay out one category's districts (one per stage, left to right) starting
+   * at (startX, startZ). Returns the block footprint, or null for an empty
+   * category. `depth` is the deepest district (unsnapped, as the legacy row
+   * advance always used it).
+   */
+  private layoutCategory(
+    category: string,
+    districts: Map<string, District>,
+    startX: number,
+    startZ: number,
+  ): CategoryBlock | null {
+    const stages = ['backlog', 'active', 'paused', 'complete'];
+    const categoryDistricts = [...districts.values()].filter(d => d.category === category);
+    if (categoryDistricts.length === 0) return null;
+
+    let currentX = startX;
+    let maxDepthInCategory = 0;
+    let maxX = startX;
+
+    // Sort by stage order
+    categoryDistricts.sort((a, b) => stages.indexOf(a.stage) - stages.indexOf(b.stage));
+
+    for (const district of categoryDistricts) {
+      // Calculate block dimensions based on building count
+      const buildingCount = district.buildings.length;
+      const cols = Math.min(buildingCount, this.buildingsPerRow);
+      const rows = Math.ceil(buildingCount / this.buildingsPerRow);
+
+      // Arrange buildings (grid-aligned start positions)
+      this.arrangeGridLayout(district, currentX, startZ);
+
+      // Calculate actual bounds (snap to grid)
+      const avgBuildingSize = this.gridSize;
+      const blockWidth = this.snapToGrid(cols * (avgBuildingSize + this.buildingSpacing));
+      const blockDepth = this.snapToGrid(rows * (avgBuildingSize + this.buildingSpacing));
+
+      district.bounds = {
+        x: currentX,
+        z: startZ,
+        width: Math.max(blockWidth, this.gridSize),
+        depth: Math.max(blockDepth, this.gridSize),
+      };
+      maxX = Math.max(maxX, district.bounds.x + district.bounds.width);
+
+      currentX = this.snapToGrid(currentX + blockWidth + this.stageGap);
+      maxDepthInCategory = Math.max(maxDepthInCategory, blockDepth);
+    }
+
+    return {
+      category,
+      districts: categoryDistricts,
+      minX: startX,
+      minZ: startZ,
+      width: maxX - startX,
+      depth: Math.max(maxDepthInCategory, this.gridSize),
+    };
+  }
+
+  /**
+   * LAY-001: pack category blocks into rows ("shelves") toward a target
+   * width:depth, instead of one category per row — seven districts used to
+   * make a strip ~3x deeper than wide. Every candidate shelf width is tried
+   * and the one whose footprint aspect is closest to the target wins (ties:
+   * the smaller footprint). Deepest blocks go first so rows stay even.
+   * Deterministic: same projects, same layout.
+   */
+  private packShelves(categories: string[], districts: Map<string, District>, targetAspect: number): void {
+    // Lay every category out at the origin first, to measure it.
+    const blocks: CategoryBlock[] = [];
+    for (const category of categories) {
+      const block = this.layoutCategory(category, districts, this.gridSize, this.gridSize);
+      if (block) blocks.push(block);
+    }
+    if (blocks.length === 0) return;
+
+    blocks.sort((a, b) => b.depth - a.depth || a.category.localeCompare(b.category));
+
+    const total = blocks.reduce((sum, b) => sum + b.width, 0) + this.shelfGapX * (blocks.length - 1);
+    const widest = Math.max(...blocks.map((b) => b.width));
+    let best: { rows: CategoryBlock[][]; score: number; area: number } | null = null;
+    for (let limit = widest; limit <= total + this.gridSize; limit += this.gridSize) {
+      const rows = this.shelfRows(blocks, limit);
+      const { width, depth } = this.shelfExtent(rows);
+      const score = Math.abs(Math.log(width / depth / targetAspect));
+      const area = width * depth;
+      if (!best || score < best.score - 1e-9 || (Math.abs(score - best.score) <= 1e-9 && area < best.area)) {
+        best = { rows, score, area };
+      }
+    }
+
+    // Place: rows top to bottom (Z), blocks left to right (X), on the grid.
+    let z = 0;
+    for (const row of best!.rows) {
+      let x = 0;
+      let rowDepth = 0;
+      for (const block of row) {
+        this.translateBlock(block, this.snapToGrid(x), this.snapToGrid(z));
+        x += block.width + this.shelfGapX;
+        rowDepth = Math.max(rowDepth, block.depth);
+      }
+      z += rowDepth + this.blockGap;
+    }
+  }
+
+  /** Greedy rows no wider than `limit` (a block wider than the limit gets its own row). */
+  private shelfRows(blocks: CategoryBlock[], limit: number): CategoryBlock[][] {
+    const rows: CategoryBlock[][] = [];
+    let row: CategoryBlock[] = [];
+    let width = 0;
+    for (const block of blocks) {
+      const next = row.length === 0 ? block.width : width + this.shelfGapX + block.width;
+      if (row.length > 0 && next > limit) {
+        rows.push(row);
+        row = [block];
+        width = block.width;
+      } else {
+        row.push(block);
+        width = next;
+      }
+    }
+    if (row.length > 0) rows.push(row);
+    return rows;
+  }
+
+  private shelfExtent(rows: CategoryBlock[][]): { width: number; depth: number } {
+    let width = 0;
+    let depth = 0;
+    rows.forEach((row, i) => {
+      width = Math.max(width, row.reduce((s, b) => s + b.width, 0) + this.shelfGapX * (row.length - 1));
+      depth += Math.max(...row.map((b) => b.depth)) + (i > 0 ? this.blockGap : 0);
+    });
+    return { width, depth: Math.max(depth, 1) };
+  }
+
+  /** Move a block laid out at its own origin to (x, z). */
+  private translateBlock(block: CategoryBlock, x: number, z: number): void {
+    const dx = x - block.minX;
+    const dz = z - block.minZ;
+    for (const district of block.districts) {
+      district.bounds.x += dx;
+      district.bounds.z += dz;
+      for (const building of district.buildings) {
+        if (!building.position) continue;
+        building.position.x += dx;
+        building.position.z += dz;
+      }
+    }
+    block.minX = x;
+    block.minZ = z;
   }
 
   private arrangeGridLayout(district: District, startX: number, startZ: number): void {

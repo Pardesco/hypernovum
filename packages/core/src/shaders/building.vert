@@ -5,6 +5,7 @@ varying vec2 vUv;
 varying vec3 vNormal;   // raw object-space (legacy classic rim — do not change)
 varying vec3 vNormalV;  // view-space, for real lighting + a true fresnel
 varying vec3 vPosition;
+varying vec3 vViewPos;  // view-space position, for the true view vector (GFX-005)
 
 // Pseudo-random
 float hash(float n) {
@@ -41,5 +42,7 @@ void main() {
     }
   }
 
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+  vViewPos = mvPosition.xyz;
+  gl_Position = projectionMatrix * mvPosition;
 }

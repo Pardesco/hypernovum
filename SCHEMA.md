@@ -196,3 +196,20 @@ projectDir: ../../projects/my-app
 
 # WRONG — omitting projectDir disables "Launch agent" and "Open folder" for this project
 ```
+
+#### Windows paths: never double-quote them
+
+Inside **double quotes**, YAML reads a backslash as the start of an escape
+sequence, so `"C:\Users\me\projects\my-app"` is invalid YAML (`\U` and `\p` are
+not valid escapes). Obsidian then discards the note's **entire** frontmatter: the
+note silently stops being a project and its building disappears from the city.
+Leave Windows paths unquoted, single-quote them, or use forward slashes:
+
+```yaml
+projectDir: C:\Users\me\projects\my-app      # unquoted — fine
+projectDir: 'C:\Users\me\projects\my-app'    # single quotes — fine
+projectDir: C:/Users/me/projects/my-app      # forward slashes — fine
+
+# WRONG — invalid YAML; the whole frontmatter block is dropped
+projectDir: "C:\Users\me\projects\my-app"
+```

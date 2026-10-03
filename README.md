@@ -6,7 +6,7 @@ agents from it and watch them work.
 Each project note becomes a building. Status maps to color, priority to height, category
 to district, and vault backlinks to glowing **Neural Link** arcs. A central **Neural Core**
 pulses as you work, **Data Arteries** flow to buildings when files change, and every active
-agent (Claude Code, GPT Codex, Antigravity CLI) orbits its building as a colored orb.
+agent (Claude Code, Codex CLI, Antigravity CLI) orbits its building as a colored orb.
 
 ![The code city — 27 project notes rendered as buildings, grouped into category districts](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/city.png)
 
@@ -38,6 +38,11 @@ projectDir: C:\Users\me\projects\my-project   # unlocks Git signals + agent laun
 The city rebuilds as you save. `projectDir` is the field that matters most: without it a
 project has no Git activity, no dependency edges, and no **Launch agent** action. See
 [SCHEMA.md](SCHEMA.md) for every field.
+
+> **Windows paths:** leave `projectDir` unquoted (as above) or use single quotes. A
+> double-quoted `"C:\Users\..."` is invalid YAML (`\U` is read as an escape), and
+> Obsidian then drops the note's *whole* frontmatter, so the project silently
+> disappears from the city.
 
 ![Whole-vault fallback — an untagged vault rendered as districts by folder, with hub notes towering](https://raw.githubusercontent.com/pardesco/hypernovum/master/docs/screenshots/whole-vault-fallback.png)
 
@@ -110,7 +115,7 @@ backlink graph all still work.
 - **Activity Monitor** polls `.hypernovum/agents/` (per-session snapshots) for real-time agent status
 - **Persistent streaming artery** while an agent is actively working on a project
 - **Activity indicator overlay** shows current project and action
-- **Terminal Launcher** for launching Claude Code, GPT Codex, Antigravity CLI, or a custom agent command
+- **Terminal Launcher** for launching Claude Code, Codex CLI, Antigravity CLI, or a custom agent command
 - **Agent context handoff** writes `.hypernovum/SETUP.md` with project metadata, Git signals, and memory context pointers before launch
 - **Heartbeat script** installed into your vault at `.hypernovum/heartbeat.js` by the **Install agent heartbeat hooks** command, which also prints ready-to-paste hook JSON with every path already resolved
 
@@ -185,12 +190,19 @@ node "<vault>/.hypernovum/heartbeat.js" --vault="<vault>" --hook \
 
 # by hand or from your own wrapper: reuse one --id for the whole session
 node "<vault>/.hypernovum/heartbeat.js" --vault="<vault>" --id="my-session" \
-  --name="Claude Code" --agent-type=claude --project="my-project" \
+  --name="Claude Code" --agent-type=claude --cwd="C:/code/my-project" \
   --state=editing --tool=Edit --file=src/x.ts
 
 # on finish
 node "<vault>/.hypernovum/heartbeat.js" --vault="<vault>" --id="my-session" --stop
 ```
+
+**Pass `--cwd`** (the agent's working directory) when you ping by hand or from a
+wrapper. It is the most reliable way to put a session on the right building: the
+plugin compares it with each project's `projectDir` *before* trying names, so it
+works even when a project's title differs from its folder name. `--project` is the
+fallback, matched against project titles and folder names. `--hook` fills in `cwd`
+for you.
 
 **Heartbeat v2** gives every session its own snapshot file
 (`.hypernovum/agents/<sessionId>.json`), so any number of agents run concurrently

@@ -3,7 +3,7 @@
 export const CORE_BUILD_VERSION = 'dev';
 
 // Types
-export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, RecentCommit, GraphEdge, EdgeType } from './types';
+export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, RecentCommit, GraphEdge, EdgeType, ToneMappingChoice } from './types';
 export { EdgeManager } from './scene/EdgeManager';
 export { collectImpact } from './graph/traverse';
 export type { TraceImpactResult, TraceNode, TraceOptions } from './graph/traverse';
@@ -23,10 +23,18 @@ export { presetForProject } from './renderers/TowerPresets';
 export type { TowerBuildInput, TowerBuildResult } from './renderers/TowerPresets';
 export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbVisual';
 export type { OrbVisual } from './scene/agentOrbVisual';
-export type { AgentOrbInput } from './scene/SceneManager';
+export type { AgentOrbInput, CameraState, BuildCityOptions } from './scene/SceneManager';
+export { computeCityFrame, shouldFrameOnBuild } from './scene/cameraFraming';
+export { TIER_CONFIG, QUALITY_TIERS, pickAutoTier, effectivePixelRatio, isQualitySetting, AdaptiveResolution } from './scene/qualityTiers';
+export type { QualityTier, QualitySetting, TierConfig } from './scene/qualityTiers';
+export type { PerfSnapshot } from './scene/frameStats';
+export type { CityFrame } from './scene/cameraFraming';
+export { freeRectAvoiding, frameBoxInRect } from './scene/viewFraming';
+export type { ScreenRect, FramingBox, FramingInput, FramingResult } from './scene/viewFraming';
 
 // Layout
 export { BinPacker } from './layout/BinPacker';
+export type { PackOptions } from './layout/BinPacker';
 
 // Renderers
 export { BuildingShader } from './renderers/BuildingShader';

@@ -1,13 +1,20 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { EdgeType, GraphEdge } from '../types';
 
 /**
  * EdgeManager (EDG-001) — the single renderer for every inter-building arc.
  *
- * Consumes a typed GraphEdge[] and draws one additive tube per edge, styled by
- * type (color/thickness), with a cone arrowhead for directed edges. Owns
- * per-type visibility, the hover/selection neighbor index, and the per-frame
- * breathe + highlight animation. Replaces SceneManager's ad-hoc linkArcs.
+ * Consumes a typed GraphEdge[] and draws additive tubes styled by type
+ * (color/thickness), with a cone arrowhead for directed edges. Owns per-type
+ * visibility, the hover/selection neighbor index, and the breathe + highlight
+ * animation.
+ *
+ * GFX-010: every edge of one type is merged into ONE tube mesh and ONE arrow
+ * mesh, so the arcs cost at most two draw calls per type (eight in all)
+ * instead of two per edge. Per-edge breathing phase, base opacity and the
+ * hover highlight live in vertex attributes; the shader animates them, so the
+ * per-frame update is a single uniform write.
  *
  * The 'core' sentinel endpoint (agent edges, EDG-005) resolves via getCorePos.
  */
@@ -29,20 +36,78 @@ const EDGE_STYLE: Record<EdgeType, EdgeStyle> = {
   'agent-working-on': { color: 0x22d3ee, radius: 0.06, directed: true },
 };
 
+const EDGE_TYPES = Object.keys(EDGE_STYLE) as EdgeType[];
+
+/** One edge's slice of its type's merged geometry (for the highlight attribute). */
 interface EdgeEntry {
   edge: GraphEdge;
-  tube: THREE.Mesh;
-  arrow: THREE.Mesh | null;
-  baseOpacity: number;
-  pulsePhase: number;
+  tubeStart: number;
+  tubeCount: number;
+  arrowStart: number;
+  arrowCount: number;
+}
+
+/** The merged meshes for one edge type. */
+interface TypeBatch {
+  type: EdgeType;
+  tubes: THREE.Mesh | null;
+  arrows: THREE.Mesh | null;
+  entries: EdgeEntry[];
+}
+
+const VERTEX_SHADER = `
+  attribute float aPhase;
+  attribute float aBase;
+  attribute float aTouch;
+  uniform float uTime;
+  uniform float uBoost;
+  varying float vAlpha;
+  void main() {
+    // Same curve the per-edge materials used: breathe around the base opacity,
+    // x3 when the edge touches the hovered/selected building.
+    float breathe = 0.75 + 0.25 * sin(uTime * 1.5 + aPhase);
+    vAlpha = min(min(aBase * breathe * (aTouch > 0.5 ? 3.0 : 1.0), 1.0) * uBoost, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+
+const FRAGMENT_SHADER = `
+  uniform vec3 uColor;
+  varying float vAlpha;
+  void main() {
+    gl_FragColor = vec4(uColor, vAlpha);
+  }`;
+
+function edgeMaterial(color: number, boost: number): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uTime: { value: 0 },
+      uBoost: { value: boost },
+    },
+    vertexShader: VERTEX_SHADER,
+    fragmentShader: FRAGMENT_SHADER,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+}
+
+/** Tag every vertex of `geo` with one edge's phase/base/touch values. */
+function addEdgeAttributes(geo: THREE.BufferGeometry, phase: number, base: number): void {
+  const n = geo.attributes.position.count;
+  geo.setAttribute('aPhase', new THREE.Float32BufferAttribute(new Float32Array(n).fill(phase), 1));
+  geo.setAttribute('aBase', new THREE.Float32BufferAttribute(new Float32Array(n).fill(base), 1));
+  geo.setAttribute('aTouch', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
 }
 
 export class EdgeManager {
-  private entries: EdgeEntry[] = [];
+  private batches = new Map<EdgeType, TypeBatch>();
   private visibleTypes = new Set<EdgeType>(['backlink', 'agent-working-on', 'depends-on', 'blocked-by']);
   /** path → neighbor paths, restricted to currently visible edge types */
   private neighbors = new Map<string, Set<string>>();
   private highlightedPath: string | null = null;
+  /** Highlight last written into the aTouch attributes. */
+  private appliedHighlight: string | null = null;
 
   constructor(
     private scene: THREE.Scene,
@@ -53,6 +118,12 @@ export class EdgeManager {
   /** Rebuild all edge geometry from a fresh GraphEdge set. */
   setEdges(edges: GraphEdge[]): void {
     this.clear();
+
+    const tubeGeos = new Map<EdgeType, THREE.BufferGeometry[]>();
+    const arrowGeos = new Map<EdgeType, THREE.BufferGeometry[]>();
+    const entries = new Map<EdgeType, EdgeEntry[]>();
+    const tubeCursor = new Map<EdgeType, number>();
+    const arrowCursor = new Map<EdgeType, number>();
 
     for (const edge of edges) {
       const start = this.endpoint(edge.from);
@@ -69,37 +140,51 @@ export class EdgeManager {
       const radius = edge.type === 'backlink'
         ? style.radius + Math.min(weight, 6) * 0.015
         : style.radius;
-      const tube = new THREE.Mesh(
-        new THREE.TubeGeometry(curve, 24, radius, 5, false),
-        new THREE.MeshBasicMaterial({
-          color: style.color, transparent: true, opacity: 0.32,
-          blending: THREE.AdditiveBlending, depthWrite: false,
-        }),
-      );
-      tube.userData = { isEdge: true, edgeType: edge.type };
-      this.scene.add(tube);
-
-      // Directed edges get a cone arrowhead near the destination.
-      let arrow: THREE.Mesh | null = null;
-      if (style.directed) {
-        arrow = this.makeArrow(curve, style.color, radius);
-        this.scene.add(arrow);
-      }
-
       const baseOpacity = edge.type === 'backlink'
         ? 0.2 + Math.min(weight, 6) * 0.04
         : 0.3;
-      this.entries.push({
-        edge, tube, arrow, baseOpacity,
-        pulsePhase: (start.x + end.z) % (Math.PI * 2),
-      });
+      const phase = (start.x + end.z) % (Math.PI * 2);
+
+      const tube = new THREE.TubeGeometry(curve, 24, radius, 5, false);
+      addEdgeAttributes(tube, phase, baseOpacity);
+      const tubeStart = tubeCursor.get(edge.type) ?? 0;
+      const tubeCount = tube.attributes.position.count;
+      tubeCursor.set(edge.type, tubeStart + tubeCount);
+      if (!tubeGeos.has(edge.type)) tubeGeos.set(edge.type, []);
+      tubeGeos.get(edge.type)!.push(tube);
+
+      // Directed edges get a cone arrowhead near the destination.
+      let arrowStart = 0, arrowCount = 0;
+      if (style.directed) {
+        const arrow = this.arrowGeometry(curve, radius);
+        addEdgeAttributes(arrow, phase, baseOpacity);
+        arrowStart = arrowCursor.get(edge.type) ?? 0;
+        arrowCount = arrow.attributes.position.count;
+        arrowCursor.set(edge.type, arrowStart + arrowCount);
+        if (!arrowGeos.has(edge.type)) arrowGeos.set(edge.type, []);
+        arrowGeos.get(edge.type)!.push(arrow);
+      }
+
+      if (!entries.has(edge.type)) entries.set(edge.type, []);
+      entries.get(edge.type)!.push({ edge, tubeStart, tubeCount, arrowStart, arrowCount });
 
       this.addNeighbor(edge.from, edge.to);
-      if (edge.direction === 'undirected') this.addNeighbor(edge.to, edge.from);
-      else this.addNeighbor(edge.to, edge.from); // neighborhood is symmetric for highlight
+      this.addNeighbor(edge.to, edge.from); // neighborhood is symmetric for highlight
     }
 
+    for (const type of EDGE_TYPES) {
+      const typeEntries = entries.get(type);
+      if (!typeEntries) continue;
+      const style = EDGE_STYLE[type];
+      const tubes = this.mergedMesh(tubeGeos.get(type), style.color, 1);
+      // Arrowheads ran at 1.4x their tube's opacity.
+      const arrows = this.mergedMesh(arrowGeos.get(type), style.color, 1.4);
+      this.batches.set(type, { type, tubes, arrows, entries: typeEntries });
+    }
+
+    this.appliedHighlight = null;
     this.applyVisibility();
+    this.applyHighlight();
   }
 
   /** Toggle which edge types render (no geometry rebuild). */
@@ -122,36 +207,31 @@ export class EdgeManager {
   /** Boost the arcs touching `path` (hover/selection neighborhood). */
   highlightForPath(path: string | null): void {
     this.highlightedPath = path;
+    this.applyHighlight();
   }
 
-  /** Per-frame breathe + highlight boost. */
+  /** Per-frame breathe: one uniform per merged mesh. */
   update(elapsed: number): void {
-    for (const e of this.entries) {
-      const mat = e.tube.material as THREE.MeshBasicMaterial;
-      const touching = this.highlightedPath !== null &&
-        (e.edge.from === this.highlightedPath || e.edge.to === this.highlightedPath);
-      const breathe = 0.75 + 0.25 * Math.sin(elapsed * 1.5 + e.pulsePhase);
-      mat.opacity = Math.min(e.baseOpacity * breathe * (touching ? 3 : 1), 1);
-      if (e.arrow) {
-        (e.arrow.material as THREE.MeshBasicMaterial).opacity = Math.min(mat.opacity * 1.4, 1);
+    for (const batch of this.batches.values()) {
+      for (const mesh of [batch.tubes, batch.arrows]) {
+        if (mesh) (mesh.material as THREE.ShaderMaterial).uniforms.uTime.value = elapsed;
       }
     }
   }
 
   clear(): void {
-    for (const e of this.entries) {
-      e.tube.geometry.dispose();
-      (e.tube.material as THREE.Material).dispose();
-      this.scene.remove(e.tube);
-      if (e.arrow) {
-        e.arrow.geometry.dispose();
-        (e.arrow.material as THREE.Material).dispose();
-        this.scene.remove(e.arrow);
+    for (const batch of this.batches.values()) {
+      for (const mesh of [batch.tubes, batch.arrows]) {
+        if (!mesh) continue;
+        mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose();
+        this.scene.remove(mesh);
       }
     }
-    this.entries = [];
+    this.batches.clear();
     this.neighbors.clear();
     this.highlightedPath = null;
+    this.appliedHighlight = null;
   }
 
   dispose(): void {
@@ -169,21 +249,60 @@ export class EdgeManager {
     return new THREE.Vector3(mesh.position.x, mesh.position.y + (geo.boundingBox?.max.y ?? 5) * 0.9, mesh.position.z);
   }
 
-  private makeArrow(curve: THREE.QuadraticBezierCurve3, color: number, radius: number): THREE.Mesh {
+  private arrowGeometry(curve: THREE.QuadraticBezierCurve3, radius: number): THREE.BufferGeometry {
     const at = curve.getPoint(0.82);
     const tangent = curve.getTangent(0.82).normalize();
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(radius * 3.2, radius * 9, 8),
-      new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.5,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-      }),
+    const cone = new THREE.ConeGeometry(radius * 3.2, radius * 9, 8);
+    // Cone points +Y by default; orient it along the curve tangent, then bake
+    // the transform so every arrow can share one merged mesh.
+    const m = new THREE.Matrix4().compose(
+      at,
+      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent),
+      new THREE.Vector3(1, 1, 1),
     );
-    cone.position.copy(at);
-    // Cone points +Y by default; orient it along the curve tangent.
-    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
-    cone.userData = { isEdge: true };
+    cone.applyMatrix4(m);
     return cone;
+  }
+
+  private mergedMesh(geos: THREE.BufferGeometry[] | undefined, color: number, boost: number): THREE.Mesh | null {
+    if (!geos || geos.length === 0) return null;
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false);
+    if (geos.length > 1) for (const g of geos) g.dispose();
+    if (!merged) return null;
+    const mesh = new THREE.Mesh(merged, edgeMaterial(color, boost));
+    mesh.userData = { isEdge: true };
+    this.scene.add(mesh);
+    return mesh;
+  }
+
+  /** Write the touching flag into aTouch for the highlighted path's edges. */
+  private applyHighlight(): void {
+    if (this.appliedHighlight === this.highlightedPath) return;
+    const prev = this.appliedHighlight;
+    const next = this.highlightedPath;
+    this.appliedHighlight = next;
+    const touches = (e: GraphEdge, p: string | null) => p !== null && (e.from === p || e.to === p);
+
+    for (const batch of this.batches.values()) {
+      let tubeDirty = false, arrowDirty = false;
+      const tubeTouch = batch.tubes?.geometry.getAttribute('aTouch') as THREE.BufferAttribute | undefined;
+      const arrowTouch = batch.arrows?.geometry.getAttribute('aTouch') as THREE.BufferAttribute | undefined;
+      for (const entry of batch.entries) {
+        const was = touches(entry.edge, prev), now = touches(entry.edge, next);
+        if (was === now) continue;
+        const value = now ? 1 : 0;
+        if (tubeTouch) {
+          (tubeTouch.array as Float32Array).fill(value, entry.tubeStart, entry.tubeStart + entry.tubeCount);
+          tubeDirty = true;
+        }
+        if (arrowTouch && entry.arrowCount > 0) {
+          (arrowTouch.array as Float32Array).fill(value, entry.arrowStart, entry.arrowStart + entry.arrowCount);
+          arrowDirty = true;
+        }
+      }
+      if (tubeDirty && tubeTouch) tubeTouch.needsUpdate = true;
+      if (arrowDirty && arrowTouch) arrowTouch.needsUpdate = true;
+    }
   }
 
   private addNeighbor(a: string, b: string): void {
@@ -193,19 +312,32 @@ export class EdgeManager {
   }
 
   private applyVisibility(): void {
-    for (const e of this.entries) {
-      const vis = this.visibleTypes.has(e.edge.type);
-      e.tube.visible = vis;
-      if (e.arrow) e.arrow.visible = vis;
+    for (const batch of this.batches.values()) {
+      const vis = this.visibleTypes.has(batch.type);
+      if (batch.tubes) batch.tubes.visible = vis;
+      if (batch.arrows) batch.arrows.visible = vis;
     }
   }
 
   private rebuildNeighborIndex(): void {
     this.neighbors.clear();
-    for (const e of this.entries) {
-      if (!this.visibleTypes.has(e.edge.type)) continue;
-      this.addNeighbor(e.edge.from, e.edge.to);
-      this.addNeighbor(e.edge.to, e.edge.from);
+    for (const batch of this.batches.values()) {
+      if (!this.visibleTypes.has(batch.type)) continue;
+      for (const { edge } of batch.entries) {
+        this.addNeighbor(edge.from, edge.to);
+        this.addNeighbor(edge.to, edge.from);
+      }
     }
+  }
+
+  /** Draw calls the arcs cost right now (visible merged meshes). */
+  drawCallCount(): number {
+    let n = 0;
+    for (const batch of this.batches.values()) {
+      if (!this.visibleTypes.has(batch.type)) continue;
+      if (batch.tubes) n++;
+      if (batch.arrows) n++;
+    }
+    return n;
   }
 }

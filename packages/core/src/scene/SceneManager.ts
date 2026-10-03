@@ -5,7 +5,14 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, ToneMappingChoice } from '../types';
 import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
 import { EdgeManager } from './EdgeManager';
@@ -25,6 +32,48 @@ import { appendDiv, appendSpan, appendTooltipRow } from '../utils/dom';
 import { orbVisualForState, stateTintsHost, type OrbVisual } from './agentOrbVisual';
 import type { InteractionStore } from '../stores/interactionStore';
 import { ud, projectOf, setUserData } from './sceneUserData';
+import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFraming';
+import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
+import { fitShadowFrustum } from './shadowFit';
+import { minFrameInterval, shouldRenderFrame } from './framePacing';
+import { frameBoxInRect, type FramingBox, type ScreenRect } from './viewFraming';
+import { markerScale } from './markerScale';
+import { LABEL_PRIORITY, labelPriority, resolveLabelCollisions, type LabelBox } from './labelCollision';
+import {
+  AUTO_PROBE_MIN_SAMPLES,
+  AUTO_PROBE_MS,
+  AUTO_START_TIER,
+  AdaptiveResolution,
+  TIER_CONFIG,
+  effectivePixelRatio,
+  isQualitySetting,
+  pickAutoTier,
+  type QualitySetting,
+  type QualityTier,
+  type TierConfig,
+} from './qualityTiers';
+import {
+  HORIZON_COLOR,
+  VignetteShader,
+  createContactShadowMesh,
+  createGridMaterial,
+  createHorizonBackground,
+} from './atmosphere';
+
+/**
+ * Bloom pass that can run below the composer's resolution (GFX-009: the
+ * Balanced tier blooms at half size). Only the internal blur targets shrink;
+ * the result is still composited at full resolution.
+ */
+class ScaledBloomPass extends UnrealBloomPass {
+  /** Fraction of the composer size the blur targets use. Read during super() too. */
+  scale?: number;
+
+  setSize(width: number, height: number): void {
+    const s = this.scale ?? 1;
+    super.setSize(Math.max(1, Math.round(width * s)), Math.max(1, Math.round(height * s)));
+  }
+}
 
 /** Release the GPU resources a mesh or line owns. */
 function disposeRenderable(obj: {
@@ -36,13 +85,66 @@ function disposeRenderable(obj: {
   else obj.material.dispose();
 }
 
+/**
+ * A camera pose (CAM-001). Lets a host carry the user's view across a scene
+ * rebuild that tears the SceneManager down — a settings change or a vault-mode
+ * toggle reloads the whole view.
+ */
+export interface CameraState {
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+}
+
+/** Options for {@link SceneManager.buildCity}. */
+export interface BuildCityOptions {
+  /**
+   * Re-frame the camera on the new city even though it was already framed —
+   * for when the city changed character (e.g. whole-vault fallback → projects).
+   */
+  refit?: boolean;
+}
+
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
   onSaveLayout?: (positions: BlockPosition[]) => void;
   settings?: HypernovumSettings;
   /** Shared interaction state (selection/hover/move mode). Optional for API compat. */
   interactionStore?: InteractionStore;
+  /**
+   * Camera pose to restore on the first build instead of framing the whole
+   * city (CAM-001). Omit for the default overview.
+   */
+  initialCamera?: CameraState | null;
+  /**
+   * Called when a graphics-tier change (the Auto probe settling on a lower
+   * tier) needs geometry rebuilt, e.g. wide lines on/off. The host re-packs and
+   * calls buildCity(); without it the change lands on the next natural rebuild.
+   */
+  onRequestRebuild?: () => void;
 }
+
+/**
+ * Renderer configuration when the host passes no graphicsQuality setting —
+ * exactly the pre-tier behaviour (device pixel ratio up to 2, full effects),
+ * so hosts that don't opt in (Pro) are unaffected by GFX-009.
+ */
+const UNTIERED_CONFIG: TierConfig = {
+  pixelRatioCap: 2,
+  msaaSamples: 4,
+  bloom: 'full',
+  shadows: 'static',
+  shadowMapSize: 2048,
+  wideLines: true,
+  reflections: true,
+};
+
+/**
+ * A ground-level polyline — district outline, leader line, handle bracket. Wide
+ * antialiased Line2 normally (GFX-004); a 1 px Line when wide lines are off.
+ */
+type GroundLine = THREE.Line | Line2;
+/** A building's edge-glow outline: wide LineSegments2, or 1 px LineSegments. */
+type EdgeLines = THREE.LineSegments | LineSegments2;
 
 interface LabelInfo {
   project: ProjectData;
@@ -59,12 +161,12 @@ interface BlockData {
   objects: THREE.Object3D[];  // All objects belonging to this block
   handle: THREE.Mesh;
   hitBox: THREE.Mesh;
-  outline: THREE.Line;
+  outline: GroundLine;
   fill: THREE.Mesh;
   label: CSS2DObject;
-  leaderLine: THREE.Line;
+  leaderLine: GroundLine;
   dot: THREE.Mesh;
-  handleBracket: THREE.Line;
+  handleBracket: GroundLine;
   projects: ProjectData[];
 }
 
@@ -101,9 +203,12 @@ export class SceneManager {
     'hypernovum-cursor-move',
   ] as const;
   private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private labelRenderer: CSS2DRenderer;
+  // Definite assignment (GL-001): these are created once, in initCamera() /
+  // initRenderer(). A field initializer here used to build a throwaway
+  // WebGLRenderer — a whole extra WebGL context — on every view open.
+  private camera!: THREE.PerspectiveCamera;
+  private renderer!: THREE.WebGLRenderer;
+  private labelRenderer!: CSS2DRenderer;
   private controls: MapControls;
   private container: HTMLElement;
   private animationId: number | null = null;
@@ -115,7 +220,7 @@ export class SceneManager {
   private tooltipLeader: THREE.Group | null = null;
   private buildings: THREE.Mesh[] = [];
   private foundations: THREE.Mesh[] = [];
-  private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
+  private blockedEdgeGlows: EdgeLines[] = []; // pulsed in animate — no per-frame traverse
   private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
   private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
   private edges!: EdgeManager; // typed project-graph edge renderer (EDG-001)
@@ -139,6 +244,23 @@ export class SceneManager {
   private gridSize = 5; // Grid snap size
   private dragAccumulator = new THREE.Vector2(0, 0); // Accumulate small movements
   private cityBounds = { centerX: 0, centerZ: 0, radius: 50 }; // Pan boundary
+
+  /**
+   * Unobstructed part of the canvas (CSS px) the overview frames the city
+   * into (HUD-001); null = the whole canvas, the 0.x framing.
+   */
+  private framingRect: ScreenRect | null = null;
+  /** Modelled marker radii (VIS-001 scales them up at a distance). */
+  private static readonly ORB_RADIUS = 0.26;
+  private static readonly GEM_RADIUS = 0.35;
+
+  /** Default overview direction: camera at 0.6 / 0.7 of the distance up / back. */
+  private static readonly OVERVIEW_DIR = new THREE.Vector3(0, 0.6, 0.7).normalize();
+
+  // Camera framing (CAM-001): frame the city once per view, not on every rebuild.
+  private hasFramed = false;
+  private lastProjectCount = 0;
+  private initialCamera: CameraState | null = null;
 
   // Layout persistence
   private savedPositions: Map<string, { offsetX: number; offsetZ: number }> = new Map();
@@ -164,10 +286,42 @@ export class SceneManager {
   private buildingStyle: 'classic' | 'parametric' = 'classic'; // BLD-004
   private useAtmosphere = false;
   private bloomIntensity = 0.8;
+  private toneMapping: ToneMappingChoice = 'aces';
+  private toneMappingExposure = 1.0;
   private buildingShader: BuildingShader;
   private shaderMaterials: Map<THREE.Mesh, THREE.ShaderMaterial> = new Map();
   private composer: EffectComposer | null = null;
-  private bloomPass: UnrealBloomPass | null = null;
+  private bloomPass: ScaledBloomPass | null = null;
+  /** MSAA samples for the composer's scene target (GFX-001); set by the tier. */
+  private msaaSamples = 4;
+
+  // Graphics quality tiers + adaptive resolution (GFX-009).
+  private qualitySetting: QualitySetting | null = null;
+  private tierConfig: TierConfig = UNTIERED_CONFIG;
+  private tier: QualityTier | null = null;
+  private autoProbe: { startAt: number; stats: FrameStats } | null = null;
+  private autoProbeDone = false;
+  private adaptive = new AdaptiveResolution();
+  private lastCameraMoveAt = 0;
+  private lastDevicePixelRatio = 1;
+  private lastDprCheck = 0;
+  /** Bloom pass resolution factor: 0.5 on the Balanced tier. */
+  private bloomScale = 1;
+  private onRequestRebuild?: () => void;
+
+  // Idle/background frame pacing (GFX-008).
+  private lastActivityAt = performance.now();
+  private lastRenderAt = 0;
+  /**
+   * Luminance above which the bloom pass picks a pixel up (GFX-002). At 0.7
+   * whole lit facades bloomed and washed out the building shading; at 1.0 only
+   * true emitters — driven above 1.0 in the half-float target — glow.
+   */
+  private static readonly BLOOM_THRESHOLD = 1.0;
+  /** Emissive multiplier for light sources when bloom is on (orbs, gems, beacons, rings). */
+  private static readonly HDR_EMISSIVE = 2.0;
+  /** Lit-window multiplier when bloom is on (building shader uEmissive). */
+  private static readonly HDR_WINDOWS = 1.3;
 
   // Neural Core and Data Arteries
   private neuralCore: NeuralCore | null = null;
@@ -182,8 +336,42 @@ export class SceneManager {
   // Launch effect tracking
   private launchEffects: Map<THREE.Mesh, { startTime: number; duration: number }> = new Map();
 
+  private removeWindowFocusListener: (() => void) | null = null;
+
   /** Gate for the requestAnimationFrame loop — see setRenderingEnabled. */
   private renderingEnabled = true;
+
+  /**
+   * Wide antialiased lines (GFX-004). WebGL ignores LineBasicMaterial.linewidth,
+   * so every outline was 1 px and shimmered or vanished at distance.
+   */
+  private wideLines = true;
+  /** Analytic environment reflections in the building shader (GFX-005). */
+  private reflections = true;
+  /** Tuned by eye: 1.0 washed shaded facades toward mint; 0.5 is a sheen. */
+  private static readonly REFLECTION_STRENGTH = 0.5;
+  /** One shared CSS-pixel resolution for every LineMaterial; onResize updates it. */
+  private lineResolution = new THREE.Vector2(1, 1);
+  private static readonly EDGE_WIDTH_PX = 1.5;
+  private static readonly OUTLINE_WIDTH_PX = 2;
+
+  /** Instanced contact-shadow decals, one per building (GFX-006); built in addGround. */
+  private contactShadows: THREE.InstancedMesh | null = null;
+  private contactShadowsDirty = false;
+
+  /** Shadow-casting key light; its shadow camera is fitted to the city (GFX-007). */
+  private keyLight!: THREE.DirectionalLight;
+  /** Key-light direction (from target toward light) — unchanged since 0.1: (50, 100, 50). */
+  private static readonly KEY_LIGHT_DIR = new THREE.Vector3(50, 100, 50).normalize();
+
+  // Frame timing + the debug performance overlay ("measure first").
+  private frameStats = new FrameStats(120);
+  private cpuStats = new FrameStats(120);
+  private lastFrameAt = 0;
+  private perfOverlay: HTMLDivElement | null = null;
+  private lastPerfPaint = 0;
+  /** Graphics tier name shown in the overlay, when the host uses tiers. */
+  private tierLabel: string | null = null;
 
   /**
    * True when the OS asks for reduced motion. Damps the continuous idle motion
@@ -195,9 +383,6 @@ export class SceneManager {
   constructor(container: HTMLElement, options?: SceneManagerOptions) {
     this.container = container;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera();
-    this.renderer = new THREE.WebGLRenderer();
-    this.labelRenderer = new CSS2DRenderer();
     this.buildingShader = new BuildingShader();
 
     // Load saved positions
@@ -208,6 +393,8 @@ export class SceneManager {
     }
     this.onSaveLayout = options?.onSaveLayout;
     this.store = options?.interactionStore ?? null;
+    this.initialCamera = options?.initialCamera ?? null;
+    this.onRequestRebuild = options?.onRequestRebuild;
     this.highlight = new HighlightManager(this.parts, this.store, {
       bloom: options?.settings?.enableBloom ?? false,
     });
@@ -226,6 +413,10 @@ export class SceneManager {
       this.showLabels = options.settings.showLabels;
       this.useShadows = options.settings.enableShadows;
       this.buildingStyle = options.settings.buildingStyle;
+      if (isQualitySetting(options.settings.graphicsQuality)) this.qualitySetting = options.settings.graphicsQuality;
+      if (options.settings.toneMapping === 'agx') this.toneMapping = 'agx';
+      const exposure = options.settings.toneMappingExposure;
+      if (typeof exposure === 'number' && Number.isFinite(exposure) && exposure > 0) this.toneMappingExposure = exposure;
     }
 
     // Honour the OS reduced-motion preference for the WebGL scene too — the
@@ -235,6 +426,18 @@ export class SceneManager {
     } catch {
       this.reducedMotion = false;
     }
+
+    // Tier (GFX-009): an explicit tier applies from the first frame; Auto
+    // starts on High and probes after the first build.
+    if (this.qualitySetting) {
+      this.tier = this.qualitySetting === 'auto' ? AUTO_START_TIER : this.qualitySetting;
+      this.tierConfig = TIER_CONFIG[this.tier];
+    }
+    this.msaaSamples = this.tierConfig.msaaSamples;
+    this.wideLines = this.tierConfig.wideLines;
+    this.reflections = this.tierConfig.reflections;
+    this.bloomScale = this.tierConfig.bloom === 'half' ? 0.5 : 1;
+    this.updateTierLabel();
 
     this.initScene();
     this.initCamera();
@@ -268,6 +471,14 @@ export class SceneManager {
     this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.container.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.container.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    // Any input on the city restores full frame rate (GFX-008).
+    const markActive = () => { this.lastActivityAt = performance.now(); };
+    for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown'] as const) {
+      this.container.addEventListener(type, markActive, { passive: true });
+    }
+    const win = this.container.ownerDocument.defaultView ?? window;
+    win.addEventListener('focus', markActive);
+    this.removeWindowFocusListener = () => win.removeEventListener('focus', markActive);
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(container);
 
@@ -275,11 +486,14 @@ export class SceneManager {
   }
 
   private initScene(): void {
-    this.scene.background = new THREE.Color(0x0c0c18);
+    // Horizon glow instead of a flat colour (GFX-006) when atmosphere is on;
+    // fog fades distant buildings into that glow rather than into a void.
+    // Atmosphere off (performance mode) keeps the flat 0.x backdrop.
+    this.scene.background = this.useAtmosphere ? createHorizonBackground() : new THREE.Color(0x0c0c18);
 
     // Add atmospheric fog for depth effect
     if (this.useAtmosphere) {
-      this.scene.fog = new THREE.FogExp2(0x0c0c18, 0.006);
+      this.scene.fog = new THREE.FogExp2(HORIZON_COLOR, 0.006);
     }
   }
 
@@ -298,25 +512,43 @@ export class SceneManager {
   static isWebGLAvailable(): boolean {
     try {
       const canvas = document.createElement('canvas');
-      return !!(
-        window.WebGLRenderingContext &&
-        (canvas.getContext('webgl2') || canvas.getContext('webgl'))
-      );
+      if (!window.WebGLRenderingContext) return false;
+      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+      if (!gl) return false;
+      // Release the probe now instead of whenever GC gets to it (GL-001):
+      // Chromium caps live contexts per page and evicts the oldest past it.
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return true;
     } catch {
       return false;
     }
   }
 
   private initRenderer(): void {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // With bloom the scene is drawn into the composer's multisampled target and
+    // the canvas only receives the final full-screen pass, so canvas MSAA would
+    // be pure cost (GFX-001). Without bloom the canvas is the scene target.
+    this.renderer = new THREE.WebGLRenderer({ antialias: !this.useBloom, alpha: true });
+    this.lastDevicePixelRatio = window.devicePixelRatio;
+    this.renderer.setPixelRatio(effectivePixelRatio(window.devicePixelRatio, this.tierConfig.pixelRatioCap));
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    this.lineResolution.set(this.container.clientWidth, this.container.clientHeight);
     // Honor the enableShadows setting (PERF-004). With the shadow map off the
     // per-mesh cast/receive flags are inert, so gating here is sufficient.
-    this.renderer.shadowMap.enabled = this.useShadows;
+    this.renderer.shadowMap.enabled = this.shadowsActive();
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    // The city is static between rebuilds, so the shadow map is rendered on
+    // demand (GFX-007) instead of re-drawing every caster every frame. Anything
+    // that moves a caster calls invalidateShadows().
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
+    // GFX-003: ACES vs AgX was A/B tested on the showcase vault; ACES keeps
+    // neon saturated (AgX made red pink and greens pastel). Overridable.
+    this.renderer.toneMapping = this.toneMapping === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = this.toneMappingExposure;
+    // Count draw calls across a whole frame — every composer pass, the shadow
+    // pass — instead of only the last render() call. Reset in animate().
+    this.renderer.info.autoReset = false;
     this.container.appendChild(this.renderer.domElement);
 
     this.labelRenderer = new CSS2DRenderer();
@@ -346,6 +578,7 @@ export class SceneManager {
       MIDDLE: THREE.MOUSE.DOLLY,
       RIGHT: THREE.MOUSE.PAN,
     };
+    controls.addEventListener('change', () => { this.lastCameraMoveAt = performance.now(); });
     return controls;
   }
 
@@ -354,10 +587,10 @@ export class SceneManager {
     this.scene.add(ambient);
 
     const directional = new THREE.DirectionalLight(0xffffff, 0.9);
-    directional.position.set(50, 100, 50);
+    directional.position.copy(SceneManager.KEY_LIGHT_DIR).multiplyScalar(150);
     directional.castShadow = true;
-    directional.shadow.mapSize.width = 2048;
-    directional.shadow.mapSize.height = 2048;
+    directional.shadow.mapSize.width = this.tierConfig.shadowMapSize;
+    directional.shadow.mapSize.height = this.tierConfig.shadowMapSize;
     directional.shadow.camera.near = 10;
     directional.shadow.camera.far = 300;
     directional.shadow.camera.left = -150;
@@ -365,6 +598,8 @@ export class SceneManager {
     directional.shadow.camera.top = 150;
     directional.shadow.camera.bottom = -150;
     this.scene.add(directional);
+    this.scene.add(directional.target);
+    this.keyLight = directional;
 
     const fill = new THREE.DirectionalLight(0x6688cc, 0.3);
     fill.position.set(-40, 60, -40);
@@ -379,23 +614,54 @@ export class SceneManager {
       const width = this.container.clientWidth;
       const height = this.container.clientHeight;
 
-      this.composer = new EffectComposer(this.renderer);
+      // GFX-001: the renderer's `antialias` only covers the default
+      // framebuffer, and with bloom on the scene renders into the composer's
+      // targets, which had no MSAA — every edge, arc and tower aliased (hidden
+      // at 2x device scale, plain at 1x). The scene target is now multisampled.
+      // Half-float keeps HDR emitters above 1.0 intact for the bloom threshold.
+      const caps = this.renderer.capabilities;
+      const samples = caps.isWebGL2 ? Math.min(this.msaaSamples, caps.maxSamples) : 0;
+      const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples });
+      this.composer = new EffectComposer(this.renderer, target);
+      // The composer clones `target` as its ping-pong partner. Only the buffer
+      // RenderPass draws into needs MSAA — render() pins RenderPass to
+      // renderTarget2 every frame — so the partner stays single-sampled (it is
+      // never even allocated unless a pass swaps buffers).
+      this.composer.renderTarget1.samples = 0;
 
       const renderPass = new RenderPass(this.scene, this.camera);
       this.composer.addPass(renderPass);
 
-      this.bloomPass = new UnrealBloomPass(
+      this.bloomPass = new ScaledBloomPass(
         new THREE.Vector2(width, height),
         this.bloomIntensity,  // strength
         0.4,                   // radius
-        0.7                    // threshold - only bright things glow
+        SceneManager.BLOOM_THRESHOLD,
       );
+      this.bloomPass.scale = this.bloomScale; // half-size blur on Balanced (GFX-009)
       this.composer.addPass(this.bloomPass);
+
+      // Gentle vignette (GFX-006), in linear space before tone mapping.
+      this.composer.addPass(new ShaderPass(VignetteShader));
 
       const outputPass = new OutputPass();
       this.composer.addPass(outputPass);
+      if (samples > 0) {
+        // Last pass draws to screen; swapping after it only made the next
+        // frame's RenderPass land in the single-sampled buffer.
+        outputPass.needsSwap = false;
+      } else {
+        // WebGL1 has no multisampled render targets: fall back to SMAA, which
+        // reads OutputPass's (swapped) result.
+        this.composer.addPass(new SMAAPass(width, height));
+      }
 
-      debugLog('Bloom post-processing initialized');
+      // Normalise sizes now that the passes exist (a custom target makes the
+      // composer start from the target's 1x1 size).
+      this.composer.setPixelRatio(this.renderer.getPixelRatio());
+      this.composer.setSize(width, height);
+
+      debugLog('Bloom post-processing initialized', { samples });
     } catch (e) {
       debugLog('Failed to initialize bloom:', e);
       this.composer = null;
@@ -403,7 +669,39 @@ export class SceneManager {
     }
   }
 
-  buildCity(projects: ProjectData[], districts: Map<string, District>): void {
+  /**
+   * Multiplier for light-source emissives (GFX-002): with a bloom pass they are
+   * pushed above 1.0 so they clear the threshold; without one there is nothing
+   * to gain and the canvas would just clip them.
+   */
+  private hdrScale(): number {
+    return this.bloomActive() ? SceneManager.HDR_EMISSIVE : 1;
+  }
+
+  /** Bloom runs: the user enabled it and the tier allows it (GFX-009). */
+  private bloomActive(): boolean {
+    return this.bloomPass !== null && this.tierConfig.bloom !== 'off';
+  }
+
+  /** Shadow map runs: the user enabled it and the tier allows it (GFX-009). */
+  private shadowsActive(): boolean {
+    return this.useShadows && this.tierConfig.shadows !== 'off';
+  }
+
+  /** Render one frame through the composer (or straight to screen without bloom). */
+  private renderFrame(): void {
+    if (this.composer && this.bloomActive()) {
+      // Pin RenderPass to the multisampled target (see initComposer): a host
+      // can insert passes that swap buffers an odd number of times per frame.
+      this.composer.readBuffer = this.composer.renderTarget2;
+      this.composer.writeBuffer = this.composer.renderTarget1;
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
+  buildCity(projects: ProjectData[], districts: Map<string, District>, options?: BuildCityOptions): void {
     // Capture streaming state before clearing (clearCity destroys buildingPathMap)
     const wasStreaming = this.arteryManager?.getIsStreaming() ?? false;
     const streamingPath = this.arteryManager?.getStreamingPath() ?? null;
@@ -459,15 +757,37 @@ export class SceneManager {
     // Apply saved positions after initial layout
     this.applySavedPositions();
 
+    // Static shadow map (GFX-007): fit to the final layout and render it once.
+    this.fitShadowCamera();
+
     // Position Neural Core at city center
     this.positionNeuralCore(projects);
 
-    this.fitCameraToCity(projects);
+    this.frameAfterBuild(projects, options?.refit === true);
 
     // Re-establish streaming if it was active before rebuild
     if (wasStreaming && streamingPath) {
       this.arteryManager?.stopStream();
       this.startStreaming(streamingPath);
+    }
+
+    this.warmUpShaders();
+  }
+
+  /**
+   * GFX-011: start compiling every material program the new city needs right
+   * away. With KHR_parallel_shader_compile (see BuildingShader.testCompilation)
+   * the driver links them off the main thread while the next frame is still
+   * being scheduled, instead of the first frames that draw them stalling on a
+   * synchronous compile. Programs are cached, so later rebuilds are no-ops.
+   */
+  private warmUpShaders(): void {
+    try {
+      this.renderer.compileAsync(this.scene, this.camera).catch(() => {
+        // Nothing to do: the first render compiles synchronously, as before.
+      });
+    } catch {
+      // compile() threw (lost context); rendering handles it.
     }
   }
 
@@ -546,6 +866,7 @@ export class SceneManager {
     this.dragHandles = [];
     this.handleHitBoxes = [];
     this.foundationHitPads = [];
+    this.contactShadows = null;
     this.shaderMaterials.clear();
     this.buildingPathMap.clear();
     this.parts.clear();
@@ -563,7 +884,10 @@ export class SceneManager {
 
     const radius = Math.max(maxExtent, 50);
     // Circular ground plane centered at origin
-    const groundGeo = new THREE.CircleGeometry(radius, 64);
+    // With atmosphere on, the ground runs far past the grid so fog carries its
+    // edge into the horizon glow; a disc edge against the glow read as a planet.
+    const groundRadius = this.useAtmosphere ? Math.max(radius * 4, 400) : radius;
+    const groundGeo = new THREE.CircleGeometry(groundRadius, 64);
     const groundMat = new THREE.MeshStandardMaterial({
       color: 0x0a0a14,
       roughness: 0.95,
@@ -576,74 +900,52 @@ export class SceneManager {
     setUserData(ground, { isGround: true });
     this.scene.add(ground);
 
-    // Square grid lines clipped to circular boundary
-    const gridColor = this.useAtmosphere ? 0x00ffff : 0x1a1a2e;
-    const gridGroup = new THREE.Group();
-    gridGroup.position.set(0, 0.01, 0);
-    setUserData(gridGroup, { isGround: true });
-    const gridSpacing = 5;
+    // Grid (GFX-006): one plane with a procedural, fwidth-antialiased grid that
+    // fades out where cells get too small to resolve, instead of 1 px line
+    // segments that moired at the default angle. Same colours, spacing and
+    // radial fade into the dark as the line grid it replaces.
+    const gridGeo = new THREE.CircleGeometry(radius, 96);
+    gridGeo.rotateX(-Math.PI / 2);
+    const grid = new THREE.Mesh(gridGeo, createGridMaterial({
+      color: this.useAtmosphere ? 0x00ffff : 0x1a1a2e,
+      opacity: this.useAtmosphere ? 0.3 : 1.0,
+      spacing: 5,
+      origin: -radius,
+      fadeStart: radius * 0.52,
+      radius,
+    }));
+    grid.position.set(0, 0.01, 0);
+    setUserData(grid, { isGround: true });
+    this.scene.add(grid);
 
-    // The grid dissolves into the dark instead of stopping at a drawn circle.
-    // Alpha comes from radial distance in the shader, so it is smooth in world
-    // space rather than per-line; the chords are subdivided because a 2-point
-    // line would interpolate the fade linearly between its endpoints and dim
-    // the middle of a long chord that should still be at full strength.
-    const fadeStart = radius * 0.52;
-    const gridMat = new THREE.ShaderMaterial({
-      uniforms: {
-        uColor: { value: new THREE.Color(gridColor) },
-        uOpacity: { value: this.useAtmosphere ? 0.3 : 1.0 },
-        uFadeStart: { value: fadeStart },
-        uRadius: { value: radius },
-      },
-      vertexShader: `
-        varying float vFade;
-        uniform float uFadeStart;
-        uniform float uRadius;
-        void main() {
-          float r = length(position.xz);
-          vFade = 1.0 - smoothstep(uFadeStart, uRadius, r);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }`,
-      fragmentShader: `
-        uniform vec3 uColor;
-        uniform float uOpacity;
-        varying float vFade;
-        void main() {
-          float a = uOpacity * vFade;
-          if (a < 0.004) discard;
-          gl_FragColor = vec4(uColor, a);
-        }`,
-      transparent: true,
-      depthWrite: false,
-    });
+    // Contact shadows (GFX-006): created here so a host that replaces the
+    // ground (Pro's floating islands) gets none. Synced after layout moves.
+    this.contactShadows = createContactShadowMesh(projects.length);
+    setUserData(this.contactShadows, { isGround: true });
+    this.scene.add(this.contactShadows);
+    this.contactShadowsDirty = true;
+  }
 
-    // One LineSegments for the whole grid — also drops ~40 draw calls.
-    const STEPS = 32;
-    const verts: number[] = [];
-    const addChord = (fixed: number, half: number, alongX: boolean) => {
-      for (let i = 0; i < STEPS; i++) {
-        const t0 = -half + (2 * half * i) / STEPS;
-        const t1 = -half + (2 * half * (i + 1)) / STEPS;
-        if (alongX) verts.push(t0, 0, fixed, t1, 0, fixed);
-        else verts.push(fixed, 0, t0, fixed, 0, t1);
-      }
-    };
-    const rSq = radius * radius;
-    for (let z = -radius; z <= radius; z += gridSpacing) {
-      if (z * z >= rSq) continue;
-      addChord(z, Math.sqrt(rSq - z * z), true);
+  /** Place one soft dark decal under every visible building (GFX-006). */
+  private syncContactShadows(): void {
+    this.contactShadowsDirty = false;
+    const mesh = this.contactShadows;
+    if (!mesh) return;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    let i = 0;
+    for (const entry of this.parts.values()) {
+      if (i >= mesh.instanceMatrix.count) break;
+      const dims = entry.project.dimensions;
+      const size = entry.building.visible && dims ? Math.max(dims.width, dims.depth) * 2.6 + 2 : 0;
+      pos.set(entry.building.position.x, 0.02, entry.building.position.z);
+      scale.set(size, 1, size);
+      mesh.setMatrixAt(i++, m.compose(pos, q, scale));
     }
-    for (let x = -radius; x <= radius; x += gridSpacing) {
-      if (x * x >= rSq) continue;
-      addChord(x, Math.sqrt(rSq - x * x), false);
-    }
-    const gridGeo = new THREE.BufferGeometry();
-    gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    const gridLines = new THREE.LineSegments(gridGeo, gridMat);
-    setUserData(gridLines, { isGround: true });
-    gridGroup.add(gridLines);
-    this.scene.add(gridGroup);
+    mesh.count = i;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   private addBlockOutlines(districts: Map<string, District>): void {
@@ -715,14 +1017,7 @@ export class SceneManager {
         new THREE.Vector3(bounds.minX - padding, 0.05, bounds.minZ - padding), // Close the loop
       ];
 
-      const outlineGeo = new THREE.BufferGeometry().setFromPoints(outlinePoints);
-      const outlineMat = new THREE.LineBasicMaterial({
-        color,
-        linewidth: 2,
-        transparent: true,
-        opacity: 0.25,
-      });
-      const outline = new THREE.Line(outlineGeo, outlineMat);
+      const outline = this.makeGroundLine(outlinePoints, color, 0.25);
       setUserData(outline, { isDistrict: true, category });
       this.scene.add(outline);
       blockObjects.push(outline);
@@ -771,13 +1066,7 @@ export class SceneManager {
         new THREE.Vector3(horizontalEnd, labelY - 0.5, labelZ),
         new THREE.Vector3(bounds.minX - padding, 0.1, labelZ),
       ];
-      const leaderGeo = new THREE.BufferGeometry().setFromPoints(leaderPoints);
-      const leaderMat = new THREE.LineBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.2,
-      });
-      const leaderLine = new THREE.Line(leaderGeo, leaderMat);
+      const leaderLine = this.makeGroundLine(leaderPoints, color, 0.2);
       setUserData(leaderLine, { isDistrict: true, category });
       this.scene.add(leaderLine);
       blockObjects.push(leaderLine);
@@ -803,9 +1092,7 @@ export class SceneManager {
         new THREE.Vector3(handleX, 0.06, handleZ),
         new THREE.Vector3(handleX, 0.06, handleZ + handleArmLen),
       ];
-      const bracketGeo = new THREE.BufferGeometry().setFromPoints(bracketPts);
-      const bracketMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
-      const handleBracket = new THREE.Line(bracketGeo, bracketMat);
+      const handleBracket = this.makeGroundLine(bracketPts, 0xffffff, 0.35);
       setUserData(handleBracket, { isDragHandle: true, category });
       this.scene.add(handleBracket);
       blockObjects.push(handleBracket);
@@ -948,6 +1235,8 @@ export class SceneManager {
         floors: build.floors,
         diagrid: build.diagrid,
         sides: build.sides,
+        emissive: this.hdrScale() > 1 ? SceneManager.HDR_WINDOWS : 1,
+        reflect: this.reflections ? SceneManager.REFLECTION_STRENGTH : 0,
       });
       if (shaderMat) {
         material = shaderMat;
@@ -1005,12 +1294,7 @@ export class SceneManager {
     const edgeColor = baseColor.clone().multiplyScalar(
       project.status === 'blocked' ? (parametric ? 1.9 : 3.0) : edgeBoost
     );
-    const lineMat = new THREE.LineBasicMaterial({
-      color: edgeColor,
-      transparent: true,
-      opacity: Math.min(edgeOpacity, 1.0),
-    });
-    const wireframe = new THREE.LineSegments(edges, lineMat);
+    const wireframe = this.makeEdgeLines(edges, edgeColor, Math.min(edgeOpacity, 1.0));
     wireframe.position.copy(mesh.position);
     setUserData(wireframe, { isBuilding: true, project, isEdgeGlow: true });
     this.scene.add(wireframe);
@@ -1067,10 +1351,10 @@ export class SceneManager {
       const questMat = new THREE.MeshStandardMaterial({
         color: 0xffcc44,
         emissive: 0xffaa22,
-        emissiveIntensity: 1.2,
+        emissiveIntensity: 1.2 * this.hdrScale(),
         flatShading: true,
       });
-      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), questMat);
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(SceneManager.GEM_RADIUS), questMat);
       const baseY = topY + 1.2;
       // Track the roof centerline — leaning presets move it well off local origin
       gem.position.set(build.topCenter.x, baseY, build.topCenter.z);
@@ -1219,6 +1503,10 @@ export class SceneManager {
   setVisible(path: string, visible: boolean): void {
     const parts = this.parts.get(path);
     if (!parts) return;
+    if (parts.building.visible !== visible) {
+      this.invalidateShadows(); // hidden casters drop their shadow
+      this.contactShadowsDirty = true;
+    }
     parts.building.visible = visible;
     parts.edgeGlow.visible = visible;
     parts.foundation.visible = visible;
@@ -1313,7 +1601,7 @@ export class SceneManager {
       const color = new THREE.Color().setHSL(hue, 0.75, 0.6);
 
       const orb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.26, 12, 12),
+        new THREE.SphereGeometry(SceneManager.ORB_RADIUS, 12, 12),
         new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.8 }),
       );
       orb.position.set(0, baseY, 0);
@@ -1372,7 +1660,7 @@ export class SceneManager {
     const mat = entry.orb.material as THREE.MeshStandardMaterial;
     mat.color.copy(color);
     mat.emissive.copy(color);
-    mat.emissiveIntensity = visual.emissiveBase;
+    mat.emissiveIntensity = visual.emissiveBase * this.hdrScale();
     const wantTransparent = visual.opacity < 1;
     if (mat.transparent !== wantTransparent) {
       mat.transparent = wantTransparent;
@@ -1405,7 +1693,7 @@ export class SceneManager {
 
       const project = projectOf(building) as ProjectData;
       const half = (project.dimensions?.width ?? 3) / 2;
-      const color = severity === 'high' ? 0xff3333 : 0xffaa33;
+      const color = new THREE.Color(severity === 'high' ? 0xff3333 : 0xffaa33).multiplyScalar(this.hdrScale());
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(half + 0.4, half + 0.9, 48),
         new THREE.MeshBasicMaterial({
@@ -1453,7 +1741,7 @@ export class SceneManager {
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.9, 1.15, 40),
       new THREE.MeshBasicMaterial({
-        color: colorHex,
+        color: new THREE.Color(colorHex).multiplyScalar(this.hdrScale()),
         transparent: true,
         opacity: 0.85,
         side: THREE.DoubleSide,
@@ -1548,14 +1836,69 @@ export class SceneManager {
     const camPos = this.camera.position;
     // Threshold scales with city radius so labels cull relative to city size.
     const threshold = Math.max(this.cityBounds.radius * 2.2, 60);
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const st = this.store?.getState();
+    // LBL-001: labels that pass the policy compete for screen space below.
+    const boxes: LabelBox[] = [];
+    const contenders = new Map<string, CSS2DObject>();
+    const contend = (id: string, label: CSS2DObject, priority: number) => {
+      const box = this.labelScreenBox(id, label, w, h, priority);
+      if (box) {
+        boxes.push(box);
+        contenders.set(id, label);
+      } else {
+        label.visible = true; // off-screen / behind the camera: CSS2DRenderer handles it
+      }
+    };
+
+    for (const [category, block] of this.blocks) {
+      if (block.label) contend(`category:${category}`, block.label, LABEL_PRIORITY.category);
+    }
     for (const entry of this.parts.values()) {
       if (!entry.label) continue;
       // A filtered-out (hidden) building never shows its label (PERF-002).
       if (!entry.building.visible) { entry.label.visible = false; continue; }
       const tier: LabelTier = entry.state?.labelTier ?? 'normal';
       const dist = camPos.distanceTo(entry.label.position);
-      entry.label.visible = labelVisible(tier, this.showLabels, dist, threshold);
+      if (!labelVisible(tier, this.showLabels, dist, threshold)) { entry.label.visible = false; continue; }
+      contend(entry.path, entry.label, labelPriority({
+        selected: st?.selectedPath === entry.path,
+        hovered: st?.hoveredPath === entry.path,
+        pinned: tier === 'always',
+        projectPriority: entry.project.priority,
+      }));
     }
+
+    const visible = resolveLabelCollisions(boxes);
+    for (const [id, label] of contenders) label.visible = visible.has(id);
+  }
+
+  /** Label sizes, measured once from the DOM (text never changes). */
+  private labelSizes = new WeakMap<HTMLElement, { width: number; height: number }>();
+  private labelProjection = new THREE.Vector3();
+
+  /**
+   * A label's centred screen rect (CSS2DObject centres its element on the
+   * projected point), or null when the anchor is off-screen or behind the
+   * camera. A label never shown yet has no layout size, so its size is
+   * estimated from its text until it can be measured.
+   */
+  private labelScreenBox(id: string, label: CSS2DObject, w: number, h: number, priority: number): LabelBox | null {
+    const v = label.getWorldPosition(this.labelProjection).project(this.camera);
+    if (v.z < -1 || v.z > 1 || v.x < -1.2 || v.x > 1.2 || v.y < -1.2 || v.y > 1.2) return null;
+    const el = label.element;
+    let size = this.labelSizes.get(el);
+    if (!size) {
+      const width = el.offsetWidth;
+      if (width > 0) {
+        size = { width, height: el.offsetHeight };
+        this.labelSizes.set(el, size);
+      }
+    }
+    const estimate = { width: (el.textContent?.length ?? 8) * 6.5 + 14, height: 18 };
+    const { width, height } = size ?? estimate;
+    return { id, x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, width, height, priority };
   }
 
   private getStatusColor(status: string): THREE.Color {
@@ -1563,33 +1906,245 @@ export class SceneManager {
     return new THREE.Color(statusColor(status));
   }
 
-  private fitCameraToCity(projects: ProjectData[]): void {
-    if (projects.length === 0) return;
+  /** A LineMaterial sized in CSS pixels, sharing the scene's resolution vector (GFX-004). */
+  private lineMaterial(color: THREE.Color, opacity: number, widthPx: number): LineMaterial {
+    // The color is stored by reference in the uniform: always pass a fresh Color.
+    const mat = new LineMaterial({ color, linewidth: widthPx, transparent: true, opacity });
+    mat.fog = true; // fade with the scene fog like the LineBasicMaterials did
+    mat.uniforms.resolution.value = this.lineResolution;
+    return mat;
+  }
 
-    let minX = Infinity, maxX = -Infinity;
-    let minZ = Infinity, maxZ = -Infinity;
-
-    for (const p of projects) {
-      if (!p.position) continue;
-      minX = Math.min(minX, p.position.x);
-      maxX = Math.max(maxX, p.position.x);
-      minZ = Math.min(minZ, p.position.z);
-      maxZ = Math.max(maxZ, p.position.z);
+  /** District outline / leader / bracket polyline (GFX-004). */
+  private makeGroundLine(points: THREE.Vector3[], color: THREE.ColorRepresentation, opacity: number): GroundLine {
+    if (!this.wideLines) {
+      return new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
+      );
     }
+    const geometry = new LineGeometry();
+    geometry.setPositions(points.flatMap((p) => [p.x, p.y, p.z]));
+    return new Line2(geometry, this.lineMaterial(new THREE.Color(color), opacity, SceneManager.OUTLINE_WIDTH_PX));
+  }
 
-    const centerX = (minX + maxX) / 2;
-    const centerZ = (minZ + maxZ) / 2;
-    const sizeX = maxX - minX + 30;
-    const sizeZ = maxZ - minZ + 30;
-    const maxSize = Math.max(sizeX, sizeZ, 50);
+  /**
+   * Replace a ground line's points with absolute coordinates. moveBlock offsets
+   * a Line2 by its position (cheap, no buffer rebuild), so absolute points also
+   * reset that offset.
+   */
+  private setGroundLinePoints(line: GroundLine, points: [number, number, number][]): void {
+    if (line instanceof Line2) {
+      line.geometry.setPositions(points.flat());
+      line.position.set(0, 0, 0);
+      return;
+    }
+    const pos = line.geometry.attributes.position as THREE.BufferAttribute;
+    points.forEach((p, i) => pos.setXYZ(i, p[0], p[1], p[2]));
+    pos.needsUpdate = true;
+  }
 
-    const distance = maxSize * 1.1;
-    this.camera.position.set(centerX, distance * 0.6, centerZ + distance * 0.7);
-    this.controls.target.set(centerX, 0, centerZ);
+  /** A building's edge-glow outline (GFX-004). Consumes the EdgesGeometry. */
+  private makeEdgeLines(edges: THREE.EdgesGeometry, color: THREE.Color, opacity: number): EdgeLines {
+    if (!this.wideLines) {
+      return new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+    }
+    const geometry = new LineSegmentsGeometry().fromEdgesGeometry(edges);
+    edges.dispose();
+    return new LineSegments2(geometry, this.lineMaterial(color, opacity, SceneManager.EDGE_WIDTH_PX));
+  }
+
+  private cityFrameFor(projects: ProjectData[]): CityFrame | null {
+    const points: { x: number; z: number }[] = [];
+    for (const p of projects) if (p.position) points.push(p.position);
+    return computeCityFrame(points);
+  }
+
+  private fitCameraToCity(projects: ProjectData[]): void {
+    const pose = this.overviewPose(projects);
+    if (!pose) return;
+    this.camera.position.copy(pose.position);
+    this.controls.target.copy(pose.target);
     this.controls.update();
+  }
 
-    // Store bounds for pan clamping
-    this.cityBounds = { centerX, centerZ, radius: maxSize * 0.75 };
+  /**
+   * Tell the camera which part of the canvas is unobstructed by HUD panels
+   * (HUD-001). The next overview framing (first open, Space / Reset camera)
+   * fits the city into it instead of behind the panels. Doesn't move the
+   * camera by itself. Pass null to frame into the whole canvas again.
+   */
+  setFramingRect(rect: ScreenRect | null): void {
+    this.framingRect = rect && rect.width > 0 && rect.height > 0 ? { ...rect } : null;
+  }
+
+  /** The city's world box for framing: district outlines, their labels, and the tallest roof. */
+  private framingBox(projects: ProjectData[]): FramingBox | null {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    const pad = 3; // outline padding (addBlockOutlines)
+    for (const block of this.blocks.values()) {
+      minX = Math.min(minX, block.bounds.minX - pad - 12); // category label sits left of the outline
+      maxX = Math.max(maxX, block.bounds.maxX + pad);
+      minZ = Math.min(minZ, block.bounds.minZ - pad);
+      maxZ = Math.max(maxZ, block.bounds.maxZ + pad);
+    }
+    if (minX === Infinity) {
+      for (const p of projects) {
+        if (!p.position) continue;
+        minX = Math.min(minX, p.position.x - 4);
+        maxX = Math.max(maxX, p.position.x + 4);
+        minZ = Math.min(minZ, p.position.z - 4);
+        maxZ = Math.max(maxZ, p.position.z + 4);
+      }
+    }
+    if (minX === Infinity) return null;
+    let maxY = 6;
+    for (const b of this.buildings) {
+      if (!b.geometry.boundingBox) b.geometry.computeBoundingBox();
+      maxY = Math.max(maxY, b.position.y + (b.geometry.boundingBox?.max.y ?? 0) + 3); // + label
+    }
+    return { minX, maxX, minZ, maxZ, maxY };
+  }
+
+  /** Default overview pose: panel-aware when a framing rect is set (HUD-001). */
+  private overviewPose(projects: ProjectData[]): { position: THREE.Vector3; target: THREE.Vector3 } | null {
+    const frame = this.cityFrameFor(projects);
+    if (!frame) return null;
+    // Pan clamp follows the city whichever framing is used.
+    this.cityBounds = { centerX: frame.centerX, centerZ: frame.centerZ, radius: frame.radius };
+
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const box = this.framingRect && w > 0 && h > 0 ? this.framingBox(projects) : null;
+    if (!box || !this.framingRect) {
+      return {
+        position: new THREE.Vector3(frame.position.x, frame.position.y, frame.position.z),
+        target: new THREE.Vector3(frame.centerX, 0, frame.centerZ),
+      };
+    }
+    const solved = frameBoxInRect({
+      box,
+      fov: this.camera.fov,
+      aspect: w / h,
+      viewDir: SceneManager.OVERVIEW_DIR,
+      canvas: { width: w, height: h },
+      rect: this.framingRect,
+      minDistance: this.controls.minDistance,
+      maxDistance: this.controls.maxDistance,
+    });
+    // Keep the solved target inside the pan clamp.
+    const off = Math.hypot(solved.target.x - frame.centerX, solved.target.z - frame.centerZ);
+    if (off + 10 > this.cityBounds.radius) this.cityBounds.radius = off + 10;
+    return { position: solved.position, target: solved.target };
+  }
+
+  /**
+   * Post-build camera policy (CAM-001). The pan clamp always follows the new
+   * city, but the camera itself only moves on the view's first build, on an
+   * empty → non-empty transition, or when the host asks for a refit. Anything
+   * else — a note save, Prepare vault, a lens change — keeps the user's view.
+   */
+  private frameAfterBuild(projects: ProjectData[], refit: boolean): void {
+    const frame = this.cityFrameFor(projects);
+    if (frame) this.cityBounds = { centerX: frame.centerX, centerZ: frame.centerZ, radius: frame.radius };
+
+    const frameNow = shouldFrameOnBuild({
+      hasFramed: this.hasFramed,
+      previousCount: this.lastProjectCount,
+      count: projects.length,
+      refit,
+    });
+    if (frameNow) {
+      if (!this.hasFramed && this.initialCamera) this.setCameraState(this.initialCamera);
+      else this.fitCameraToCity(projects);
+      this.hasFramed = true;
+    }
+    this.initialCamera = null; // only ever applies to the first build
+    this.lastProjectCount = projects.length;
+
+    // Auto quality (GFX-009): measure ~2 s of frames once a city is on screen.
+    if (this.qualitySetting === 'auto' && !this.autoProbeDone && !this.autoProbe && projects.length > 0) {
+      this.autoProbe = { startAt: performance.now() + 300, stats: new FrameStats(600) };
+    }
+  }
+
+  /**
+   * Re-render the static shadow map on the next frame (GFX-007). Core calls
+   * this whenever it moves or hides a shadow caster; a host that moves casters
+   * itself (animated decor, lifted districts) must call it too.
+   */
+  invalidateShadows(): void {
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /** Fit the key light's shadow camera to the current buildings (GFX-007). */
+  private fitShadowCamera(): void {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, maxY = 0;
+    for (const b of this.buildings) {
+      const p = projectOf(b);
+      if (!p?.position || !p.dimensions) continue;
+      const half = Math.max(p.dimensions.width, p.dimensions.depth) / 2 + 1;
+      minX = Math.min(minX, b.position.x - half);
+      maxX = Math.max(maxX, b.position.x + half);
+      minZ = Math.min(minZ, b.position.z - half);
+      maxZ = Math.max(maxZ, b.position.z + half);
+      if (!b.geometry.boundingBox) b.geometry.computeBoundingBox();
+      maxY = Math.max(maxY, b.position.y + (b.geometry.boundingBox?.max.y ?? p.dimensions.height));
+    }
+    if (minX === Infinity) return;
+
+    const f = fitShadowFrustum({ minX, maxX, minZ, maxZ, maxY });
+    const light = this.keyLight;
+    light.target.position.set(f.center.x, f.center.y, f.center.z);
+    light.target.updateMatrixWorld();
+    light.position.copy(SceneManager.KEY_LIGHT_DIR).multiplyScalar(f.distance).add(light.target.position);
+    const cam = light.shadow.camera;
+    cam.left = -f.halfSize;
+    cam.right = f.halfSize;
+    cam.top = f.halfSize;
+    cam.bottom = -f.halfSize;
+    cam.near = f.near;
+    cam.far = f.far;
+    cam.updateProjectionMatrix();
+    this.invalidateShadows();
+  }
+
+  private markerWorldPos = new THREE.Vector3();
+
+  /**
+   * VIS-001: quest gems and agent orbs keep a minimum on-screen size. At the
+   * overview distance they rendered at a few pixels; each frame they scale up
+   * just enough to stay ~12 px across (capped), and shrink back to their
+   * modelled size up close. Orbs are their own raycast targets, so hover
+   * follows the drawn size automatically.
+   */
+  private keepMarkersReadable(): void {
+    const h = this.container.clientHeight;
+    if (h <= 0) return;
+    const fit = (mesh: THREE.Mesh, radius: number) => {
+      mesh.getWorldPosition(this.markerWorldPos);
+      const parentScale = mesh.parent ? mesh.parent.scale.x : 1;
+      const dist = this.markerWorldPos.distanceTo(this.camera.position);
+      mesh.scale.setScalar(markerScale(radius * parentScale, dist, this.camera.fov, h));
+    };
+    for (const entry of this.agentOrbs.values()) fit(entry.orb, SceneManager.ORB_RADIUS);
+    for (const gem of this.questMarkers) fit(gem, SceneManager.GEM_RADIUS);
+  }
+
+  /** Current camera pose, for a host to restore after a view reload (CAM-001). */
+  getCameraState(): CameraState {
+    const p = this.camera.position;
+    const t = this.controls.target;
+    return { position: { x: p.x, y: p.y, z: p.z }, target: { x: t.x, y: t.y, z: t.z } };
+  }
+
+  /** Move the camera to a saved pose (CAM-001). */
+  setCameraState(state: CameraState): void {
+    const { position: p, target: t } = state;
+    if (![p.x, p.y, p.z, t.x, t.y, t.z].every(Number.isFinite)) return;
+    this.camera.position.set(p.x, p.y, p.z);
+    this.controls.target.set(t.x, t.y, t.z);
+    this.controls.update();
   }
 
   private onMouseMove(event: MouseEvent): void {
@@ -1923,6 +2478,8 @@ export class SceneManager {
   private onMouseUp(_event: MouseEvent): void {
     if (this.isDragging) {
       this.dragEndAt = performance.now();
+      // A drag can grow the city past the shadow frustum (GFX-007).
+      this.fitShadowCamera();
       if (this.draggedBlock) {
         // Persist the internal state immediately so background rebuilds (e.g. file edits)
         // do not revert the user's manual dragging before they hit the Save Layout button.
@@ -1948,6 +2505,8 @@ export class SceneManager {
   private moveSingleBuilding(building: THREE.Mesh, deltaX: number, deltaZ: number): void {
     const project = projectOf(building) as ProjectData;
     if (!project) return;
+    this.invalidateShadows();
+    this.contactShadowsDirty = true;
 
     // Move the building mesh
     building.position.x += deltaX;
@@ -1975,7 +2534,7 @@ export class SceneManager {
 
     // Move wireframes (foundation and building edges)
     this.scene.traverse((obj) => {
-      if (obj instanceof THREE.LineSegments && projectOf(obj) === project) {
+      if ((obj instanceof THREE.LineSegments || obj instanceof LineSegments2) && projectOf(obj) === project) {
         obj.position.x += deltaX;
         obj.position.z += deltaZ;
       }
@@ -2032,18 +2591,13 @@ export class SceneManager {
 
     // 1. Update outline vertices (5-point closed rectangle)
     if (block.outline) {
-      const pos = block.outline.geometry.attributes.position as THREE.BufferAttribute;
-      const pts: [number, number, number][] = [
+      this.setGroundLinePoints(block.outline, [
         [minX - padding, 0.05, minZ - padding],
         [maxX + padding, 0.05, minZ - padding],
         [maxX + padding, 0.05, maxZ + padding],
         [minX - padding, 0.05, maxZ + padding],
         [minX - padding, 0.05, minZ - padding],
-      ];
-      for (let i = 0; i < pts.length; i++) {
-        pos.setXYZ(i, pts[i][0], pts[i][1], pts[i][2]);
-      }
-      pos.needsUpdate = true;
+      ]);
     }
 
     // 2. Dispose + recreate fill geometry
@@ -2063,12 +2617,12 @@ export class SceneManager {
       block.label.position.set(labelX, labelY, labelZ);
     }
     if (block.leaderLine) {
-      const lp = block.leaderLine.geometry.attributes.position as THREE.BufferAttribute;
       const horizontalEnd = labelX + 3;
-      lp.setXYZ(0, labelX + 1.5, labelY - 0.5, labelZ);
-      lp.setXYZ(1, horizontalEnd, labelY - 0.5, labelZ);
-      lp.setXYZ(2, minX - padding, 0.1, labelZ);
-      lp.needsUpdate = true;
+      this.setGroundLinePoints(block.leaderLine, [
+        [labelX + 1.5, labelY - 0.5, labelZ],
+        [horizontalEnd, labelY - 0.5, labelZ],
+        [minX - padding, 0.1, labelZ],
+      ]);
     }
     if (block.dot) {
       block.dot.position.set(minX - padding, 0.08, labelZ);
@@ -2086,15 +2640,17 @@ export class SceneManager {
     // Update L-bracket vertices
     if (block.handleBracket) {
       const armLen = 2.5;
-      const bp = block.handleBracket.geometry.attributes.position as THREE.BufferAttribute;
-      bp.setXYZ(0, handleX - armLen, 0.06, handleZ);
-      bp.setXYZ(1, handleX, 0.06, handleZ);
-      bp.setXYZ(2, handleX, 0.06, handleZ + armLen);
-      bp.needsUpdate = true;
+      this.setGroundLinePoints(block.handleBracket, [
+        [handleX - armLen, 0.06, handleZ],
+        [handleX, 0.06, handleZ],
+        [handleX, 0.06, handleZ + armLen],
+      ]);
     }
   }
 
   private moveBlock(category: string, deltaX: number, deltaZ: number): void {
+    this.invalidateShadows();
+    this.contactShadowsDirty = true;
     // Move all buildings and foundations in this category
     for (const building of this.buildings) {
       const project = projectOf(building);
@@ -2124,7 +2680,7 @@ export class SceneManager {
     // Move foundation wireframes and building wireframes
     this.scene.traverse((obj) => {
       if ((ud(obj).isFoundation || ud(obj).isBuilding) &&
-        obj instanceof THREE.LineSegments &&
+        (obj instanceof THREE.LineSegments || obj instanceof LineSegments2) &&
         projectOf(obj)?.category === category) {
         obj.position.x += deltaX;
         obj.position.z += deltaZ;
@@ -2389,6 +2945,7 @@ export class SceneManager {
     // getDelta() would otherwise return the whole paused interval and make every
     // time-based animation jump on resume.
     this.clock.getDelta();
+    this.lastFrameAt = 0; // nor should the pause count as one long frame
     if (this.animationId === null) this.animate();
   }
 
@@ -2403,6 +2960,27 @@ export class SceneManager {
       return;
     }
     this.animationId = window.requestAnimationFrame(this.animate);
+
+    // GFX-008: full rate while interacting, ~30 fps when idle, ~5 fps while
+    // Obsidian is in the background. Camera motion (damping, glides) counts
+    // as activity; the Auto quality probe needs every frame.
+    const now = performance.now();
+    const budget = minFrameInterval({
+      now,
+      lastActivityAt: Math.max(this.lastActivityAt, this.lastCameraMoveAt),
+      // The container's own document: the city may live in a popout window.
+      focused: this.container.ownerDocument.hasFocus(),
+      needsFullRate: this.autoProbe !== null,
+    });
+    if (!shouldRenderFrame(now, this.lastRenderAt, budget)) return;
+    this.lastRenderAt = now;
+
+    const frameStart = now;
+    const frameInterval = this.lastFrameAt > 0 ? frameStart - this.lastFrameAt : 0;
+    if (frameInterval > 0) this.frameStats.push(frameInterval);
+    this.lastFrameAt = frameStart;
+    this.renderer.info.reset();
+    this.updateQuality(frameStart, frameInterval);
 
     const elapsed = this.clock.getElapsedTime();
     const delta = this.clock.getDelta();
@@ -2483,6 +3061,7 @@ export class SceneManager {
     }
 
     // Agent orbs: orbit + pulse + complete-fade around their AGT-005 baselines.
+    const hdr = this.hdrScale();
     for (const entry of this.agentOrbs.values()) {
       const v = entry.visual;
       const mat = entry.orb.material as THREE.MeshStandardMaterial;
@@ -2501,7 +3080,7 @@ export class SceneManager {
 
       // Pulse: modulate emissive around the published baseline.
       if (v.pulseSpeed > 0) {
-        mat.emissiveIntensity = v.emissiveBase + Math.sin(motion * v.pulseSpeed + entry.phase) * v.pulseAmplitude;
+        mat.emissiveIntensity = (v.emissiveBase + Math.sin(motion * v.pulseSpeed + entry.phase) * v.pulseAmplitude) * hdr;
       }
 
       // Complete fade: ramp opacity 1→0 over 60s, then hide the orb.
@@ -2559,10 +3138,12 @@ export class SceneManager {
         Math.sin(motion * 2 + (ud(gem).bobPhase as number)) * 0.15;
     }
 
+    this.keepMarkersReadable();
+
     // Pulse critical-priority warning beacons (slow aircraft-light blink)
     if (this.roofBeacons.length > 0) {
       const blink = (Math.sin(motion * 2.4) + 1) / 2;
-      const intensity = 0.3 + blink * 2.0;
+      const intensity = (0.3 + blink * 2.0) * this.hdrScale();
       for (const beacon of this.roofBeacons) {
         (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
       }
@@ -2582,9 +3163,9 @@ export class SceneManager {
     }
 
     // Process launch effects (dramatic pulse when launching Claude)
-    const now = performance.now();
+    const launchNow = performance.now();
     for (const [building, effect] of this.launchEffects) {
-      const age = now - effect.startTime;
+      const age = launchNow - effect.startTime;
       const progress = age / effect.duration;
 
       if (progress >= 1.0) {
@@ -2638,16 +3219,182 @@ export class SceneManager {
 
     this.controls.update();
 
+    if (this.contactShadowsDirty) this.syncContactShadows();
+
     // Render with composer (bloom) or direct renderer
-    if (this.composer) {
-      this.composer.render();
-    } else {
-      this.renderer.render(this.scene, this.camera);
-    }
+    this.renderFrame();
 
     // Labels always render last (on top, not affected by bloom)
     this.labelRenderer.render(this.scene, this.camera);
+
+    this.cpuStats.push(performance.now() - frameStart);
+    if (this.perfOverlay && frameStart - this.lastPerfPaint > 500) {
+      this.lastPerfPaint = frameStart;
+      this.paintPerfOverlay();
+    }
   };
+
+  /** Active graphics tier, or null when the host doesn't use tiers (GFX-009). */
+  getQualityTier(): QualityTier | null {
+    return this.tier;
+  }
+
+  private updateTierLabel(): void {
+    if (!this.qualitySetting || !this.tier) { this.tierLabel = null; return; }
+    const probing = this.qualitySetting === 'auto' && !this.autoProbeDone;
+    this.tierLabel = this.qualitySetting === 'auto'
+      ? `auto ${probing ? '(probing) ' : ''}→ ${this.tier}`
+      : this.tier;
+  }
+
+  /** Per-frame quality bookkeeping: Auto probe, adaptive resolution, DPR changes. */
+  private updateQuality(now: number, frameInterval: number): void {
+    const probe = this.autoProbe;
+    if (probe && now >= probe.startAt) {
+      if (frameInterval > 0) probe.stats.push(frameInterval);
+      if (now - probe.startAt >= AUTO_PROBE_MS && probe.stats.count >= AUTO_PROBE_MIN_SAMPLES) {
+        const picked = pickAutoTier(probe.stats.median());
+        debugLog('Auto quality probe', { medianMs: probe.stats.median(), picked });
+        this.autoProbe = null;
+        this.autoProbeDone = true;
+        if (picked !== this.tier) this.applyQualityTier(picked);
+        else this.updateTierLabel();
+      }
+    }
+
+    if (this.qualitySetting && frameInterval > 0) {
+      const changed = this.adaptive.update(frameInterval, now - this.lastCameraMoveAt);
+      if (changed !== null) this.applyPixelRatio();
+    }
+
+    // Moving the window to a monitor with another scale changes the DPR
+    // without resizing the container, so poll it (cheaply) once a second.
+    if (now - this.lastDprCheck > 1000) {
+      this.lastDprCheck = now;
+      if (window.devicePixelRatio !== this.lastDevicePixelRatio) {
+        this.lastDevicePixelRatio = window.devicePixelRatio;
+        this.applyPixelRatio();
+      }
+    }
+  }
+
+  /** Renderer + composer pixel ratio from the DPR, the tier cap and the adaptive scale. */
+  private applyPixelRatio(): void {
+    const pr = effectivePixelRatio(window.devicePixelRatio, this.tierConfig.pixelRatioCap, this.adaptive.scale);
+    if (Math.abs(pr - this.renderer.getPixelRatio()) < 1e-3) return;
+    this.renderer.setPixelRatio(pr);
+    if (this.composer) {
+      this.composer.setPixelRatio(pr);
+      this.composer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+  }
+
+  /**
+   * Switch graphics tier at runtime (GFX-009) — used when the Auto probe
+   * settles. Pixel ratio, MSAA, bloom resolution, shadows and reflections
+   * change in place; wide lines need new geometry, so the host is asked to
+   * rebuild.
+   */
+  private applyQualityTier(tier: QualityTier): void {
+    const prev = this.tierConfig;
+    const cfg = TIER_CONFIG[tier];
+    const bloomWasActive = this.bloomActive();
+    const shadowsWereActive = this.shadowsActive();
+    this.tier = tier;
+    this.tierConfig = cfg;
+    this.updateTierLabel();
+
+    this.applyPixelRatio();
+
+    if (this.composer) {
+      const caps = this.renderer.capabilities;
+      const samples = caps.isWebGL2 ? Math.min(cfg.msaaSamples, caps.maxSamples) : 0;
+      if (this.composer.renderTarget2.samples !== samples) {
+        // Releasing the target makes three re-create it with the new count.
+        this.composer.renderTarget2.dispose();
+        this.composer.renderTarget2.samples = samples;
+      }
+      this.bloomScale = cfg.bloom === 'half' ? 0.5 : 1;
+      if (this.bloomPass) this.bloomPass.scale = this.bloomScale;
+      this.composer.setSize(this.container.clientWidth, this.container.clientHeight);
+    }
+    this.msaaSamples = cfg.msaaSamples;
+
+    const shadowsOn = this.shadowsActive();
+    if (shadowsOn !== shadowsWereActive) {
+      this.renderer.shadowMap.enabled = shadowsOn;
+      // Shadow support is compiled into each program: rebuild them.
+      this.scene.traverse((obj) => {
+        const mat = (obj as THREE.Mesh).material;
+        if (!mat) return;
+        for (const m of Array.isArray(mat) ? mat : [mat]) m.needsUpdate = true;
+      });
+    }
+    if (cfg.shadowMapSize !== prev.shadowMapSize) {
+      this.keyLight.shadow.mapSize.set(cfg.shadowMapSize, cfg.shadowMapSize);
+      this.keyLight.shadow.map?.dispose();
+      this.keyLight.shadow.map = null;
+    }
+    this.invalidateShadows();
+
+    const bloomOn = this.bloomActive();
+    this.reflections = cfg.reflections;
+    for (const entry of this.parts.values()) {
+      const u = entry.shaderMaterial?.uniforms;
+      if (!u) continue;
+      if (u.uReflect) u.uReflect.value = cfg.reflections ? SceneManager.REFLECTION_STRENGTH : 0;
+      if (bloomOn !== bloomWasActive && u.uEmissive) u.uEmissive.value = bloomOn ? SceneManager.HDR_WINDOWS : 1;
+    }
+    if (bloomOn !== bloomWasActive) {
+      for (const entry of this.agentOrbs.values()) this.applyOrbState(entry);
+    }
+
+    if (cfg.wideLines !== this.wideLines) {
+      this.wideLines = cfg.wideLines;
+      this.onRequestRebuild?.();
+    }
+  }
+
+  /** Current frame-timing and renderer numbers (overlay, QA scripts, Auto tier). */
+  getPerfSnapshot(): PerfSnapshot {
+    const frameMs = this.frameStats.median();
+    return {
+      frameMs,
+      frameP90Ms: this.frameStats.quantile(0.9),
+      cpuMs: this.cpuStats.median(),
+      fps: frameMs > 0 ? 1000 / frameMs : 0,
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      pixelRatio: this.renderer.getPixelRatio(),
+      tier: this.tierLabel,
+    };
+  }
+
+  /**
+   * Debug overlay with frame ms, draw calls, triangles and pixel ratio. Off by
+   * default; hosts toggle it (the plugin has a command for it).
+   */
+  setPerfOverlay(enabled: boolean): void {
+    if (enabled && !this.perfOverlay) {
+      this.perfOverlay = appendDiv(this.container, 'hypernovum-perf-overlay');
+      this.lastPerfPaint = 0;
+    } else if (!enabled && this.perfOverlay) {
+      this.perfOverlay.remove();
+      this.perfOverlay = null;
+    }
+  }
+
+  isPerfOverlayEnabled(): boolean {
+    return this.perfOverlay !== null;
+  }
+
+  private paintPerfOverlay(): void {
+    const el = this.perfOverlay;
+    if (!el) return;
+    const lines = formatPerfSnapshot(this.getPerfSnapshot());
+    while (el.childElementCount < lines.length) appendDiv(el);
+    lines.forEach((text, i) => { el.children[i].textContent = text; });
+  }
 
   private onResize(): void {
     const width = this.container.clientWidth;
@@ -2656,6 +3403,7 @@ export class SceneManager {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
     this.labelRenderer.setSize(width, height);
+    this.lineResolution.set(width, height);
 
     // Resize composer if bloom is enabled
     if (this.composer) {
@@ -2669,6 +3417,7 @@ export class SceneManager {
   dispose(): void {
     if (this.animationId !== null) window.cancelAnimationFrame(this.animationId);
     this.resizeObserver.disconnect();
+    this.removeWindowFocusListener?.();
     this.controls.dispose();
     this.highlight.dispose();
     if (this.composer) {
@@ -2692,8 +3441,13 @@ export class SceneManager {
       this.arteryManager = null;
     }
     this.renderer.dispose();
+    // dispose() frees three's GPU resources but leaves the context itself alive
+    // until GC — and every settings change reloads the view, stacking up
+    // contexts. Lose it explicitly so a closed view holds none (GL-001).
+    this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
     this.labelRenderer.domElement.remove();
+    this.setPerfOverlay(false);
   }
 
   getScene(): THREE.Scene { return this.scene; }
@@ -2711,11 +3465,7 @@ export class SceneManager {
    * HUD overlays and CSS2D labels are DOM, so the capture is a clean render.
    */
   captureSnapshot(): string {
-    if (this.composer) {
-      this.composer.render();
-    } else {
-      this.renderer.render(this.scene, this.camera);
-    }
+    this.renderFrame();
     return this.renderer.domElement.toDataURL('image/png');
   }
 
@@ -2730,24 +3480,10 @@ export class SceneManager {
   /** Smoothly animate camera back to default overhead position */
   animateCameraToDefault(duration = 1000): void {
     const projects = this.buildings.map(b => projectOf(b)).filter(Boolean) as ProjectData[];
-    if (projects.length === 0) return;
-
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of projects) {
-      if (!p.position) continue;
-      minX = Math.min(minX, p.position.x);
-      maxX = Math.max(maxX, p.position.x);
-      minZ = Math.min(minZ, p.position.z);
-      maxZ = Math.max(maxZ, p.position.z);
-    }
-    const centerX = (minX + maxX) / 2;
-    const centerZ = (minZ + maxZ) / 2;
-    const sizeX = maxX - minX + 30;
-    const sizeZ = maxZ - minZ + 30;
-    const maxSize = Math.max(sizeX, sizeZ, 50);
-    const distance = maxSize * 1.1;
-    const targetPos = new THREE.Vector3(centerX, distance * 0.6, centerZ + distance * 0.7);
-    const targetLookAt = new THREE.Vector3(centerX, 0, centerZ);
+    const pose = this.overviewPose(projects);
+    if (!pose) return;
+    const targetPos = pose.position;
+    const targetLookAt = pose.target;
     const startPos = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
     const startTime = performance.now();

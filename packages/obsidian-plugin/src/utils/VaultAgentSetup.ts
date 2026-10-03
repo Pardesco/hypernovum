@@ -96,7 +96,7 @@ questions:              # optional open research questions — rendered as quest
 - **status** → building color: active = green, blocked = red, paused = blue, complete = purple.
 - **priority** → building height: critical is tallest, low is shortest.
 - **category** → free-form; identical values share a city district.
-- **projectDir** → lets Hypernovum read Git activity and launch agents in the right folder.
+- **projectDir** → lets Hypernovum read Git activity and launch agents in the right folder. On Windows, write it unquoted, single-quoted or with forward slashes — never a double-quoted backslash path like \`"C:\\Users\\..."\`: that is invalid YAML and Obsidian drops the note's whole frontmatter.
 
 Keep frontmatter values current as work progresses (e.g. flip \`status\` to \`blocked\` when a project stalls) — the city is only as truthful as the notes.
 
@@ -145,8 +145,8 @@ ${buildStopExample(heartbeat)}
 - Reuse one \`--id\` for every ping in a session so they all update the same orb — pick any stable string. (From a Claude Code hook, pass \`--hook\` instead: the script then reads the real \`session_id\` from the hook's stdin JSON. There is no \`$CLAUDE_SESSION_ID\` environment variable.)
 - \`--state\`: starting | planning | reading | editing | running | testing | reviewing | waiting | blocked | complete | failed (inferred from \`--tool\`/\`--action\` if omitted).
 - \`--file\` (project-relative) enables same-file conflict detection between agents.
-- \`--project\` should match the project note's title.
-- Snapshots land in \`<vault>/.hypernovum/agents/<sessionId>.json\`; the plugin treats pings older than 10s as idle, then stale.
+- \`--cwd\` (your working directory) is the most reliable way to attach a session to a project: it is matched against each project's \`projectDir\` first. \`--project\` is the fallback and should match the project note's title.
+- Snapshots land in \`<vault>/.hypernovum/agents/<sessionId>.json\`; a ping keeps its working state for 90s; after that the session shows as stale, and it is dropped after 15 minutes of silence.
 
 The script itself lives at \`${heartbeat.scriptPath}\` — Hypernovum installs and updates it, so don't edit it by hand.
 
