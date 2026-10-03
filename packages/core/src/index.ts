@@ -23,7 +23,9 @@ export { presetForProject } from './renderers/TowerPresets';
 export type { TowerBuildInput, TowerBuildResult } from './renderers/TowerPresets';
 export { orbVisualForState, stateTintsHost, ORB_COLORS } from './scene/agentOrbVisual';
 export type { OrbVisual } from './scene/agentOrbVisual';
-export type { AgentOrbInput } from './scene/SceneManager';
+export type { AgentOrbInput, CameraState, BuildCityOptions } from './scene/SceneManager';
+export { computeCityFrame, shouldFrameOnBuild } from './scene/cameraFraming';
+export type { CityFrame } from './scene/cameraFraming';
 
 // Layout
 export { BinPacker } from './layout/BinPacker';

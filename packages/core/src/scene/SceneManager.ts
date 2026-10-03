@@ -25,6 +25,7 @@ import { appendDiv, appendSpan, appendTooltipRow } from '../utils/dom';
 import { orbVisualForState, stateTintsHost, type OrbVisual } from './agentOrbVisual';
 import type { InteractionStore } from '../stores/interactionStore';
 import { ud, projectOf, setUserData } from './sceneUserData';
+import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFraming';
 
 /** Release the GPU resources a mesh or line owns. */
 function disposeRenderable(obj: {
@@ -36,12 +37,36 @@ function disposeRenderable(obj: {
   else obj.material.dispose();
 }
 
+/**
+ * A camera pose (CAM-001). Lets a host carry the user's view across a scene
+ * rebuild that tears the SceneManager down — a settings change or a vault-mode
+ * toggle reloads the whole view.
+ */
+export interface CameraState {
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+}
+
+/** Options for {@link SceneManager.buildCity}. */
+export interface BuildCityOptions {
+  /**
+   * Re-frame the camera on the new city even though it was already framed —
+   * for when the city changed character (e.g. whole-vault fallback → projects).
+   */
+  refit?: boolean;
+}
+
 interface SceneManagerOptions {
   savedPositions?: BlockPosition[];
   onSaveLayout?: (positions: BlockPosition[]) => void;
   settings?: HypernovumSettings;
   /** Shared interaction state (selection/hover/move mode). Optional for API compat. */
   interactionStore?: InteractionStore;
+  /**
+   * Camera pose to restore on the first build instead of framing the whole
+   * city (CAM-001). Omit for the default overview.
+   */
+  initialCamera?: CameraState | null;
 }
 
 interface LabelInfo {
@@ -140,6 +165,11 @@ export class SceneManager {
   private dragAccumulator = new THREE.Vector2(0, 0); // Accumulate small movements
   private cityBounds = { centerX: 0, centerZ: 0, radius: 50 }; // Pan boundary
 
+  // Camera framing (CAM-001): frame the city once per view, not on every rebuild.
+  private hasFramed = false;
+  private lastProjectCount = 0;
+  private initialCamera: CameraState | null = null;
+
   // Layout persistence
   private savedPositions: Map<string, { offsetX: number; offsetZ: number }> = new Map();
   private blockOffsets: Map<string, { offsetX: number; offsetZ: number }> = new Map();
@@ -208,6 +238,7 @@ export class SceneManager {
     }
     this.onSaveLayout = options?.onSaveLayout;
     this.store = options?.interactionStore ?? null;
+    this.initialCamera = options?.initialCamera ?? null;
     this.highlight = new HighlightManager(this.parts, this.store, {
       bloom: options?.settings?.enableBloom ?? false,
     });
@@ -403,7 +434,7 @@ export class SceneManager {
     }
   }
 
-  buildCity(projects: ProjectData[], districts: Map<string, District>): void {
+  buildCity(projects: ProjectData[], districts: Map<string, District>, options?: BuildCityOptions): void {
     // Capture streaming state before clearing (clearCity destroys buildingPathMap)
     const wasStreaming = this.arteryManager?.getIsStreaming() ?? false;
     const streamingPath = this.arteryManager?.getStreamingPath() ?? null;
@@ -462,7 +493,7 @@ export class SceneManager {
     // Position Neural Core at city center
     this.positionNeuralCore(projects);
 
-    this.fitCameraToCity(projects);
+    this.frameAfterBuild(projects, options?.refit === true);
 
     // Re-establish streaming if it was active before rebuild
     if (wasStreaming && streamingPath) {
@@ -1563,33 +1594,61 @@ export class SceneManager {
     return new THREE.Color(statusColor(status));
   }
 
+  private cityFrameFor(projects: ProjectData[]): CityFrame | null {
+    const points: { x: number; z: number }[] = [];
+    for (const p of projects) if (p.position) points.push(p.position);
+    return computeCityFrame(points);
+  }
+
   private fitCameraToCity(projects: ProjectData[]): void {
-    if (projects.length === 0) return;
-
-    let minX = Infinity, maxX = -Infinity;
-    let minZ = Infinity, maxZ = -Infinity;
-
-    for (const p of projects) {
-      if (!p.position) continue;
-      minX = Math.min(minX, p.position.x);
-      maxX = Math.max(maxX, p.position.x);
-      minZ = Math.min(minZ, p.position.z);
-      maxZ = Math.max(maxZ, p.position.z);
-    }
-
-    const centerX = (minX + maxX) / 2;
-    const centerZ = (minZ + maxZ) / 2;
-    const sizeX = maxX - minX + 30;
-    const sizeZ = maxZ - minZ + 30;
-    const maxSize = Math.max(sizeX, sizeZ, 50);
-
-    const distance = maxSize * 1.1;
-    this.camera.position.set(centerX, distance * 0.6, centerZ + distance * 0.7);
-    this.controls.target.set(centerX, 0, centerZ);
+    const frame = this.cityFrameFor(projects);
+    if (!frame) return;
+    this.camera.position.set(frame.position.x, frame.position.y, frame.position.z);
+    this.controls.target.set(frame.centerX, 0, frame.centerZ);
     this.controls.update();
-
     // Store bounds for pan clamping
-    this.cityBounds = { centerX, centerZ, radius: maxSize * 0.75 };
+    this.cityBounds = { centerX: frame.centerX, centerZ: frame.centerZ, radius: frame.radius };
+  }
+
+  /**
+   * Post-build camera policy (CAM-001). The pan clamp always follows the new
+   * city, but the camera itself only moves on the view's first build, on an
+   * empty → non-empty transition, or when the host asks for a refit. Anything
+   * else — a note save, Prepare vault, a lens change — keeps the user's view.
+   */
+  private frameAfterBuild(projects: ProjectData[], refit: boolean): void {
+    const frame = this.cityFrameFor(projects);
+    if (frame) this.cityBounds = { centerX: frame.centerX, centerZ: frame.centerZ, radius: frame.radius };
+
+    const frameNow = shouldFrameOnBuild({
+      hasFramed: this.hasFramed,
+      previousCount: this.lastProjectCount,
+      count: projects.length,
+      refit,
+    });
+    if (frameNow) {
+      if (!this.hasFramed && this.initialCamera) this.setCameraState(this.initialCamera);
+      else this.fitCameraToCity(projects);
+      this.hasFramed = true;
+    }
+    this.initialCamera = null; // only ever applies to the first build
+    this.lastProjectCount = projects.length;
+  }
+
+  /** Current camera pose, for a host to restore after a view reload (CAM-001). */
+  getCameraState(): CameraState {
+    const p = this.camera.position;
+    const t = this.controls.target;
+    return { position: { x: p.x, y: p.y, z: p.z }, target: { x: t.x, y: t.y, z: t.z } };
+  }
+
+  /** Move the camera to a saved pose (CAM-001). */
+  setCameraState(state: CameraState): void {
+    const { position: p, target: t } = state;
+    if (![p.x, p.y, p.z, t.x, t.y, t.z].every(Number.isFinite)) return;
+    this.camera.position.set(p.x, p.y, p.z);
+    this.controls.target.set(t.x, t.y, t.z);
+    this.controls.update();
   }
 
   private onMouseMove(event: MouseEvent): void {
@@ -2730,24 +2789,10 @@ export class SceneManager {
   /** Smoothly animate camera back to default overhead position */
   animateCameraToDefault(duration = 1000): void {
     const projects = this.buildings.map(b => projectOf(b)).filter(Boolean) as ProjectData[];
-    if (projects.length === 0) return;
-
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of projects) {
-      if (!p.position) continue;
-      minX = Math.min(minX, p.position.x);
-      maxX = Math.max(maxX, p.position.x);
-      minZ = Math.min(minZ, p.position.z);
-      maxZ = Math.max(maxZ, p.position.z);
-    }
-    const centerX = (minX + maxX) / 2;
-    const centerZ = (minZ + maxZ) / 2;
-    const sizeX = maxX - minX + 30;
-    const sizeZ = maxZ - minZ + 30;
-    const maxSize = Math.max(sizeX, sizeZ, 50);
-    const distance = maxSize * 1.1;
-    const targetPos = new THREE.Vector3(centerX, distance * 0.6, centerZ + distance * 0.7);
-    const targetLookAt = new THREE.Vector3(centerX, 0, centerZ);
+    const frame = this.cityFrameFor(projects);
+    if (!frame) return;
+    const targetPos = new THREE.Vector3(frame.position.x, frame.position.y, frame.position.z);
+    const targetLookAt = new THREE.Vector3(frame.centerX, 0, frame.centerZ);
     const startPos = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
     const startTime = performance.now();

@@ -3,7 +3,7 @@ import { existsSync, statSync } from 'fs';
 import { execFile } from 'child_process';
 import * as path from 'path';
 import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, createInteractionStore } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult, CameraState } from '@hypernovum/core';
 import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
@@ -328,6 +328,8 @@ export class HypernovumView extends ItemView {
       },
       settings: this.settings,
       interactionStore: this.interactionStore,
+      // Non-null only when this view replaces one reloaded for a setting change.
+      initialCamera: this.plugin.takePendingCameraState(),
     });
 
     // Add legend overlay
@@ -784,9 +786,22 @@ category: default
     if (this.sceneManager) {
       const districts = this.binPacker.packDistricts(this.allProjects);
       this.sceneManager.clearAllWeather();
-      this.sceneManager.buildCity(this.allProjects, districts);
+      // The camera keeps its pose across rebuilds (CAM-001); re-frame only when
+      // the city switches between whole-vault fallback and project mode, since
+      // the old pose then points at a layout that no longer exists.
+      const refit = this.lastBuiltFallback !== null && this.lastBuiltFallback !== this.vaultFallback;
+      this.lastBuiltFallback = this.vaultFallback;
+      this.sceneManager.buildCity(this.allProjects, districts, { refit });
     }
     this.applyView();
+  }
+
+  /** Fallback mode of the previous build; null before the first one. */
+  private lastBuiltFallback: boolean | null = null;
+
+  /** Current camera pose, carried across a reload by the plugin (CAM-001). */
+  getCameraState(): CameraState | null {
+    return this.sceneManager?.getCameraState() ?? null;
   }
 
   /** Apply filters/search/lens as a visibility + retint pass — no repack. */

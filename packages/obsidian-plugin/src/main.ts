@@ -1,4 +1,5 @@
 import { Notice, Plugin } from 'obsidian';
+import type { CameraState } from '@hypernovum/core';
 import { HypernovumView, VIEW_TYPE } from './views/HypernovumView';
 import { HypernovumSettings, DEFAULT_SETTINGS, SettingsTab } from './settings/SettingsTab';
 import { ProjectParser } from './parsers/ProjectParser';
@@ -294,8 +295,22 @@ export default class HypernovumPlugin extends Plugin {
   async reloadOpenViews(): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     if (leaves.length === 0) return;
+    // A reload is an implementation detail of applying a setting — the user's
+    // camera should survive it (CAM-001).
+    const view = leaves[0].view;
+    this.pendingCameraState = view instanceof HypernovumView ? view.getCameraState() : null;
     leaves.forEach((leaf) => leaf.detach());
     await this.activateView();
+  }
+
+  /** Camera pose handed from a view being reloaded to its replacement (CAM-001). */
+  private pendingCameraState: CameraState | null = null;
+
+  /** Take (and clear) the camera pose left by the last reload, if any. */
+  takePendingCameraState(): CameraState | null {
+    const state = this.pendingCameraState;
+    this.pendingCameraState = null;
+    return state;
   }
 
   async loadSettings(): Promise<void> {
