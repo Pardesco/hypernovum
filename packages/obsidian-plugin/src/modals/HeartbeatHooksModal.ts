@@ -47,7 +47,7 @@ export class HeartbeatHooksModal extends Modal {
     contentEl.createEl('p', {
       text:
         'Run this in a terminal, then open the code city — an orb should appear on the ' +
-        'matching building for about 10 seconds.',
+        'matching building and keep its working state for about 90 seconds, then turn grey.',
     });
     this.addCopyBlock(
       contentEl,
