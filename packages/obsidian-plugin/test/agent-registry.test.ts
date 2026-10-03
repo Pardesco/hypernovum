@@ -3,7 +3,7 @@ import {
   deriveAgentState,
   inferStateFromTool,
   AgentRegistry,
-  FRESH_MS,
+  LIVE_MS,
   WAITING_MAX_MS,
   DISCONNECT_MS,
 } from '../src/monitors/AgentRegistry';
@@ -69,15 +69,44 @@ describe('deriveAgentState (§10 matrix)', () => {
     expect(deriveAgentState(presence({ state: 'blocked', lastPing: NOW - WAITING_MAX_MS - 1 }), NOW)).toBe('stale');
   });
 
-  it('age ladder: waiting → stale → disconnected', () => {
-    expect(deriveAgentState(presence({ lastPing: NOW - (FRESH_MS + 5_000) }), NOW)).toBe('stale');
+  it('age ladder: live → stale → disconnected, never inferred waiting', () => {
+    expect(deriveAgentState(presence({ lastPing: NOW - (LIVE_MS + 5_000) }), NOW)).toBe('stale');
     expect(deriveAgentState(presence({ lastPing: NOW - (WAITING_MAX_MS + 5_000) }), NOW)).toBe('stale');
     expect(deriveAgentState(presence({ lastPing: NOW - (DISCONNECT_MS + 5_000) }), NOW)).toBe('disconnected');
   });
 
-  it('explicit fresh state overrides the age ladder only when fresh', () => {
-    // stale-aged snapshot with an explicit editing state → age ladder wins (waiting)
-    expect(deriveAgentState(presence({ state: 'editing', lastPing: NOW - 60_000 }), NOW)).toBe('stale');
+  it('AGT-010: one --state=editing ping reads editing for 90s, stale after, gone after 15min', () => {
+    const p = presence({ state: 'editing', lastPing: NOW });
+    expect(LIVE_MS).toBe(90_000);
+    // The 10-60s generation gap between tool calls used to flip this to stale.
+    for (const age of [0, 10_001, 30_000, 60_000, 90_000]) {
+      expect(deriveAgentState(p, NOW + age)).toBe('editing');
+    }
+    expect(deriveAgentState(p, NOW + 90_001)).toBe('stale');
+    expect(deriveAgentState(p, NOW + DISCONNECT_MS)).toBe('stale');
+    expect(deriveAgentState(p, NOW + DISCONNECT_MS + 1)).toBe('disconnected');
+  });
+
+  it('AGT-010: every explicit live state (and tool inference) gets the same window', () => {
+    for (const state of ['planning', 'reading', 'editing', 'running', 'testing', 'reviewing', 'starting']) {
+      expect(deriveAgentState(presence({ state, lastPing: NOW - 45_000 }), NOW)).toBe(state);
+    }
+    // --hook pings carry no --state, so a busy Claude Code session lives on inference.
+    expect(deriveAgentState(presence({ tool: 'Edit', lastPing: NOW - 45_000 }), NOW)).toBe('editing');
+    expect(deriveAgentState(presence({ tool: 'Bash', action: 'npm test', lastPing: NOW - 80_000 }), NOW)).toBe('testing');
+  });
+
+  it('AGT-010: blocked, failed and complete keep their 0.6.0 behaviour', () => {
+    expect(deriveAgentState(presence({ state: 'blocked', lastPing: NOW - 100_000 }), NOW)).toBe('blocked');
+    expect(deriveAgentState(presence({ state: 'blocked', lastPing: NOW - WAITING_MAX_MS - 1 }), NOW)).toBe('stale');
+    expect(deriveAgentState(presence({ state: 'failed', lastPing: NOW - 100_000 }), NOW)).toBe('failed');
+    expect(deriveAgentState(presence({ state: 'failed', lastPing: NOW - WAITING_MAX_MS - 1 }), NOW)).toBe('stale');
+    expect(deriveAgentState(presence({ state: 'complete', lastPing: NOW - DISCONNECT_MS * 2 }), NOW)).toBe('complete');
+  });
+
+  it('explicit live state overrides the age ladder only inside the live window', () => {
+    expect(deriveAgentState(presence({ state: 'editing', lastPing: NOW - 60_000 }), NOW)).toBe('editing');
+    expect(deriveAgentState(presence({ state: 'editing', lastPing: NOW - LIVE_MS - 1 }), NOW)).toBe('stale');
   });
 });
 

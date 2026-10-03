@@ -14,6 +14,7 @@
  * implements Obsidian's HTMLElement helpers (createDiv/createSpan/createEl/…).
  */
 import { describe, it, expect, vi } from 'vitest';
+import { LIVE_MS } from '../src/monitors/AgentRegistry';
 
 vi.mock('obsidian', () => {
   // Callable-or-constructible stub per export, so `class X extends Modal` and
@@ -191,9 +192,9 @@ describe('city overview fleet summary (AGT-009 regression)', () => {
     (view as unknown as FleetUpdate).onFleetUpdate([presence({ lastPing: now })]);
     expect(panel.findAll('fleet-summary')[0].text).toBe('1 active · 0 waiting · 0 conflicts');
 
-    // Same session, but pings stopped 30s ago → §10 age ladder puts it in
+    // Same session, but pings stopped past the live window → §10 age ladder puts it in
     // 'stale'; the overview must follow without any selection happening.
-    (view as unknown as FleetUpdate).onFleetUpdate([presence({ lastPing: now - 30_000 })]);
+    (view as unknown as FleetUpdate).onFleetUpdate([presence({ lastPing: now - (LIVE_MS + 30_000) })]);
     expect(panel.findAll('fleet-summary')[0].text).toBe('0 active · 0 waiting · 0 conflicts');
   });
 
@@ -203,9 +204,9 @@ describe('city overview fleet summary (AGT-009 regression)', () => {
     (view as unknown as Inspector).updateInspector();
     expect(panel.findAll('warning-row')).toHaveLength(0);
 
-    // A waiting agent is a §11 warning — it must appear without a selection.
+    // A stale agent is a §11 warning — it must appear without a selection.
     (view as unknown as FleetUpdate).onFleetUpdate([
-      presence({ lastPing: Date.now() - 30_000 }),
+      presence({ lastPing: Date.now() - (LIVE_MS + 30_000) }),
     ]);
     const rows = panel.findAll('warning-row');
     expect(rows.length).toBeGreaterThan(0);

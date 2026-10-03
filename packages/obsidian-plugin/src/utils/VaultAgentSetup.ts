@@ -146,7 +146,7 @@ ${buildStopExample(heartbeat)}
 - \`--state\`: starting | planning | reading | editing | running | testing | reviewing | waiting | blocked | complete | failed (inferred from \`--tool\`/\`--action\` if omitted).
 - \`--file\` (project-relative) enables same-file conflict detection between agents.
 - \`--project\` should match the project note's title.
-- Snapshots land in \`<vault>/.hypernovum/agents/<sessionId>.json\`; the plugin treats pings older than 10s as idle, then stale.
+- Snapshots land in \`<vault>/.hypernovum/agents/<sessionId>.json\`; a ping keeps its working state for 90s; after that the session shows as stale, and it is dropped after 15 minutes of silence.
 
 The script itself lives at \`${heartbeat.scriptPath}\` — Hypernovum installs and updates it, so don't edit it by hand.
 

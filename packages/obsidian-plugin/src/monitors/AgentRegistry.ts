@@ -3,8 +3,8 @@
  *
  * Consumes the merged fleet (AgentPresence[]) each poll and maintains a
  * coherent Map<sessionId, AgentSession> with:
- *   - the §10 lifecycle state (explicit state wins when fresh; else inferred
- *     from tool/action; else the age ladder waiting → stale → disconnected),
+ *   - the §10 lifecycle state (explicit state wins within the live window;
+ *     else inferred from tool/action; else the age ladder stale → disconnected),
  *   - accumulated filesTouched per (session, project),
  *   - stable startedAt (reset only when a same-id session restarts).
  *
@@ -39,8 +39,15 @@ export interface AgentSession {
 }
 
 // §10 timing bands
-export const FRESH_MS = 10_000;          // explicit state / tool inference window
-export const WAITING_MAX_MS = 120_000;   // 10s–120s → waiting
+/**
+ * How long a ping keeps its working state (AGT-010). Real Claude Code and Codex
+ * sessions often generate for 10–60 s between tool calls, and the old 10 s
+ * window flipped a busy agent's orb to stale between every pair of calls.
+ * Covers an explicit live state and a state inferred from the pinged tool —
+ * hook pings (`--hook`) carry no `--state`, so inference is the common path.
+ */
+export const LIVE_MS = 90_000;
+export const WAITING_MAX_MS = 120_000;   // blocked/failed stay red this long, then stale
 export const DISCONNECT_MS = 15 * 60_000; // >15min → disconnected (removed)
 
 /** Live states that an explicit fresh snapshot may assert directly. */
@@ -78,14 +85,15 @@ export function deriveAgentState(presence: AgentPresence, now: number): AgentSta
   // Disconnect ladder end (rule 4).
   if (age > DISCONNECT_MS) return 'disconnected';
 
-  // Fresh: explicit live state wins (rule 1), else infer from tool/action (rule 2).
-  if (age <= FRESH_MS) {
+  // Live window: explicit live state wins (rule 1), else infer from tool/action (rule 2).
+  if (age <= LIVE_MS) {
     if (explicit && LIVE_STATES.has(explicit)) return explicit;
     return inferStateFromTool(presence.tool, presence.action);
   }
 
-  // 10s–120s → waiting (rule 3); 120s–15min → stale (rule 4).
-  return 'stale'; // Silence is missing telemetry, not evidence of waiting for a person.
+  // 90s–15min → stale (rule 4). Never 'waiting': silence is missing telemetry,
+  // not evidence that the agent is waiting for a person (rule 3 is explicit-only).
+  return 'stale';
 }
 
 /** Forward-slash + trim; conflict detection normalizes further against project dir. */
@@ -147,7 +155,7 @@ export class AgentRegistry {
       if (s.dirtyAtStart === undefined && p.dirtyAtStart !== undefined) s.dirtyAtStart = p.dirtyAtStart;
       s.state = deriveAgentState(p, now);
       s.checkoutPath = p.cwd;
-      s.connection = now - p.lastPing > DISCONNECT_MS ? 'disconnected' : now - p.lastPing > FRESH_MS ? 'stale' : 'fresh';
+      s.connection = now - p.lastPing > DISCONNECT_MS ? 'disconnected' : now - p.lastPing > LIVE_MS ? 'stale' : 'fresh';
       s.outcome = p.state === 'failed' ? 'failed' : 'unverified';
 
       // Accumulate filesTouched per (session, project).
