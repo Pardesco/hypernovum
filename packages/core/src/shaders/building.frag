@@ -11,11 +11,13 @@ uniform float uFloors;        // 0 = legacy auto-density; >0 = real floor count 
 uniform float uDiagrid;       // 0 = off; >0 = draw a diagrid facade (preset D)
 uniform float uWindowCols;    // 0 = legacy per-face density; >0 = explicit column count
 uniform float uEmissive;      // window light multiplier: >1 drives lit windows into HDR for bloom (GFX-002); 0 = unset → 1
+uniform float uReflect;       // strength of the analytic environment reflection (GFX-005); 0 = off
 
 varying vec2 vUv;
-varying vec3 vNormal;         // object-space (legacy classic rim)
+varying vec3 vNormal;         // object-space (unused since GFX-005; kept for the vertex contract)
 varying vec3 vNormalV;        // view-space
 varying vec3 vPosition;
+varying vec3 vViewPos;        // view-space position (GFX-005 view vector)
 
 // Pseudo-random function
 float random(vec2 st) {
@@ -60,17 +62,25 @@ void main() {
   float isFrontier = step(abs(windowID.y - frontierRow), 0.5);
   float frontierRand = random(windowID);
   float frontierLit = isFrontier * step(0.5, frontierRand);
+  float litRow = max(litBase, frontierLit);
 
-  float lightOn = max(litBase, frontierLit);
+  // Occupancy (GFX-005): one hash per floor, one per window. Lit floors keep
+  // ~88% of their windows on and unlit floors show a few late lights, so the
+  // fill line still reads as task progress without a ruler-straight edge.
+  float floorHash = random(vec2(windowID.y, 7.31));
+  float winHash = random(windowID + vec2(floorHash * 13.0, 1.7));
+  float lightOn = litRow > 0.5 ? step(0.12, winHash) : step(0.965, winHash);
 
-  // Window color: warm amber, gold tint when fully complete
-  vec3 windowBaseColor = uLitPercent >= 1.0 ? vec3(1.0, 0.85, 0.4) : vec3(1.0, 0.95, 0.7);
+  // Window color: warm amber (gold when complete), tinted toward the status
+  // color so a district reads as one neighbourhood (GFX-005).
+  vec3 warm = uLitPercent >= 1.0 ? vec3(1.0, 0.85, 0.4) : vec3(1.0, 0.95, 0.7);
+  vec3 windowBaseColor = mix(warm, warm * (0.55 + 0.9 * uColor), 0.35);
 
   // Terminal pulse: lit windows breathe brighter
   float terminalPulse = uPulse * (sin(uTime * 3.0) * 0.3 + 0.3);
 
-  // Per-window brightness variation — occupied floors, not a light switch
-  float winVar = 0.7 + 0.3 * random(windowID + vec2(3.7, 9.1));
+  // Per-window brightness variation, biased per floor — occupied floors, not a light switch
+  float winVar = 0.68 + 0.32 * mix(random(windowID + vec2(3.7, 9.1)), floorHash, 0.4);
   // Lit windows are light sources: with bloom on they are driven above 1.0 so
   // they (and not the facade) clear the bloom threshold (GFX-002).
   float emissive = uEmissive > 0.0 ? uEmissive : 1.0;
@@ -92,38 +102,40 @@ void main() {
     wallColor *= 0.55 + 0.45 * lines; // darken along the diagonal members
   }
 
-  // === SURFACE LIGHTING (parametric only) ===
-  // Classic silhouettes are axis-aligned boxes whose look is tuned around the
-  // flat vertical gradient alone. Lofted profiles need a real normal response
-  // or their taper, waist and facets are literally invisible — which is also
-  // what made facetedNormals pay 3x the vertices for nothing. viewMatrix is a
-  // three.js built-in, so the key and up directions stay fixed in world space.
-  float roofMask = 0.0;
+  // === SURFACE LIGHTING (both styles since GFX-005) ===
+  // A real normal response for every building. viewMatrix is a three.js
+  // built-in, so the key and up directions stay fixed in world space.
+  vec3 N = normalize(vNormalV);
+  vec3 V = normalize(-vViewPos);
+  vec3 keyDir = normalize(mat3(viewMatrix) * vec3(0.45, 0.80, 0.40));
+  vec3 upDir = normalize(mat3(viewMatrix) * vec3(0.0, 1.0, 0.0));
+  float ndl = max(dot(N, keyDir), 0.0);
+  float hemi = 0.85 + 0.15 * dot(N, upDir);
   if (uFloors > 0.5) {
-    vec3 N = normalize(vNormalV);
-    vec3 keyDir = normalize(mat3(viewMatrix) * vec3(0.45, 0.80, 0.40));
-    vec3 upDir = normalize(mat3(viewMatrix) * vec3(0.0, 1.0, 0.0));
-    float ndl = max(dot(N, keyDir), 0.0);
-    float hemi = 0.85 + 0.15 * dot(N, upDir);
-    // A wide key range is what separates one mass from the next. At 0.55-1.0 the
-    // lit and shaded faces of a stacked tower differ by less than the bloom
-    // bleeds, so the steps vanish; 0.34-1.0 keeps them legible through the post
-    // chain. The facade also sits a little darker so windows, ledges and the
-    // outline carry the brightness instead of the whole surface glowing.
+    // A wide key range is what separates one mass from the next on stacked
+    // towers; 0.34-1.0 keeps the steps legible through the post chain.
     wallColor *= (0.34 + 0.66 * ndl) * hemi * 0.86;
-
-    // Roof deck. The camera looks DOWN at roofs more than at any facade, and
-    // the cap inherits v=1 — the brightest value the wall gradient produces —
-    // so an untreated roof was the single brightest surface on the building, in
-    // pure status color. Dark deck instead: greebles and beacons now read
-    // against it, and the parapet lip reads as a lip.
-    roofMask = smoothstep(0.86, 0.97, dot(N, upDir));
-    wallColor = mix(wallColor, wallColor * 0.30, roofMask);
+  } else {
+    // Classic silhouettes were tuned on the flat gradient alone: a gentler key
+    // gives their faces form without dimming the established palette.
+    wallColor *= (0.58 + 0.5 * ndl) * hemi;
   }
+
+  // Roof deck: the camera looks down at roofs, and the cap inherits v=1 — the
+  // brightest value the wall gradient produces. A dark deck lets greebles and
+  // beacons read against it and the parapet read as a lip.
+  float roofMask = smoothstep(0.86, 0.97, dot(N, upDir));
+  wallColor = mix(wallColor, wallColor * 0.30, roofMask);
 
   // === COMBINE ===
   // Windows never run across the roof deck.
-  vec3 finalColor = mix(wallColor, windowColor, isWindow * lightOn * (1.0 - roofMask));
+  float windowMix = isWindow * lightOn * (1.0 - roofMask);
+  vec3 finalColor = mix(wallColor, windowColor, windowMix);
+
+  // === PARAPET HIGHLIGHT (GFX-005) ===
+  // A thin bright band where the facade meets the roof edge.
+  float parapet = smoothstep(0.955, 0.99, vUv.y) * (1.0 - roofMask);
+  finalColor += uColor * parapet * 0.3;
 
   // === GLITCH EFFECTS (Blocked projects) ===
   if (uGlitch > 0.0) {
@@ -158,16 +170,26 @@ void main() {
   float glowAmount = uPulse * 0.25 * (0.7 + pulse * 0.3);
   finalColor += uColor * glowAmount;
 
-  // === EDGE GLOW (rim lighting) ===
-  // Constant faint fresnel gives every tower a glass edge; pulse/completion boost it.
-  // Parametric uses the VIEW-space normal, which makes this an actual fresnel —
-  // in view space +Z points at the camera. Classic keeps the object-space normal
-  // it was tuned against (a fixed stripe, but changing it would alter every
-  // shipped classic building).
-  vec3 rimN = uFloors > 0.5 ? normalize(vNormalV) : normalize(vNormal);
-  float rim = 1.0 - max(dot(rimN, vec3(0.0, 0.0, 1.0)), 0.0);
-  rim = pow(rim, 2.0);
+  // === FRESNEL RIM (both styles since GFX-005) ===
+  // View-space normal against the true view vector: an actual fresnel, so every
+  // tower gets a glass edge that follows the camera. Pulse/completion boost it.
+  float fresnel = 1.0 - max(dot(N, V), 0.0);
+  float rim = fresnel * fresnel;
   finalColor += uColor * rim * (0.08 + 0.3 * max(uPulse, uLitPercent * 0.3));
+
+  // === CHEAP REFLECTION (GFX-005) ===
+  // Reflect the view ray off the facade and look up an analytic environment
+  // that matches the scene — dark ground, the horizon glow, a faint high strip
+  // — instead of sampling a texture or rendering a probe. Glass (not lit
+  // windows) and walls pick it up most at grazing angles.
+  if (uReflect > 0.0) {
+    vec3 R = reflect(-V, N);
+    float ry = (vec4(R, 0.0) * viewMatrix).y; // view → world (rotation transpose)
+    vec3 env = mix(vec3(0.012, 0.012, 0.03), vec3(0.16, 0.19, 0.42), exp(-abs(ry) * 5.0));
+    env += vec3(0.55, 0.65, 0.9) * smoothstep(0.5, 0.85, ry) * 0.18;
+    float reflectAmt = uReflect * (0.06 + 0.6 * pow(fresnel, 3.0)) * (1.0 - windowMix) * (1.0 - roofMask * 0.6);
+    finalColor += env * reflectAmt;
+  }
 
   // === DECAY DITHERING ===
   if (uDecay > 0.6) {

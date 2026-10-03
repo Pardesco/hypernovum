@@ -42,6 +42,7 @@ export class BuildingShader {
           uDiagrid: { value: 0.0 },
           uWindowCols: { value: 0.0 },
           uEmissive: { value: 1.0 },
+          uReflect: { value: 0.0 },
         },
         vertexShader,
         fragmentShader,
@@ -110,7 +111,7 @@ export class BuildingShader {
    */
   createMaterial(
     project: ProjectData,
-    opts?: { floors?: number; diagrid?: boolean; sides?: number | null; emissive?: number },
+    opts?: { floors?: number; diagrid?: boolean; sides?: number | null; emissive?: number; reflect?: number },
   ): THREE.ShaderMaterial | null {
     if (BuildingShader.compilationFailed) {
       return null;
@@ -136,6 +137,8 @@ export class BuildingShader {
           },
           // Lit-window intensity; > 1 only when a bloom pass will read it (GFX-002).
           uEmissive: { value: opts?.emissive ?? 1.0 },
+          // Analytic environment reflection strength; 0 turns it off (GFX-005).
+          uReflect: { value: opts?.reflect ?? 1.0 },
         },
         vertexShader,
         fragmentShader,

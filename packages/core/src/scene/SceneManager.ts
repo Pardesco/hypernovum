@@ -261,6 +261,10 @@ export class SceneManager {
    * so every outline was 1 px and shimmered or vanished at distance.
    */
   private wideLines = true;
+  /** Analytic environment reflections in the building shader (GFX-005). */
+  private reflections = true;
+  /** Tuned by eye: 1.0 washed shaded facades toward mint; 0.5 is a sheen. */
+  private static readonly REFLECTION_STRENGTH = 0.5;
   /** One shared CSS-pixel resolution for every LineMaterial; onResize updates it. */
   private lineResolution = new THREE.Vector2(1, 1);
   private static readonly EDGE_WIDTH_PX = 1.5;
@@ -1093,6 +1097,7 @@ export class SceneManager {
         diagrid: build.diagrid,
         sides: build.sides,
         emissive: this.hdrScale() > 1 ? SceneManager.HDR_WINDOWS : 1,
+        reflect: this.reflections ? SceneManager.REFLECTION_STRENGTH : 0,
       });
       if (shaderMat) {
         material = shaderMat;
