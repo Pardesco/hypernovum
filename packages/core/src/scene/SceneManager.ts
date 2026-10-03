@@ -37,6 +37,7 @@ import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats'
 import { fitShadowFrustum } from './shadowFit';
 import { minFrameInterval, shouldRenderFrame } from './framePacing';
 import { frameBoxInRect, type FramingBox, type ScreenRect } from './viewFraming';
+import { markerScale } from './markerScale';
 import {
   AUTO_PROBE_MIN_SAMPLES,
   AUTO_PROBE_MS,
@@ -248,6 +249,10 @@ export class SceneManager {
    * into (HUD-001); null = the whole canvas, the 0.x framing.
    */
   private framingRect: ScreenRect | null = null;
+  /** Modelled marker radii (VIS-001 scales them up at a distance). */
+  private static readonly ORB_RADIUS = 0.26;
+  private static readonly GEM_RADIUS = 0.35;
+
   /** Default overview direction: camera at 0.6 / 0.7 of the distance up / back. */
   private static readonly OVERVIEW_DIR = new THREE.Vector3(0, 0.6, 0.7).normalize();
 
@@ -1348,7 +1353,7 @@ export class SceneManager {
         emissiveIntensity: 1.2 * this.hdrScale(),
         flatShading: true,
       });
-      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.35), questMat);
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(SceneManager.GEM_RADIUS), questMat);
       const baseY = topY + 1.2;
       // Track the roof centerline — leaning presets move it well off local origin
       gem.position.set(build.topCenter.x, baseY, build.topCenter.z);
@@ -1595,7 +1600,7 @@ export class SceneManager {
       const color = new THREE.Color().setHSL(hue, 0.75, 0.6);
 
       const orb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.26, 12, 12),
+        new THREE.SphereGeometry(SceneManager.ORB_RADIUS, 12, 12),
         new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.8 }),
       );
       orb.position.set(0, baseY, 0);
@@ -2046,6 +2051,28 @@ export class SceneManager {
     cam.far = f.far;
     cam.updateProjectionMatrix();
     this.invalidateShadows();
+  }
+
+  private markerWorldPos = new THREE.Vector3();
+
+  /**
+   * VIS-001: quest gems and agent orbs keep a minimum on-screen size. At the
+   * overview distance they rendered at a few pixels; each frame they scale up
+   * just enough to stay ~12 px across (capped), and shrink back to their
+   * modelled size up close. Orbs are their own raycast targets, so hover
+   * follows the drawn size automatically.
+   */
+  private keepMarkersReadable(): void {
+    const h = this.container.clientHeight;
+    if (h <= 0) return;
+    const fit = (mesh: THREE.Mesh, radius: number) => {
+      mesh.getWorldPosition(this.markerWorldPos);
+      const parentScale = mesh.parent ? mesh.parent.scale.x : 1;
+      const dist = this.markerWorldPos.distanceTo(this.camera.position);
+      mesh.scale.setScalar(markerScale(radius * parentScale, dist, this.camera.fov, h));
+    };
+    for (const entry of this.agentOrbs.values()) fit(entry.orb, SceneManager.ORB_RADIUS);
+    for (const gem of this.questMarkers) fit(gem, SceneManager.GEM_RADIUS);
   }
 
   /** Current camera pose, for a host to restore after a view reload (CAM-001). */
@@ -3054,6 +3081,8 @@ export class SceneManager {
       gem.position.y = (ud(gem).baseY as number) +
         Math.sin(motion * 2 + (ud(gem).bobPhase as number)) * 0.15;
     }
+
+    this.keepMarkersReadable();
 
     // Pulse critical-priority warning beacons (slow aircraft-light blink)
     if (this.roofBeacons.length > 0) {
