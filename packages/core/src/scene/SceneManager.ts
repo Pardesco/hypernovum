@@ -126,9 +126,12 @@ export class SceneManager {
     'hypernovum-cursor-move',
   ] as const;
   private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private labelRenderer: CSS2DRenderer;
+  // Definite assignment (GL-001): these are created once, in initCamera() /
+  // initRenderer(). A field initializer here used to build a throwaway
+  // WebGLRenderer — a whole extra WebGL context — on every view open.
+  private camera!: THREE.PerspectiveCamera;
+  private renderer!: THREE.WebGLRenderer;
+  private labelRenderer!: CSS2DRenderer;
   private controls: MapControls;
   private container: HTMLElement;
   private animationId: number | null = null;
@@ -225,9 +228,6 @@ export class SceneManager {
   constructor(container: HTMLElement, options?: SceneManagerOptions) {
     this.container = container;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera();
-    this.renderer = new THREE.WebGLRenderer();
-    this.labelRenderer = new CSS2DRenderer();
     this.buildingShader = new BuildingShader();
 
     // Load saved positions
@@ -329,10 +329,13 @@ export class SceneManager {
   static isWebGLAvailable(): boolean {
     try {
       const canvas = document.createElement('canvas');
-      return !!(
-        window.WebGLRenderingContext &&
-        (canvas.getContext('webgl2') || canvas.getContext('webgl'))
-      );
+      if (!window.WebGLRenderingContext) return false;
+      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+      if (!gl) return false;
+      // Release the probe now instead of whenever GC gets to it (GL-001):
+      // Chromium caps live contexts per page and evicts the oldest past it.
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      return true;
     } catch {
       return false;
     }
@@ -2751,6 +2754,10 @@ export class SceneManager {
       this.arteryManager = null;
     }
     this.renderer.dispose();
+    // dispose() frees three's GPU resources but leaves the context itself alive
+    // until GC — and every settings change reloads the view, stacking up
+    // contexts. Lose it explicitly so a closed view holds none (GL-001).
+    this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
     this.labelRenderer.domElement.remove();
   }
