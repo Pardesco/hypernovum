@@ -6,7 +6,7 @@
 // vault. See scripts/gen-heartbeat-source.mjs for why.
 
 /** Short content hash of scripts/heartbeat.js — used to detect a stale copy in a vault. */
-export const HEARTBEAT_SOURCE_SHA = '289666b3d62d';
+export const HEARTBEAT_SOURCE_SHA = 'd548336dc647';
 
 /** Verbatim contents of scripts/heartbeat.js. */
 export const HEARTBEAT_SOURCE = `#!/usr/bin/env node
@@ -195,6 +195,8 @@ function logSessionEvent(vaultPath, snap, prior, isStop, now) {
     kind,
     name: snap.name,
     project: snap.project ?? undefined,
+    // Lets the plugin tie the digest to a project by folder, not just name.
+    cwd: snap.cwd ?? undefined,
     state: snap.state,
     tool: snap.tool ?? undefined,
     file: snap.file ?? undefined,
@@ -293,19 +295,12 @@ function applyHookPayload(params) {
   if (merged.id === undefined && payload.session_id) merged.id = String(payload.session_id);
   if (merged.tool === undefined && payload.tool_name) merged.tool = String(payload.tool_name);
 
-  // Project defaults to the basename of the agent's working directory, which is
-  // the convention the plugin matches against project titles and folder names.
+  // Recorded verbatim: the plugin matches it against each project's resolved
+  // directory, which works even when a project's title differs from its folder
+  // name (basename matching alone missed those entirely). main() derives the
+  // project name from it when none was given.
   const cwd = payload.cwd ? String(payload.cwd) : null;
-  if (cwd) {
-    // Recorded verbatim as well: the plugin matches it against each project's
-    // resolved directory, which works even when a project's title differs from
-    // its folder name (basename matching alone missed those entirely).
-    if (merged.cwd === undefined) merged.cwd = cwd;
-    if (merged.project === undefined) {
-      const base = path.basename(cwd);
-      if (base) merged.project = base;
-    }
-  }
+  if (cwd && merged.cwd === undefined) merged.cwd = cwd;
 
   // The touched file lives in tool_input, and it is what drives same-file conflict
   // detection between concurrent agents. Without it every hook ping reported
@@ -327,6 +322,16 @@ function main() {
 
   // --hook: pull session_id / tool_name / cwd from the hook's stdin JSON.
   if (params.hook) params = applyHookPayload(params);
+
+  // Project defaults to the basename of the working directory — the convention
+  // the plugin matches against project titles and folder names. This used to
+  // happen only on the --hook path, so a hand or wrapper ping with --cwd and no
+  // --project logged sessions with no project at all, and the inspector's
+  // "Last session" digest could never find them (AGT-011).
+  if (params.project === undefined && strOrNull(params.cwd)) {
+    const base = path.basename(String(params.cwd).replace(/[\\\\/]+$/, ''));
+    if (base) params.project = base;
+  }
 
   const vaultPath = params.vault || process.env.HYPERNOVUM_PATH || process.env.OBSIDIAN_VAULT;
   if (!vaultPath) {

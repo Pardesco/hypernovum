@@ -8,7 +8,7 @@ import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
 import { SessionReader } from '../monitors/SessionReader';
-import type { SessionDigest } from '../monitors/sessionDigest';
+import { digestMatchesProject, type SessionDigest } from '../monitors/sessionDigest';
 import { filterProjects } from '../utils/projectFilter';
 import { ProjectParser } from '../parsers/ProjectParser';
 import { MetadataExtractor } from '../parsers/MetadataExtractor';
@@ -1988,12 +1988,12 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     if (!vaultBase) return null;
 
     const sessionsDir = path.join(vaultBase, '.hypernovum', 'sessions');
-    const dirBase = this.projectDirOf(project)?.split(/[\\/]/).pop()?.toLowerCase();
-    const digest = this.sessionReader.readLatestForProject(sessionsDir, (proj) => {
-      if (!proj) return false;
-      const p = proj.toLowerCase();
-      return p === project.title.toLowerCase() || p === dirBase;
-    }) ?? null;
+    // Working directory first, then title / folder name (AGT-011).
+    const target = { title: project.title, dir: this.projectDirOf(project) };
+    const digest = this.sessionReader.readLatestForProject(
+      sessionsDir,
+      (_proj, d) => digestMatchesProject(d, target),
+    ) ?? null;
 
     this.sessionDigestCache.set(project.path, { at: now, digest });
     return digest;

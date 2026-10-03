@@ -5,6 +5,7 @@
  */
 
 import { parseJsonObject } from '../utils/json';
+import { samePath } from '../utils/projectPaths';
 
 export interface ActivityEvent {
   t: number;
@@ -12,6 +13,8 @@ export interface ActivityEvent {
   kind: 'session-start' | 'ping' | 'stop';
   name?: string;
   project?: string;
+  /** Agent working directory (heartbeat 0.6.1+; absent in older logs). */
+  cwd?: string;
   state?: string;
   tool?: string;
   file?: string;
@@ -21,6 +24,8 @@ export interface SessionDigest {
   sessionId: string;
   name?: string;
   project?: string;
+  /** Last working directory the session reported, when its log carries one. */
+  cwd?: string;
   startT: number;
   endT: number;
   durationMs: number;
@@ -53,20 +58,43 @@ export function parseSessionDigest(events: ActivityEvent[]): SessionDigest | nul
   const files = new Set<string>();
   let name: string | undefined;
   let project: string | undefined;
+  let cwd: string | undefined;
   for (const e of sorted) {
     if (e.file) files.add(e.file);
     if (e.name) name = e.name;
     if (e.project) project = e.project;
+    if (typeof e.cwd === 'string' && e.cwd) cwd = e.cwd;
   }
 
   return {
     sessionId: first.sessionId,
     name,
     project,
+    cwd,
     startT: first.t,
     endT: last.t,
     durationMs: Math.max(0, last.t - first.t),
     filesTouched: [...files],
     ended: sorted.some((e) => e.kind === 'stop'),
   };
+}
+
+/**
+ * Whether a session digest belongs to a project (AGT-011).
+ *
+ * The working directory is checked first, against the project's resolved
+ * folder — the same rule that puts a live orb on a building — so a session
+ * pinged with `--cwd` and no `--project` gets its "Last session" row even when
+ * the project's title differs from its folder name. Name matching (title or
+ * folder basename) remains the fallback for logs written before 0.6.1.
+ */
+export function digestMatchesProject(
+  digest: Pick<SessionDigest, 'project' | 'cwd'>,
+  target: { title: string; dir: string | null },
+): boolean {
+  if (target.dir && digest.cwd && samePath(target.dir, digest.cwd)) return true;
+  if (!digest.project) return false;
+  const p = digest.project.toLowerCase();
+  const dirBase = target.dir?.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase();
+  return p === target.title.toLowerCase() || (!!dirBase && p === dirBase);
 }

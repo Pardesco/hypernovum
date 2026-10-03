@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseSessionLines, parseSessionDigest, type ActivityEvent } from '../src/monitors/sessionDigest';
+import {
+  parseSessionLines,
+  parseSessionDigest,
+  digestMatchesProject,
+  type ActivityEvent,
+} from '../src/monitors/sessionDigest';
 
 function ev(over: Partial<ActivityEvent>): ActivityEvent {
   return { t: 0, sessionId: 's1', kind: 'ping', ...over };
@@ -51,5 +56,33 @@ describe('parseSessionDigest', () => {
 
   it('returns null for no events', () => {
     expect(parseSessionDigest([])).toBeNull();
+  });
+});
+
+describe('session digest ↔ project matching (AGT-011)', () => {
+  const flux = { title: 'Flux Portal', dir: String.raw`C:\hn-demo\projects\flux-portal` };
+
+  it('carries the last reported cwd', () => {
+    const d = parseSessionDigest([
+      ev({ t: 1, kind: 'session-start', cwd: String.raw`C:\old` }),
+      ev({ t: 2, cwd: String.raw`C:\hn-demo\projects\flux-portal` }),
+      ev({ t: 3 }),
+    ])!;
+    expect(d.cwd).toBe(String.raw`C:\hn-demo\projects\flux-portal`);
+  });
+
+  it('matches by working directory even when no project name was logged', () => {
+    expect(digestMatchesProject({ cwd: 'c:/hn-demo/projects/flux-portal/' }, flux)).toBe(true);
+  });
+
+  it('still matches pre-0.6.1 logs by title or folder name', () => {
+    expect(digestMatchesProject({ project: 'flux portal' }, flux)).toBe(true);
+    expect(digestMatchesProject({ project: 'flux-portal' }, flux)).toBe(true);
+  });
+
+  it('rejects other projects and empty digests', () => {
+    expect(digestMatchesProject({ cwd: String.raw`C:\hn-demo\projects\nova`, project: 'nova' }, flux)).toBe(false);
+    expect(digestMatchesProject({}, flux)).toBe(false);
+    expect(digestMatchesProject({ cwd: String.raw`C:\x` }, { title: 'X', dir: null })).toBe(false);
   });
 });
