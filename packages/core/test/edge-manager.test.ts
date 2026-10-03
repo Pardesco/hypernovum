@@ -73,6 +73,47 @@ describe('EdgeManager', () => {
     expect(() => em.update(1.23)).not.toThrow();
   });
 
+  it('GFX-010: batches every edge of a type into one tube mesh + one arrow mesh', () => {
+    const { scene, em, map } = setup();
+    for (let i = 0; i < 20; i++) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2));
+      m.position.set(i * 3, 0, 20);
+      map.set(`n${i}.md`, m);
+      scene.add(m);
+    }
+    const before = scene.children.length;
+    const deps = Array.from({ length: 20 }, (_, i) => dependsOn(`n${i}.md`, 'a.md'));
+    const links = Array.from({ length: 10 }, (_, i) => backlink(`n${i}.md`, 'b.md'));
+    em.setEdges([...deps, ...links]);
+    // depends-on: tubes + arrows; backlink: tubes only — 3 objects for 30 edges.
+    expect(scene.children.length).toBe(before + 3);
+    expect(em.drawCallCount()).toBe(3);
+    em.setVisibleTypes(new Set(['backlink']));
+    expect(em.drawCallCount()).toBe(1);
+  });
+
+  it('GFX-010: hover highlight flags only the touching edges, and clears again', () => {
+    const { scene, em } = setup();
+    em.setEdges([backlink('a.md', 'b.md'), backlink('b.md', 'c.md')]);
+    const mesh = scene.children.find((o) => o.userData.isEdge) as THREE.Mesh;
+    const touch = () => [...(mesh.geometry.getAttribute('aTouch').array as Float32Array)];
+    const half = touch().length / 2; // two tubes of equal vertex count
+    em.highlightForPath('a.md');
+    expect(touch().slice(0, half).every((v) => v === 1)).toBe(true);
+    expect(touch().slice(half).every((v) => v === 0)).toBe(true);
+    em.highlightForPath(null);
+    expect(touch().every((v) => v === 0)).toBe(true);
+  });
+
+  it('GFX-010: the breathe animation is one uniform write per merged mesh', () => {
+    const { scene, em } = setup();
+    em.setEdges([dependsOn('a.md', 'b.md')]);
+    em.update(4.2);
+    const meshes = scene.children.filter((o) => o.userData.isEdge) as THREE.Mesh[];
+    expect(meshes).toHaveLength(2);
+    for (const m of meshes) expect((m.material as THREE.ShaderMaterial).uniforms.uTime.value).toBe(4.2);
+  });
+
   it('clear removes all edge objects from the scene', () => {
     const { scene, em } = setup();
     const before = scene.children.length;
