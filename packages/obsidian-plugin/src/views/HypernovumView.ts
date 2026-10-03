@@ -320,6 +320,9 @@ export class HypernovumView extends ItemView {
       return;
     }
 
+    // Non-null only when this view replaces one reloaded for a setting change.
+    const restoredCamera = this.plugin.takePendingCameraState();
+
     // Initialize 3D scene with save callback and settings
     this.sceneManager = new SceneManager(container, {
       savedPositions: this.settings.blockPositions,
@@ -328,8 +331,7 @@ export class HypernovumView extends ItemView {
       },
       settings: this.settings,
       interactionStore: this.interactionStore,
-      // Non-null only when this view replaces one reloaded for a setting change.
-      initialCamera: this.plugin.takePendingCameraState(),
+      initialCamera: restoredCamera,
       // The Auto quality probe can switch wide lines off (GFX-009): re-pack.
       onRequestRebuild: () => this.rebuildCity(),
     });
@@ -424,9 +426,21 @@ export class HypernovumView extends ItemView {
     this.updateFramingRect();
     this.framingObserver = new ResizeObserver(() => this.updateFramingRect());
     this.framingObserver.observe(container);
+    for (const el of [this.hudTopLeft, this.commandPanelEl, this.inspectorOuterEl]) {
+      if (el) this.framingObserver.observe(el);
+    }
 
     // Parse projects and build city
     await this.buildCity();
+
+    // The panels only reach their real size once the first build has filled
+    // them (the inspector renders its overview after the scene is built), so a
+    // fresh open frames once more against the final layout. A view restoring a
+    // camera after a reload keeps that camera (CAM-001).
+    if (!restoredCamera) {
+      this.updateFramingRect();
+      this.sceneManager.resetCamera();
+    }
 
     // Watch for vault changes and rebuild on update
     this.metadataExtractor = new MetadataExtractor(
