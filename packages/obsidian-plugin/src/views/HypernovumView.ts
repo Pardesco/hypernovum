@@ -458,6 +458,8 @@ export class HypernovumView extends ItemView {
     // Add HUD title
     this.addHudTitle(container);
 
+    if (this.plugin.perfOverlay) this.sceneManager.setPerfOverlay(true);
+
     // Stop rendering when the view isn't on screen (P1-2).
     this.setupRenderGating(container);
 
@@ -802,6 +804,11 @@ category: default
   /** Current camera pose, carried across a reload by the plugin (CAM-001). */
   getCameraState(): CameraState | null {
     return this.sceneManager?.getCameraState() ?? null;
+  }
+
+  /** Show or hide the debug performance overlay (frame ms, draw calls, pixel ratio). */
+  setPerfOverlay(enabled: boolean): void {
+    this.sceneManager?.setPerfOverlay(enabled);
   }
 
   /** Apply filters/search/lens as a visibility + retint pass — no repack. */

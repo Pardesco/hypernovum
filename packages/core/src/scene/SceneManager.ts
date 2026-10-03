@@ -26,6 +26,7 @@ import { orbVisualForState, stateTintsHost, type OrbVisual } from './agentOrbVis
 import type { InteractionStore } from '../stores/interactionStore';
 import { ud, projectOf, setUserData } from './sceneUserData';
 import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFraming';
+import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
 
 /** Release the GPU resources a mesh or line owns. */
 function disposeRenderable(obj: {
@@ -218,6 +219,15 @@ export class SceneManager {
   /** Gate for the requestAnimationFrame loop — see setRenderingEnabled. */
   private renderingEnabled = true;
 
+  // Frame timing + the debug performance overlay ("measure first").
+  private frameStats = new FrameStats(120);
+  private cpuStats = new FrameStats(120);
+  private lastFrameAt = 0;
+  private perfOverlay: HTMLDivElement | null = null;
+  private lastPerfPaint = 0;
+  /** Graphics tier name shown in the overlay, when the host uses tiers. */
+  private tierLabel: string | null = null;
+
   /**
    * True when the OS asks for reduced motion. Damps the continuous idle motion
    * (core rotation, glow breathing, orb orbits) — the CSS media query only covered
@@ -351,6 +361,9 @@ export class SceneManager {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
+    // Count draw calls across a whole frame — every composer pass, the shadow
+    // pass — instead of only the last render() call. Reset in animate().
+    this.renderer.info.autoReset = false;
     this.container.appendChild(this.renderer.domElement);
 
     this.labelRenderer = new CSS2DRenderer();
@@ -2451,6 +2464,7 @@ export class SceneManager {
     // getDelta() would otherwise return the whole paused interval and make every
     // time-based animation jump on resume.
     this.clock.getDelta();
+    this.lastFrameAt = 0; // nor should the pause count as one long frame
     if (this.animationId === null) this.animate();
   }
 
@@ -2465,6 +2479,11 @@ export class SceneManager {
       return;
     }
     this.animationId = window.requestAnimationFrame(this.animate);
+
+    const frameStart = performance.now();
+    if (this.lastFrameAt > 0) this.frameStats.push(frameStart - this.lastFrameAt);
+    this.lastFrameAt = frameStart;
+    this.renderer.info.reset();
 
     const elapsed = this.clock.getElapsedTime();
     const delta = this.clock.getDelta();
@@ -2709,7 +2728,54 @@ export class SceneManager {
 
     // Labels always render last (on top, not affected by bloom)
     this.labelRenderer.render(this.scene, this.camera);
+
+    this.cpuStats.push(performance.now() - frameStart);
+    if (this.perfOverlay && frameStart - this.lastPerfPaint > 500) {
+      this.lastPerfPaint = frameStart;
+      this.paintPerfOverlay();
+    }
   };
+
+  /** Current frame-timing and renderer numbers (overlay, QA scripts, Auto tier). */
+  getPerfSnapshot(): PerfSnapshot {
+    const frameMs = this.frameStats.median();
+    return {
+      frameMs,
+      frameP90Ms: this.frameStats.quantile(0.9),
+      cpuMs: this.cpuStats.median(),
+      fps: frameMs > 0 ? 1000 / frameMs : 0,
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      pixelRatio: this.renderer.getPixelRatio(),
+      tier: this.tierLabel,
+    };
+  }
+
+  /**
+   * Debug overlay with frame ms, draw calls, triangles and pixel ratio. Off by
+   * default; hosts toggle it (the plugin has a command for it).
+   */
+  setPerfOverlay(enabled: boolean): void {
+    if (enabled && !this.perfOverlay) {
+      this.perfOverlay = appendDiv(this.container, 'hypernovum-perf-overlay');
+      this.lastPerfPaint = 0;
+    } else if (!enabled && this.perfOverlay) {
+      this.perfOverlay.remove();
+      this.perfOverlay = null;
+    }
+  }
+
+  isPerfOverlayEnabled(): boolean {
+    return this.perfOverlay !== null;
+  }
+
+  private paintPerfOverlay(): void {
+    const el = this.perfOverlay;
+    if (!el) return;
+    const lines = formatPerfSnapshot(this.getPerfSnapshot());
+    while (el.childElementCount < lines.length) appendDiv(el);
+    lines.forEach((text, i) => { el.children[i].textContent = text; });
+  }
 
   private onResize(): void {
     const width = this.container.clientWidth;
@@ -2760,6 +2826,7 @@ export class SceneManager {
     this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
     this.labelRenderer.domElement.remove();
+    this.setPerfOverlay(false);
   }
 
   getScene(): THREE.Scene { return this.scene; }

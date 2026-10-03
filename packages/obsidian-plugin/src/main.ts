@@ -109,6 +109,14 @@ export default class HypernovumPlugin extends Plugin {
       { id: 'cycle-paused', name: 'Go to next paused project', run: (v) => v.commandCycleStatus('paused') },
       { id: 'trace-selection', name: 'Trace impact of selected project', run: (v) => v.commandTraceSelection() },
       { id: 'set-project-folder', name: 'Set project folder for selected project', run: (v) => { void v.commandSetProjectFolder(); } },
+      {
+        id: 'toggle-perf-overlay',
+        name: 'Toggle performance overlay',
+        run: (v) => {
+          this.perfOverlay = !this.perfOverlay;
+          v.setPerfOverlay(this.perfOverlay);
+        },
+      },
     ];
 
     for (const action of viewActions) {
@@ -303,6 +311,9 @@ export default class HypernovumPlugin extends Plugin {
     leaves.forEach((leaf) => leaf.detach());
     await this.activateView();
   }
+
+  /** Debug performance overlay, session-only so it survives view reloads. */
+  perfOverlay = false;
 
   /** Camera pose handed from a view being reloaded to its replacement (CAM-001). */
   private pendingCameraState: CameraState | null = null;
