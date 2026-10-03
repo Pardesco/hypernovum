@@ -3,6 +3,7 @@ import type { SettingDefinitionItem } from 'obsidian';
 import type HypernovumPlugin from '../main';
 import { DEFAULT_SETTINGS as CORE_DEFAULTS } from '@hypernovum/core';
 import type { BlockPosition, HypernovumSettings as CoreSettings } from '@hypernovum/core';
+import { CURRENT_LAYOUT_VERSION, type LayoutVersion } from './settingsMigrations';
 
 /** Known CLI agents — users can also enter a custom command */
 const KNOWN_AGENTS = [
@@ -54,6 +55,11 @@ export interface HypernovumSettings extends CoreSettings {
   buildingStyleMigrated: boolean;
   /** Collapsed HUD panels (HUD-001), remembered across reloads. */
   hudCollapsed: HudCollapsed;
+  /**
+   * City layout generation (LAY-001): 1 = one category per row (0.x, what
+   * pre-0.7 saved offsets are relative to), 2 = shelf packing.
+   */
+  layoutVersion: LayoutVersion;
 }
 
 /** Which HUD panels are collapsed to their header (HUD-001). */
@@ -77,6 +83,7 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   // GFX-009: Auto probes frame times on first open and picks a tier.
   graphicsQuality: 'auto',
   hudCollapsed: { agents: false, command: false, inspector: false },
+  layoutVersion: CURRENT_LAYOUT_VERSION,
 };
 
 export type { BlockPosition };

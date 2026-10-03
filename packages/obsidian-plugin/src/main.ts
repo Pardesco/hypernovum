@@ -14,7 +14,7 @@ import {
 } from './utils/HeartbeatInstaller';
 import { HeartbeatHooksModal } from './modals/HeartbeatHooksModal';
 import { FirstRunModal } from './modals/FirstRunModal';
-import { migrateAgentName } from './settings/settingsMigrations';
+import { CURRENT_LAYOUT_VERSION, layoutVersionFor, migrateAgentName } from './settings/settingsMigrations';
 
 export default class HypernovumPlugin extends Plugin {
   settings: HypernovumSettings = DEFAULT_SETTINGS;
@@ -57,6 +57,12 @@ export default class HypernovumPlugin extends Plugin {
       id: 'generate-daily-briefing',
       name: 'Generate daily briefing',
       callback: () => { void this.generateDailyBriefing(); },
+    });
+
+    this.addCommand({
+      id: 'reset-city-layout',
+      name: 'Reset city layout',
+      callback: () => { void this.resetCityLayout(); },
     });
 
     this.addCommand({
@@ -276,6 +282,19 @@ export default class HypernovumPlugin extends Plugin {
     }
   }
 
+  /**
+   * Forget saved block positions and switch to the current default layout
+   * (LAY-001). The only way a pre-0.7 layout with saved offsets moves to the
+   * shelf layout, since the migration keeps those layouts exactly as they were.
+   */
+  async resetCityLayout(): Promise<void> {
+    this.settings.blockPositions = [];
+    this.settings.layoutVersion = CURRENT_LAYOUT_VERSION;
+    await this.saveSettings();
+    await this.reloadOpenViews({ keepCamera: false });
+    new Notice('City layout reset');
+  }
+
   /** Flip vault mode and reload any open city view so it takes effect */
   async toggleVaultMode(): Promise<void> {
     await this.setVaultMode(!this.settings.vaultMode);
@@ -302,13 +321,13 @@ export default class HypernovumPlugin extends Plugin {
    * Reload any open city view so a setting applied at view-open (building style,
    * vault mode, shaders…) takes effect immediately instead of on next open.
    */
-  async reloadOpenViews(): Promise<void> {
+  async reloadOpenViews(options?: { keepCamera?: boolean }): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     if (leaves.length === 0) return;
     // A reload is an implementation detail of applying a setting — the user's
-    // camera should survive it (CAM-001).
+    // camera should survive it (CAM-001), unless the layout itself changed.
     const view = leaves[0].view;
-    this.pendingCameraState = view instanceof HypernovumView ? view.getCameraState() : null;
+    this.pendingCameraState = options?.keepCamera !== false && view instanceof HypernovumView ? view.getCameraState() : null;
     leaves.forEach((leaf) => leaf.detach());
     await this.activateView();
   }
@@ -359,6 +378,15 @@ export default class HypernovumPlugin extends Plugin {
     // Migration (TXT-001): the agent is identified by its command; the name is a
     // stored display string, so a renamed preset ("GPT Codex" → "Codex CLI")
     // would otherwise keep the old label in every "Launch …" menu item.
+    // Migration (LAY-001): configs with saved block offsets keep the layout
+    // those offsets are relative to, so existing layouts render exactly as
+    // before; others move to the shelf layout. Recorded once.
+    const layoutVersion = layoutVersionFor(stored);
+    if (stored && stored.layoutVersion !== layoutVersion) {
+      this.settings.layoutVersion = layoutVersion;
+      await this.saveSettings();
+    }
+
     const renamedAgent = migrateAgentName(this.settings.agentCommand, this.settings.agentName);
     if (renamedAgent) {
       this.settings.agentName = renamedAgent;

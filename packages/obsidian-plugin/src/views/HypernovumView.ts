@@ -813,7 +813,11 @@ category: default
    */
   private rebuildCity(): void {
     if (this.sceneManager) {
-      const districts = this.binPacker.packDistricts(this.allProjects);
+      // LAY-001: shelf-packed toward ~1.8:1; configs whose saved offsets are
+      // relative to the 0.x column layout keep it (layoutVersion 1).
+      const districts = this.binPacker.packDistricts(this.allProjects, {
+        layout: this.settings.layoutVersion === 1 ? 'legacy' : 'shelf',
+      });
       this.sceneManager.clearAllWeather();
       // The camera keeps its pose across rebuilds (CAM-001); re-frame only when
       // the city switches between whole-vault fallback and project mode, since

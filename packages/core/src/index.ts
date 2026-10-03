@@ -34,6 +34,7 @@ export type { ScreenRect, FramingBox, FramingInput, FramingResult } from './scen
 
 // Layout
 export { BinPacker } from './layout/BinPacker';
+export type { PackOptions } from './layout/BinPacker';
 
 // Renderers
 export { BuildingShader } from './renderers/BuildingShader';
