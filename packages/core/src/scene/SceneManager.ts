@@ -5,6 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
 import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
@@ -203,6 +204,10 @@ export class SceneManager {
   private shaderMaterials: Map<THREE.Mesh, THREE.ShaderMaterial> = new Map();
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
+  /** MSAA samples for the composer's scene target (GFX-001). */
+  private msaaSamples = 4;
+  /** Luminance above which the bloom pass picks a pixel up. */
+  private static readonly BLOOM_THRESHOLD = 0.7;
 
   // Neural Core and Data Arteries
   private neuralCore: NeuralCore | null = null;
@@ -358,7 +363,10 @@ export class SceneManager {
   }
 
   private initRenderer(): void {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // With bloom the scene is drawn into the composer's multisampled target and
+    // the canvas only receives the final full-screen pass, so canvas MSAA would
+    // be pure cost (GFX-001). Without bloom the canvas is the scene target.
+    this.renderer = new THREE.WebGLRenderer({ antialias: !this.useBloom, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
     // Honor the enableShadows setting (PERF-004). With the shadow map off the
@@ -439,7 +447,20 @@ export class SceneManager {
       const width = this.container.clientWidth;
       const height = this.container.clientHeight;
 
-      this.composer = new EffectComposer(this.renderer);
+      // GFX-001: the renderer's `antialias` only covers the default
+      // framebuffer, and with bloom on the scene renders into the composer's
+      // targets, which had no MSAA — every edge, arc and tower aliased (hidden
+      // at 2x device scale, plain at 1x). The scene target is now multisampled.
+      // Half-float keeps HDR emitters above 1.0 intact for the bloom threshold.
+      const caps = this.renderer.capabilities;
+      const samples = caps.isWebGL2 ? Math.min(this.msaaSamples, caps.maxSamples) : 0;
+      const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples });
+      this.composer = new EffectComposer(this.renderer, target);
+      // The composer clones `target` as its ping-pong partner. Only the buffer
+      // RenderPass draws into needs MSAA — render() pins RenderPass to
+      // renderTarget2 every frame — so the partner stays single-sampled (it is
+      // never even allocated unless a pass swaps buffers).
+      this.composer.renderTarget1.samples = 0;
 
       const renderPass = new RenderPass(this.scene, this.camera);
       this.composer.addPass(renderPass);
@@ -448,18 +469,45 @@ export class SceneManager {
         new THREE.Vector2(width, height),
         this.bloomIntensity,  // strength
         0.4,                   // radius
-        0.7                    // threshold - only bright things glow
+        SceneManager.BLOOM_THRESHOLD,
       );
       this.composer.addPass(this.bloomPass);
 
       const outputPass = new OutputPass();
       this.composer.addPass(outputPass);
+      if (samples > 0) {
+        // Last pass draws to screen; swapping after it only made the next
+        // frame's RenderPass land in the single-sampled buffer.
+        outputPass.needsSwap = false;
+      } else {
+        // WebGL1 has no multisampled render targets: fall back to SMAA, which
+        // reads OutputPass's (swapped) result.
+        this.composer.addPass(new SMAAPass(width, height));
+      }
 
-      debugLog('Bloom post-processing initialized');
+      // Normalise sizes now that the passes exist (a custom target makes the
+      // composer start from the target's 1x1 size).
+      this.composer.setPixelRatio(this.renderer.getPixelRatio());
+      this.composer.setSize(width, height);
+
+      debugLog('Bloom post-processing initialized', { samples });
     } catch (e) {
       debugLog('Failed to initialize bloom:', e);
       this.composer = null;
       this.bloomPass = null;
+    }
+  }
+
+  /** Render one frame through the composer (or straight to screen without bloom). */
+  private renderFrame(): void {
+    if (this.composer) {
+      // Pin RenderPass to the multisampled target (see initComposer): a host
+      // can insert passes that swap buffers an odd number of times per frame.
+      this.composer.readBuffer = this.composer.renderTarget2;
+      this.composer.writeBuffer = this.composer.renderTarget1;
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
     }
   }
 
@@ -2782,11 +2830,7 @@ export class SceneManager {
     this.controls.update();
 
     // Render with composer (bloom) or direct renderer
-    if (this.composer) {
-      this.composer.render();
-    } else {
-      this.renderer.render(this.scene, this.camera);
-    }
+    this.renderFrame();
 
     // Labels always render last (on top, not affected by bloom)
     this.labelRenderer.render(this.scene, this.camera);
@@ -2906,11 +2950,7 @@ export class SceneManager {
    * HUD overlays and CSS2D labels are DOM, so the capture is a clean render.
    */
   captureSnapshot(): string {
-    if (this.composer) {
-      this.composer.render();
-    } else {
-      this.renderer.render(this.scene, this.camera);
-    }
+    this.renderFrame();
     return this.renderer.domElement.toDataURL('image/png');
   }
 
