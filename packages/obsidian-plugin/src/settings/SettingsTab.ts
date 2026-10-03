@@ -72,6 +72,10 @@ export type { BlockPosition };
 /** Reopening a view is the only way these take effect; say so once, in one place. */
 const ON_REOPEN = ' Applies to city views opened after the change.';
 
+/** Shared by both settings renderers (1.13 definitions + the display() fallback). */
+const SKILLS_NAME = 'Obsidian format skills';
+const SKILLS_DESC = 'Install pinned MIT skills by Steph Ango for Markdown, Bases, and Canvas in this vault. Offline; existing skill folders are preserved. Includes license and source revision.';
+
 export class SettingsTab extends PluginSettingTab {
   plugin: HypernovumPlugin;
 
@@ -171,6 +175,22 @@ export class SettingsTab extends PluginSettingTab {
             desc: 'Install the heartbeat script into this vault and show the hook JSON that makes agent sessions appear as live orbs in the city.',
             aliases: ['heartbeat', 'hooks', 'presence'],
             action: () => { void this.plugin.installHeartbeatHooks(); },
+          },
+          {
+            // QA-001: this row existed only in display(), so on 1.13+ (which
+            // renders these definitions instead) the two install buttons were
+            // missing from the settings tab entirely. Two buttons on one row
+            // need `render`; `action` makes the whole row a single click target.
+            name: SKILLS_NAME,
+            desc: SKILLS_DESC,
+            aliases: ['skills', 'markdown', 'bases', 'canvas', 'steph ango'],
+            render: (setting) => {
+              setting
+                .setName(SKILLS_NAME)
+                .setDesc(SKILLS_DESC)
+                .addButton((button) => button.setButtonText('Install for Codex').onClick(() => this.plugin.installBundledSkills('codex')))
+                .addButton((button) => button.setButtonText('Install for Claude').onClick(() => this.plugin.installBundledSkills('claude')));
+            },
           },
         ],
       },
@@ -493,8 +513,8 @@ export class SettingsTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Obsidian format skills')
-      .setDesc('Install pinned MIT skills by Steph Ango for Markdown, Bases, and Canvas in this vault. Offline; existing skill folders are preserved. Includes license and source revision.')
+      .setName(SKILLS_NAME)
+      .setDesc(SKILLS_DESC)
       .addButton(button => button.setButtonText('Install for Codex').onClick(() => this.plugin.installBundledSkills('codex')))
       .addButton(button => button.setButtonText('Install for Claude').onClick(() => this.plugin.installBundledSkills('claude')));
 
