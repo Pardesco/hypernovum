@@ -836,35 +836,70 @@
 .edge-chip[data-edge="blocked-by"].active { border-color: #ff8844; background: rgba(90, 50, 20, 0.5); box-shadow: 0 0 8px rgba(255, 136, 68, 0.3); }
 .edge-chip[data-edge="agent-working-on"].active { border-color: #22d3ee; background: rgba(15, 70, 85, 0.5); box-shadow: 0 0 8px rgba(34, 211, 238, 0.3); }
 
-/* Vault-mode toggle — amber counterpart to the violet links toggle */
-.vault-mode-toggle {
-  width: 100%;
-  height: 26px;
-  margin-top: 6px;
-  border: 1px solid rgba(255, 190, 90, 0.22);
-  border-radius: 6px;
-  background: rgba(45, 34, 16, 0.5);
+/* Vault-mode switch (UX-001) — compact, in the command-panel header, so a
+   stray click on the panel can no longer turn the agent layer off. Scoped
+   under the header so it beats Obsidian's default button chrome. */
+.command-panel-header .vault-mode-switch {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  margin: 0;
+  padding: 0 3px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
   color: rgba(255, 210, 140, 0.55);
   font-family: var(--font-monospace, monospace);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-.vault-mode-toggle:hover {
-  border-color: rgba(255, 190, 90, 0.45);
+.command-panel-header .vault-mode-switch:hover {
+  border-color: rgba(255, 190, 90, 0.3);
   color: rgba(255, 222, 170, 0.85);
 }
 
-.vault-mode-toggle.active {
-  border-color: rgba(255, 190, 90, 0.6);
-  background: rgba(90, 65, 25, 0.6);
+.vault-mode-switch-track {
+  position: relative;
+  width: 24px;
+  height: 12px;
+  border: 1px solid rgba(255, 190, 90, 0.35);
+  border-radius: 6px;
+  background: rgba(45, 34, 16, 0.6);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.vault-mode-switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 210, 140, 0.6);
+  transition: transform 0.15s ease;
+}
+
+.command-panel-header .vault-mode-switch.active {
   color: #ffd9a0;
   text-shadow: 0 0 8px rgba(255, 190, 90, 0.6);
-  box-shadow: 0 0 12px rgba(255, 190, 90, 0.15), inset 0 0 12px rgba(255, 190, 90, 0.08);
+}
+
+.vault-mode-switch.active .vault-mode-switch-track {
+  border-color: rgba(255, 190, 90, 0.75);
+  background: rgba(160, 110, 30, 0.75);
+}
+
+.vault-mode-switch.active .vault-mode-switch-thumb {
+  transform: translateX(12px);
+  background: #ffd9a0;
 }
 
 /* Project inspector */

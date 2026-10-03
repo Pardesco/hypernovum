@@ -1459,6 +1459,21 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
     attentionBadge.hidden = true;
     const summary = header.createSpan({ cls: 'command-panel-summary', text: 'Loading...' });
+    // UX-001: a compact switch in the header, not a full-width bar under the
+    // filters — a stray click there turned the whole agent layer off and
+    // reloaded the city.
+    const vaultToggle = header.createEl('button', {
+      cls: 'vault-mode-switch',
+      attr: {
+        type: 'button',
+        role: 'switch',
+        'aria-checked': String(this.settings.vaultMode),
+        'aria-label': 'Vault mode',
+        title: 'Vault mode: pure 3D visualization, no AI agent features. Reloads the view.',
+      },
+    });
+    vaultToggle.createSpan({ cls: 'vault-mode-switch-label', text: 'Vault' });
+    vaultToggle.createSpan({ cls: 'vault-mode-switch-track' }).createSpan({ cls: 'vault-mode-switch-thumb' });
 
     // Shown only while the city is standing in for an untagged vault. Built with
     // DOM APIs, never innerHTML — the vault name is user content.
@@ -1525,13 +1540,6 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
         attr: { 'data-edge': type },
       }));
     }
-    const vaultToggle = panel.createEl('button', {
-      cls: 'vault-mode-toggle',
-      // Sentence case in the string; the all-caps HUD look is CSS text-transform.
-      text: 'Vault mode · off',
-      attr: { title: 'Vault mode: pure 3D visualization, no AI agent features. Reloads the view.' },
-    });
-
     this.searchInput = searchInput;
     this.layerSelect = layerSelect;
     this.statusSelect = statusSelect;
@@ -1592,11 +1600,22 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
       });
     }
 
-    vaultToggle.textContent = `Vault mode · ${this.settings.vaultMode ? 'on' : 'off'}`;
     vaultToggle.classList.toggle('active', this.settings.vaultMode);
     vaultToggle.addEventListener('click', () => {
-      // Reloads the view; the fresh view renders the new state
-      void this.plugin.toggleVaultMode();
+      // Reloads the view; the fresh view renders the new state.
+      const live = this.fleetSessions.filter((s) => HypernovumView.LIVE_AGENT_STATES.has(s.state)).length;
+      if (this.settings.vaultMode || live === 0) {
+        void this.plugin.toggleVaultMode();
+        return;
+      }
+      // Turning it ON hides every live agent — confirm rather than act on a
+      // click that may have been meant for the city underneath.
+      new ConfirmModal(this.app, {
+        title: 'Turn on vault mode?',
+        body: `${live} agent session${live === 1 ? ' is' : 's are'} live. Vault mode hides agent orbs, `
+          + 'stops reading agent activity and reloads the city.',
+        cta: 'Turn on vault mode',
+      }, () => { void this.plugin.toggleVaultMode(); }).open();
     });
   }
 
@@ -3235,6 +3254,33 @@ class FolderInputModal extends Modal {
     }
     this.close();
     this.onSubmit(trimmed);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** Yes/no confirmation (UX-001). `minAppVersion` predates Obsidian's own one. */
+class ConfirmModal extends Modal {
+  constructor(
+    app: App,
+    private opts: { title: string; body: string; cta: string },
+    private onConfirm: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: this.opts.title });
+    contentEl.createEl('p', { text: this.opts.body });
+    new Setting(contentEl)
+      .addButton((btn) => btn.setButtonText('Cancel').onClick(() => this.close()))
+      .addButton((btn) => btn.setButtonText(this.opts.cta).setCta().onClick(() => {
+        this.close();
+        this.onConfirm();
+      }));
   }
 
   onClose(): void {
