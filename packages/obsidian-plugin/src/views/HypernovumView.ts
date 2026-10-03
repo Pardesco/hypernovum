@@ -2,8 +2,8 @@ import { ItemView, WorkspaceLeaf, App, Notice, TFile, Menu, Modal, Setting, Plat
 import { existsSync, statSync } from 'fs';
 import { execFile } from 'child_process';
 import * as path from 'path';
-import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, createInteractionStore } from '@hypernovum/core';
-import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult, CameraState } from '@hypernovum/core';
+import { SceneManager, BinPacker, BuildingRaycaster, KeyboardNav, createInteractionStore, freeRectAvoiding } from '@hypernovum/core';
+import type { ProjectData, BlockPosition, RaycastHit, GraphEdge, EdgeType, TraceImpactResult, CameraState, ScreenRect } from '@hypernovum/core';
 import { collectImpact } from '@hypernovum/core';
 import { DependencyScanner } from '../monitors/DependencyScanner';
 import { resolveProjectRef, type DependencyScanResult } from '../monitors/dependencyMatch';
@@ -38,7 +38,7 @@ import {
   type ResolvedProjectDir,
 } from '../utils/projectPaths';
 import { createBinaryVaultFile } from '../utils/vaultFiles';
-import type { HypernovumSettings } from '../settings/SettingsTab';
+import type { HudCollapsed, HypernovumSettings } from '../settings/SettingsTab';
 import type HypernovumPlugin from '../main';
 
 export const VIEW_TYPE = 'hypernovum-view';
@@ -411,10 +411,19 @@ export class HypernovumView extends ItemView {
         if (this.sceneManager?.exitMoveModeIfActive()) return;
         this.interactionStore.getState().clearSelection();
       },
+      onToggleHud: () => this.toggleHud(),
     });
 
     // Inspector mirrors the selection — single subscription, no manual calls
     this.registerStoreSubscription();
+
+    // HUD-001: frame the first overview into the area the panels leave free,
+    // and keep that area current as the pane resizes.
+    this.cityContainer = container;
+    container.classList.toggle('hud-hidden', this.plugin.hudHidden);
+    this.updateFramingRect();
+    this.framingObserver = new ResizeObserver(() => this.updateFramingRect());
+    this.framingObserver.observe(container);
 
     // Parse projects and build city
     await this.buildCity();
@@ -482,6 +491,8 @@ export class HypernovumView extends ItemView {
     this.storeUnsubscribe = null;
     this.visibilityObserver?.disconnect();
     this.visibilityObserver = null;
+    this.framingObserver?.disconnect();
+    this.framingObserver = null;
 
     if (this.sceneManager) {
       this.sceneManager.dispose();
@@ -1038,6 +1049,7 @@ category: default
     const heading = header.createDiv();
     heading.createSpan({ cls: 'agents-title', text: 'AGENTS' });
     heading.createDiv({ cls: 'agents-subtitle', text: 'Right-click a building to launch' });
+    this.addCollapseToggle(header, panel, 'agents', 'agents panel');
     const list = panel.createDiv({ cls: 'agents-list' });
     const prepareBtn = panel.createEl('button', {
       cls: 'agents-prepare-btn',
@@ -1290,6 +1302,7 @@ category: default
       ['Scroll', 'Zoom'],
       ['B / S', 'Cycle blocked / stale'],
       ['Space', 'Reset camera'],
+      ['H', 'Hide / show HUD'],
     ] as const) {
       const row = controls.createDiv({ cls: 'controls-row' });
       row.createEl('kbd', { text: key });
@@ -1483,6 +1496,8 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
     });
     vaultToggle.createSpan({ cls: 'vault-mode-switch-label', text: 'Vault' });
     vaultToggle.createSpan({ cls: 'vault-mode-switch-track' }).createSpan({ cls: 'vault-mode-switch-thumb' });
+    this.commandPanelEl = panel;
+    this.addCollapseToggle(header, panel, 'command', 'projects panel');
 
     // Shown only while the city is standing in for an untagged vault. Built with
     // DOM APIs, never innerHTML — the vault name is user content.
@@ -1630,8 +1645,85 @@ Duplicate this note and edit the frontmatter to add your own projects to the cit
 
   private addInspectorPanel(container: HTMLElement): void {
     const panel = container.createDiv({ cls: 'hypernovum-project-inspector' });
-    panel.createDiv({ cls: 'inspector-empty', text: 'Select a project' });
-    this.inspectorPanel = panel;
+    // The body re-renders on every inspector update; the collapse toggle lives
+    // outside it so it survives those renders (HUD-001).
+    this.addCollapseToggle(panel, panel, 'inspector', 'inspector', 'inspector-collapse');
+    const body = panel.createDiv({ cls: 'inspector-body' });
+    body.createDiv({ cls: 'inspector-empty', text: 'Select a project' });
+    this.inspectorPanel = body;
+    this.inspectorOuterEl = panel;
+  }
+
+  // --- HUD collapse + hide (HUD-001) ---------------------------------------
+
+  private commandPanelEl: HTMLElement | null = null;
+  private inspectorOuterEl: HTMLElement | null = null;
+  private cityContainer: HTMLElement | null = null;
+  private framingObserver: ResizeObserver | null = null;
+
+  /**
+   * A chevron that collapses `panel` to its header. The state is saved in
+   * settings so it survives a reload, and the camera framing is told about
+   * the panel's new size.
+   */
+  private addCollapseToggle(
+    host: HTMLElement,
+    panel: HTMLElement,
+    key: keyof HudCollapsed,
+    label: string,
+    extraCls = '',
+  ): void {
+    const collapsed = this.settings.hudCollapsed?.[key] ?? false;
+    const btn = host.createEl('button', {
+      cls: extraCls ? `hud-collapse ${extraCls}` : 'hud-collapse',
+      attr: { type: 'button' },
+    });
+    const render = (isCollapsed: boolean) => {
+      panel.classList.toggle('is-collapsed', isCollapsed);
+      btn.textContent = isCollapsed ? '▸' : '▾';
+      btn.setAttribute('aria-expanded', String(!isCollapsed));
+      btn.setAttribute('aria-label', `${isCollapsed ? 'Expand' : 'Collapse'} ${label}`);
+      btn.setAttribute('title', `${isCollapsed ? 'Expand' : 'Collapse'} ${label}`);
+    };
+    render(collapsed);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const next = !panel.classList.contains('is-collapsed');
+      render(next);
+      this.plugin.settings.hudCollapsed = {
+        ...{ agents: false, command: false, inspector: false },
+        ...this.plugin.settings.hudCollapsed,
+        [key]: next,
+      };
+      void this.plugin.saveSettings();
+      this.updateFramingRect();
+    });
+  }
+
+  /** Hide every HUD overlay except the title and legend (H key, command). */
+  toggleHud(): void {
+    this.plugin.hudHidden = !this.plugin.hudHidden;
+    this.cityContainer?.classList.toggle('hud-hidden', this.plugin.hudHidden);
+    this.updateFramingRect();
+  }
+
+  /**
+   * Report the canvas area the HUD panels leave free, so the overview framing
+   * (first open, Space) puts the city there instead of under the panels.
+   */
+  private updateFramingRect(): void {
+    if (!this.sceneManager) return;
+    const canvasRect = this.sceneManager.getCanvas().getBoundingClientRect();
+    if (canvasRect.width < 10 || canvasRect.height < 10) return;
+    const obstacles: ScreenRect[] = [];
+    for (const el of [this.hudTopLeft, this.commandPanelEl, this.inspectorOuterEl]) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue; // hidden (HUD off, narrow layout)
+      obstacles.push({ x: r.left - canvasRect.left, y: r.top - canvasRect.top, width: r.width, height: r.height });
+    }
+    const canvas = { width: canvasRect.width, height: canvasRect.height };
+    this.sceneManager.setFramingRect(freeRectAvoiding(canvas, obstacles) ?? { x: 0, y: 0, ...canvas });
   }
 
   private storeUnsubscribe: (() => void) | null = null;

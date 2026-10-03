@@ -29,6 +29,8 @@ export { TIER_CONFIG, QUALITY_TIERS, pickAutoTier, effectivePixelRatio, isQualit
 export type { QualityTier, QualitySetting, TierConfig } from './scene/qualityTiers';
 export type { PerfSnapshot } from './scene/frameStats';
 export type { CityFrame } from './scene/cameraFraming';
+export { freeRectAvoiding, frameBoxInRect } from './scene/viewFraming';
+export type { ScreenRect, FramingBox, FramingInput, FramingResult } from './scene/viewFraming';
 
 // Layout
 export { BinPacker } from './layout/BinPacker';

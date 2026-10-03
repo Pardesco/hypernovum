@@ -13,6 +13,7 @@ export class KeyboardNav {
   private onCycleStale: (() => void) | null = null;
   private onResetCamera: (() => void) | null = null;
   private onEscape: (() => void) | null = null;
+  private onToggleHud: (() => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -37,11 +38,14 @@ export class KeyboardNav {
     onCycleStale?: () => void;
     onResetCamera?: () => void;
     onEscape?: () => void;
+    /** H: hide/show the HUD overlays (HUD-001). */
+    onToggleHud?: () => void;
   }): void {
     this.onCycleBlocked = handlers.onCycleBlocked ?? null;
     this.onCycleStale = handlers.onCycleStale ?? null;
     this.onResetCamera = handlers.onResetCamera ?? null;
     this.onEscape = handlers.onEscape ?? null;
+    this.onToggleHud = handlers.onToggleHud ?? null;
   }
 
   private handleKeyPress(event: KeyboardEvent): void {
@@ -59,6 +63,11 @@ export class KeyboardNav {
       case ' ':
         event.preventDefault();
         this.onResetCamera?.();
+        break;
+      case 'h':
+        if (!this.onToggleHud) return;
+        event.preventDefault();
+        this.onToggleHud();
         break;
       case 'Escape':
         event.preventDefault();

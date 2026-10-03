@@ -1576,3 +1576,77 @@ button.agents-item { width: 100%; text-align: left; height: auto; background: tr
   pointer-events: none;
   user-select: none;
 }
+
+/* HUD collapse chevrons (HUD-001). Scoped under the container so they beat
+   Obsidian's default button chrome. */
+.hypernovum-container button.hud-collapse {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(170, 190, 220, 0.55);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hypernovum-container button.hud-collapse:hover {
+  background: rgba(120, 150, 190, 0.15);
+  color: rgba(240, 245, 255, 0.9);
+}
+
+.agents-panel.is-collapsed .agents-list,
+.agents-panel.is-collapsed .agents-prepare-btn,
+.agents-panel.is-collapsed .agents-subtitle {
+  display: none;
+}
+
+.agents-panel.is-collapsed .agents-header {
+  border-bottom: none;
+}
+
+.hypernovum-command-panel.is-collapsed > :not(.command-panel-header) {
+  display: none;
+}
+
+.hypernovum-command-panel.is-collapsed .command-panel-header {
+  margin-bottom: 0;
+}
+
+.hypernovum-project-inspector > .inspector-collapse {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+}
+
+/* Keep the project view's close button clear of the collapse chevron. */
+.hypernovum-project-inspector .inspector-close {
+  right: 18px;
+}
+
+.hypernovum-project-inspector.is-collapsed {
+  overflow: hidden;
+}
+
+.hypernovum-project-inspector.is-collapsed .inspector-body > :not(.inspector-header) {
+  display: none;
+}
+
+.hypernovum-project-inspector.is-collapsed .inspector-header {
+  margin-bottom: 0;
+}
+
+/* Hide HUD (H / "Toggle HUD"): only the title and the legend stay. */
+.hypernovum-container.hud-hidden .hypernovum-hud-topleft,
+.hypernovum-container.hud-hidden .hypernovum-command-panel,
+.hypernovum-container.hud-hidden .hypernovum-project-inspector,
+.hypernovum-container.hud-hidden .hypernovum-controls,
+.hypernovum-container.hud-hidden .hypernovum-save-btn {
+  display: none;
+}

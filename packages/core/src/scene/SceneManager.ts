@@ -36,6 +36,7 @@ import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFr
 import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
 import { fitShadowFrustum } from './shadowFit';
 import { minFrameInterval, shouldRenderFrame } from './framePacing';
+import { frameBoxInRect, type FramingBox, type ScreenRect } from './viewFraming';
 import {
   AUTO_PROBE_MIN_SAMPLES,
   AUTO_PROBE_MS,
@@ -241,6 +242,14 @@ export class SceneManager {
   private gridSize = 5; // Grid snap size
   private dragAccumulator = new THREE.Vector2(0, 0); // Accumulate small movements
   private cityBounds = { centerX: 0, centerZ: 0, radius: 50 }; // Pan boundary
+
+  /**
+   * Unobstructed part of the canvas (CSS px) the overview frames the city
+   * into (HUD-001); null = the whole canvas, the 0.x framing.
+   */
+  private framingRect: ScreenRect | null = null;
+  /** Default overview direction: camera at 0.6 / 0.7 of the distance up / back. */
+  private static readonly OVERVIEW_DIR = new THREE.Vector3(0, 0.6, 0.7).normalize();
 
   // Camera framing (CAM-001): frame the city once per view, not on every rebuild.
   private hasFramed = false;
@@ -1891,13 +1900,81 @@ export class SceneManager {
   }
 
   private fitCameraToCity(projects: ProjectData[]): void {
-    const frame = this.cityFrameFor(projects);
-    if (!frame) return;
-    this.camera.position.set(frame.position.x, frame.position.y, frame.position.z);
-    this.controls.target.set(frame.centerX, 0, frame.centerZ);
+    const pose = this.overviewPose(projects);
+    if (!pose) return;
+    this.camera.position.copy(pose.position);
+    this.controls.target.copy(pose.target);
     this.controls.update();
-    // Store bounds for pan clamping
+  }
+
+  /**
+   * Tell the camera which part of the canvas is unobstructed by HUD panels
+   * (HUD-001). The next overview framing (first open, Space / Reset camera)
+   * fits the city into it instead of behind the panels. Doesn't move the
+   * camera by itself. Pass null to frame into the whole canvas again.
+   */
+  setFramingRect(rect: ScreenRect | null): void {
+    this.framingRect = rect && rect.width > 0 && rect.height > 0 ? { ...rect } : null;
+  }
+
+  /** The city's world box for framing: district outlines, their labels, and the tallest roof. */
+  private framingBox(projects: ProjectData[]): FramingBox | null {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    const pad = 3; // outline padding (addBlockOutlines)
+    for (const block of this.blocks.values()) {
+      minX = Math.min(minX, block.bounds.minX - pad - 12); // category label sits left of the outline
+      maxX = Math.max(maxX, block.bounds.maxX + pad);
+      minZ = Math.min(minZ, block.bounds.minZ - pad);
+      maxZ = Math.max(maxZ, block.bounds.maxZ + pad);
+    }
+    if (minX === Infinity) {
+      for (const p of projects) {
+        if (!p.position) continue;
+        minX = Math.min(minX, p.position.x - 4);
+        maxX = Math.max(maxX, p.position.x + 4);
+        minZ = Math.min(minZ, p.position.z - 4);
+        maxZ = Math.max(maxZ, p.position.z + 4);
+      }
+    }
+    if (minX === Infinity) return null;
+    let maxY = 6;
+    for (const b of this.buildings) {
+      if (!b.geometry.boundingBox) b.geometry.computeBoundingBox();
+      maxY = Math.max(maxY, b.position.y + (b.geometry.boundingBox?.max.y ?? 0) + 3); // + label
+    }
+    return { minX, maxX, minZ, maxZ, maxY };
+  }
+
+  /** Default overview pose: panel-aware when a framing rect is set (HUD-001). */
+  private overviewPose(projects: ProjectData[]): { position: THREE.Vector3; target: THREE.Vector3 } | null {
+    const frame = this.cityFrameFor(projects);
+    if (!frame) return null;
+    // Pan clamp follows the city whichever framing is used.
     this.cityBounds = { centerX: frame.centerX, centerZ: frame.centerZ, radius: frame.radius };
+
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const box = this.framingRect && w > 0 && h > 0 ? this.framingBox(projects) : null;
+    if (!box || !this.framingRect) {
+      return {
+        position: new THREE.Vector3(frame.position.x, frame.position.y, frame.position.z),
+        target: new THREE.Vector3(frame.centerX, 0, frame.centerZ),
+      };
+    }
+    const solved = frameBoxInRect({
+      box,
+      fov: this.camera.fov,
+      aspect: w / h,
+      viewDir: SceneManager.OVERVIEW_DIR,
+      canvas: { width: w, height: h },
+      rect: this.framingRect,
+      minDistance: this.controls.minDistance,
+      maxDistance: this.controls.maxDistance,
+    });
+    // Keep the solved target inside the pan clamp.
+    const off = Math.hypot(solved.target.x - frame.centerX, solved.target.z - frame.centerZ);
+    if (off + 10 > this.cityBounds.radius) this.cityBounds.radius = off + 10;
+    return { position: solved.position, target: solved.target };
   }
 
   /**
@@ -3318,10 +3395,10 @@ export class SceneManager {
   /** Smoothly animate camera back to default overhead position */
   animateCameraToDefault(duration = 1000): void {
     const projects = this.buildings.map(b => projectOf(b)).filter(Boolean) as ProjectData[];
-    const frame = this.cityFrameFor(projects);
-    if (!frame) return;
-    const targetPos = new THREE.Vector3(frame.position.x, frame.position.y, frame.position.z);
-    const targetLookAt = new THREE.Vector3(frame.centerX, 0, frame.centerZ);
+    const pose = this.overviewPose(projects);
+    if (!pose) return;
+    const targetPos = pose.position;
+    const targetLookAt = pose.target;
     const startPos = this.camera.position.clone();
     const startTarget = this.controls.target.clone();
     const startTime = performance.now();

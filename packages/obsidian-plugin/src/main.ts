@@ -109,6 +109,7 @@ export default class HypernovumPlugin extends Plugin {
       { id: 'cycle-paused', name: 'Go to next paused project', run: (v) => v.commandCycleStatus('paused') },
       { id: 'trace-selection', name: 'Trace impact of selected project', run: (v) => v.commandTraceSelection() },
       { id: 'set-project-folder', name: 'Set project folder for selected project', run: (v) => { void v.commandSetProjectFolder(); } },
+      { id: 'toggle-hud', name: 'Toggle HUD (keep only title and legend)', run: (v) => v.toggleHud() },
       {
         id: 'toggle-perf-overlay',
         name: 'Toggle performance overlay',
@@ -314,6 +315,9 @@ export default class HypernovumPlugin extends Plugin {
 
   /** Debug performance overlay, session-only so it survives view reloads. */
   perfOverlay = false;
+
+  /** Hide HUD (H): session-only, so a reloaded view keeps it (HUD-001). */
+  hudHidden = false;
 
   /** Camera pose handed from a view being reloaded to its replacement (CAM-001). */
   private pendingCameraState: CameraState | null = null;

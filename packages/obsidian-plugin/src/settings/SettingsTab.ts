@@ -52,6 +52,15 @@ export interface HypernovumSettings extends CoreSettings {
   outputFolder: string;
   /** The 0.4.2 classic→parametric default flip has already been applied once */
   buildingStyleMigrated: boolean;
+  /** Collapsed HUD panels (HUD-001), remembered across reloads. */
+  hudCollapsed: HudCollapsed;
+}
+
+/** Which HUD panels are collapsed to their header (HUD-001). */
+export interface HudCollapsed {
+  agents: boolean;
+  command: boolean;
+  inspector: boolean;
 }
 
 export const DEFAULT_SETTINGS: HypernovumSettings = {
@@ -67,6 +76,7 @@ export const DEFAULT_SETTINGS: HypernovumSettings = {
   buildingStyleMigrated: false,
   // GFX-009: Auto probes frame times on first open and picks a tier.
   graphicsQuality: 'auto',
+  hudCollapsed: { agents: false, command: false, inspector: false },
 };
 
 export type { BlockPosition };
