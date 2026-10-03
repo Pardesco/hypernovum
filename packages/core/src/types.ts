@@ -121,7 +121,18 @@ export interface HypernovumSettings {
   enableGitActivity: boolean;
   /** Building silhouette system: 'classic' (current) or 'parametric' (TowerLoft, opt-in) */
   buildingStyle: 'classic' | 'parametric';
+  /**
+   * Tone-mapping operator (GFX-003). Optional and not exposed in any UI: ACES
+   * won the A/B against AgX (AgX turned neon red pink and greens pastel), but
+   * the choice stays one data.json edit away. Default 'aces'.
+   */
+  toneMapping?: ToneMappingChoice;
+  /** Tone-mapping exposure. Default 1.0. */
+  toneMappingExposure?: number;
 }
+
+/** Tone-mapping operators the scene supports (three r160: Neutral needs r162+). */
+export type ToneMappingChoice = 'aces' | 'agx';
 
 /**
  * Git-derived weather data for a project.

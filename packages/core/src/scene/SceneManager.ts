@@ -6,7 +6,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
-import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData } from '../types';
+import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, ToneMappingChoice } from '../types';
 import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
 import { EdgeManager } from './EdgeManager';
@@ -200,6 +200,8 @@ export class SceneManager {
   private buildingStyle: 'classic' | 'parametric' = 'classic'; // BLD-004
   private useAtmosphere = false;
   private bloomIntensity = 0.8;
+  private toneMapping: ToneMappingChoice = 'aces';
+  private toneMappingExposure = 1.0;
   private buildingShader: BuildingShader;
   private shaderMaterials: Map<THREE.Mesh, THREE.ShaderMaterial> = new Map();
   private composer: EffectComposer | null = null;
@@ -286,6 +288,9 @@ export class SceneManager {
       this.showLabels = options.settings.showLabels;
       this.useShadows = options.settings.enableShadows;
       this.buildingStyle = options.settings.buildingStyle;
+      if (options.settings.toneMapping === 'agx') this.toneMapping = 'agx';
+      const exposure = options.settings.toneMappingExposure;
+      if (typeof exposure === 'number' && Number.isFinite(exposure) && exposure > 0) this.toneMappingExposure = exposure;
     }
 
     // Honour the OS reduced-motion preference for the WebGL scene too — the
@@ -386,8 +391,10 @@ export class SceneManager {
     // that moves a caster calls invalidateShadows().
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    // GFX-003: ACES vs AgX was A/B tested on the showcase vault; ACES keeps
+    // neon saturated (AgX made red pink and greens pastel). Overridable.
+    this.renderer.toneMapping = this.toneMapping === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = this.toneMappingExposure;
     // Count draw calls across a whole frame — every composer pass, the shadow
     // pass — instead of only the last render() call. Reset in animate().
     this.renderer.info.autoReset = false;

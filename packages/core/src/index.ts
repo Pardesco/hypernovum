@@ -3,7 +3,7 @@
 export const CORE_BUILD_VERSION = 'dev';
 
 // Types
-export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, RecentCommit, GraphEdge, EdgeType } from './types';
+export type { ProjectData, District, Bounds, CityState, BlockPosition, HypernovumSettings, WeatherData, RecentCommit, GraphEdge, EdgeType, ToneMappingChoice } from './types';
 export { EdgeManager } from './scene/EdgeManager';
 export { collectImpact } from './graph/traverse';
 export type { TraceImpactResult, TraceNode, TraceOptions } from './graph/traverse';
