@@ -6,6 +6,11 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import type { ProjectData, District, BlockPosition, HypernovumSettings, WeatherData, ToneMappingChoice } from '../types';
 import { statusColor } from '../types';
 import { HighlightManager, type BuildingParts } from './HighlightManager';
@@ -72,6 +77,14 @@ interface SceneManagerOptions {
   initialCamera?: CameraState | null;
 }
 
+/**
+ * A ground-level polyline — district outline, leader line, handle bracket. Wide
+ * antialiased Line2 normally (GFX-004); a 1 px Line when wide lines are off.
+ */
+type GroundLine = THREE.Line | Line2;
+/** A building's edge-glow outline: wide LineSegments2, or 1 px LineSegments. */
+type EdgeLines = THREE.LineSegments | LineSegments2;
+
 interface LabelInfo {
   project: ProjectData;
   buildingPos: THREE.Vector3;
@@ -87,12 +100,12 @@ interface BlockData {
   objects: THREE.Object3D[];  // All objects belonging to this block
   handle: THREE.Mesh;
   hitBox: THREE.Mesh;
-  outline: THREE.Line;
+  outline: GroundLine;
   fill: THREE.Mesh;
   label: CSS2DObject;
-  leaderLine: THREE.Line;
+  leaderLine: GroundLine;
   dot: THREE.Mesh;
-  handleBracket: THREE.Line;
+  handleBracket: GroundLine;
   projects: ProjectData[];
 }
 
@@ -146,7 +159,7 @@ export class SceneManager {
   private tooltipLeader: THREE.Group | null = null;
   private buildings: THREE.Mesh[] = [];
   private foundations: THREE.Mesh[] = [];
-  private blockedEdgeGlows: THREE.LineSegments[] = []; // pulsed in animate — no per-frame traverse
+  private blockedEdgeGlows: EdgeLines[] = []; // pulsed in animate — no per-frame traverse
   private roofBeacons: THREE.Mesh[] = []; // critical-priority warning lights, pulsed in animate
   private questMarkers: THREE.Mesh[] = []; // floating gems over projects with open questions
   private edges!: EdgeManager; // typed project-graph edge renderer (EDG-001)
@@ -234,6 +247,16 @@ export class SceneManager {
 
   /** Gate for the requestAnimationFrame loop — see setRenderingEnabled. */
   private renderingEnabled = true;
+
+  /**
+   * Wide antialiased lines (GFX-004). WebGL ignores LineBasicMaterial.linewidth,
+   * so every outline was 1 px and shimmered or vanished at distance.
+   */
+  private wideLines = true;
+  /** One shared CSS-pixel resolution for every LineMaterial; onResize updates it. */
+  private lineResolution = new THREE.Vector2(1, 1);
+  private static readonly EDGE_WIDTH_PX = 1.5;
+  private static readonly OUTLINE_WIDTH_PX = 2;
 
   /** Shadow-casting key light; its shadow camera is fitted to the city (GFX-007). */
   private keyLight!: THREE.DirectionalLight;
@@ -382,6 +405,7 @@ export class SceneManager {
     this.renderer = new THREE.WebGLRenderer({ antialias: !this.useBloom, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+    this.lineResolution.set(this.container.clientWidth, this.container.clientHeight);
     // Honor the enableShadows setting (PERF-004). With the shadow map off the
     // per-mesh cast/receive flags are inert, so gating here is sufficient.
     this.renderer.shadowMap.enabled = this.useShadows;
@@ -850,14 +874,7 @@ export class SceneManager {
         new THREE.Vector3(bounds.minX - padding, 0.05, bounds.minZ - padding), // Close the loop
       ];
 
-      const outlineGeo = new THREE.BufferGeometry().setFromPoints(outlinePoints);
-      const outlineMat = new THREE.LineBasicMaterial({
-        color,
-        linewidth: 2,
-        transparent: true,
-        opacity: 0.25,
-      });
-      const outline = new THREE.Line(outlineGeo, outlineMat);
+      const outline = this.makeGroundLine(outlinePoints, color, 0.25);
       setUserData(outline, { isDistrict: true, category });
       this.scene.add(outline);
       blockObjects.push(outline);
@@ -906,13 +923,7 @@ export class SceneManager {
         new THREE.Vector3(horizontalEnd, labelY - 0.5, labelZ),
         new THREE.Vector3(bounds.minX - padding, 0.1, labelZ),
       ];
-      const leaderGeo = new THREE.BufferGeometry().setFromPoints(leaderPoints);
-      const leaderMat = new THREE.LineBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.2,
-      });
-      const leaderLine = new THREE.Line(leaderGeo, leaderMat);
+      const leaderLine = this.makeGroundLine(leaderPoints, color, 0.2);
       setUserData(leaderLine, { isDistrict: true, category });
       this.scene.add(leaderLine);
       blockObjects.push(leaderLine);
@@ -938,9 +949,7 @@ export class SceneManager {
         new THREE.Vector3(handleX, 0.06, handleZ),
         new THREE.Vector3(handleX, 0.06, handleZ + handleArmLen),
       ];
-      const bracketGeo = new THREE.BufferGeometry().setFromPoints(bracketPts);
-      const bracketMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
-      const handleBracket = new THREE.Line(bracketGeo, bracketMat);
+      const handleBracket = this.makeGroundLine(bracketPts, 0xffffff, 0.35);
       setUserData(handleBracket, { isDragHandle: true, category });
       this.scene.add(handleBracket);
       blockObjects.push(handleBracket);
@@ -1141,12 +1150,7 @@ export class SceneManager {
     const edgeColor = baseColor.clone().multiplyScalar(
       project.status === 'blocked' ? (parametric ? 1.9 : 3.0) : edgeBoost
     );
-    const lineMat = new THREE.LineBasicMaterial({
-      color: edgeColor,
-      transparent: true,
-      opacity: Math.min(edgeOpacity, 1.0),
-    });
-    const wireframe = new THREE.LineSegments(edges, lineMat);
+    const wireframe = this.makeEdgeLines(edges, edgeColor, Math.min(edgeOpacity, 1.0));
     wireframe.position.copy(mesh.position);
     setUserData(wireframe, { isBuilding: true, project, isEdgeGlow: true });
     this.scene.add(wireframe);
@@ -1700,6 +1704,54 @@ export class SceneManager {
     return new THREE.Color(statusColor(status));
   }
 
+  /** A LineMaterial sized in CSS pixels, sharing the scene's resolution vector (GFX-004). */
+  private lineMaterial(color: THREE.Color, opacity: number, widthPx: number): LineMaterial {
+    // The color is stored by reference in the uniform: always pass a fresh Color.
+    const mat = new LineMaterial({ color, linewidth: widthPx, transparent: true, opacity });
+    mat.fog = true; // fade with the scene fog like the LineBasicMaterials did
+    mat.uniforms.resolution.value = this.lineResolution;
+    return mat;
+  }
+
+  /** District outline / leader / bracket polyline (GFX-004). */
+  private makeGroundLine(points: THREE.Vector3[], color: THREE.ColorRepresentation, opacity: number): GroundLine {
+    if (!this.wideLines) {
+      return new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
+      );
+    }
+    const geometry = new LineGeometry();
+    geometry.setPositions(points.flatMap((p) => [p.x, p.y, p.z]));
+    return new Line2(geometry, this.lineMaterial(new THREE.Color(color), opacity, SceneManager.OUTLINE_WIDTH_PX));
+  }
+
+  /**
+   * Replace a ground line's points with absolute coordinates. moveBlock offsets
+   * a Line2 by its position (cheap, no buffer rebuild), so absolute points also
+   * reset that offset.
+   */
+  private setGroundLinePoints(line: GroundLine, points: [number, number, number][]): void {
+    if (line instanceof Line2) {
+      line.geometry.setPositions(points.flat());
+      line.position.set(0, 0, 0);
+      return;
+    }
+    const pos = line.geometry.attributes.position as THREE.BufferAttribute;
+    points.forEach((p, i) => pos.setXYZ(i, p[0], p[1], p[2]));
+    pos.needsUpdate = true;
+  }
+
+  /** A building's edge-glow outline (GFX-004). Consumes the EdgesGeometry. */
+  private makeEdgeLines(edges: THREE.EdgesGeometry, color: THREE.Color, opacity: number): EdgeLines {
+    if (!this.wideLines) {
+      return new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+    }
+    const geometry = new LineSegmentsGeometry().fromEdgesGeometry(edges);
+    edges.dispose();
+    return new LineSegments2(geometry, this.lineMaterial(color, opacity, SceneManager.EDGE_WIDTH_PX));
+  }
+
   private cityFrameFor(projects: ProjectData[]): CityFrame | null {
     const points: { x: number; z: number }[] = [];
     for (const p of projects) if (p.position) points.push(p.position);
@@ -2184,7 +2236,7 @@ export class SceneManager {
 
     // Move wireframes (foundation and building edges)
     this.scene.traverse((obj) => {
-      if (obj instanceof THREE.LineSegments && projectOf(obj) === project) {
+      if ((obj instanceof THREE.LineSegments || obj instanceof LineSegments2) && projectOf(obj) === project) {
         obj.position.x += deltaX;
         obj.position.z += deltaZ;
       }
@@ -2241,18 +2293,13 @@ export class SceneManager {
 
     // 1. Update outline vertices (5-point closed rectangle)
     if (block.outline) {
-      const pos = block.outline.geometry.attributes.position as THREE.BufferAttribute;
-      const pts: [number, number, number][] = [
+      this.setGroundLinePoints(block.outline, [
         [minX - padding, 0.05, minZ - padding],
         [maxX + padding, 0.05, minZ - padding],
         [maxX + padding, 0.05, maxZ + padding],
         [minX - padding, 0.05, maxZ + padding],
         [minX - padding, 0.05, minZ - padding],
-      ];
-      for (let i = 0; i < pts.length; i++) {
-        pos.setXYZ(i, pts[i][0], pts[i][1], pts[i][2]);
-      }
-      pos.needsUpdate = true;
+      ]);
     }
 
     // 2. Dispose + recreate fill geometry
@@ -2272,12 +2319,12 @@ export class SceneManager {
       block.label.position.set(labelX, labelY, labelZ);
     }
     if (block.leaderLine) {
-      const lp = block.leaderLine.geometry.attributes.position as THREE.BufferAttribute;
       const horizontalEnd = labelX + 3;
-      lp.setXYZ(0, labelX + 1.5, labelY - 0.5, labelZ);
-      lp.setXYZ(1, horizontalEnd, labelY - 0.5, labelZ);
-      lp.setXYZ(2, minX - padding, 0.1, labelZ);
-      lp.needsUpdate = true;
+      this.setGroundLinePoints(block.leaderLine, [
+        [labelX + 1.5, labelY - 0.5, labelZ],
+        [horizontalEnd, labelY - 0.5, labelZ],
+        [minX - padding, 0.1, labelZ],
+      ]);
     }
     if (block.dot) {
       block.dot.position.set(minX - padding, 0.08, labelZ);
@@ -2295,11 +2342,11 @@ export class SceneManager {
     // Update L-bracket vertices
     if (block.handleBracket) {
       const armLen = 2.5;
-      const bp = block.handleBracket.geometry.attributes.position as THREE.BufferAttribute;
-      bp.setXYZ(0, handleX - armLen, 0.06, handleZ);
-      bp.setXYZ(1, handleX, 0.06, handleZ);
-      bp.setXYZ(2, handleX, 0.06, handleZ + armLen);
-      bp.needsUpdate = true;
+      this.setGroundLinePoints(block.handleBracket, [
+        [handleX - armLen, 0.06, handleZ],
+        [handleX, 0.06, handleZ],
+        [handleX, 0.06, handleZ + armLen],
+      ]);
     }
   }
 
@@ -2334,7 +2381,7 @@ export class SceneManager {
     // Move foundation wireframes and building wireframes
     this.scene.traverse((obj) => {
       if ((ud(obj).isFoundation || ud(obj).isBuilding) &&
-        obj instanceof THREE.LineSegments &&
+        (obj instanceof THREE.LineSegments || obj instanceof LineSegments2) &&
         projectOf(obj)?.category === category) {
         obj.position.x += deltaX;
         obj.position.z += deltaZ;
@@ -2916,6 +2963,7 @@ export class SceneManager {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
     this.labelRenderer.setSize(width, height);
+    this.lineResolution.set(width, height);
 
     // Resize composer if bloom is enabled
     if (this.composer) {

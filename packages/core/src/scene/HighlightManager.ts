@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import type { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import type { ProjectData, WeatherData } from '../types';
 import type { InteractionStore } from '../stores/interactionStore';
 import { resolveVisualState, type VisualState } from './visualState';
@@ -14,7 +15,11 @@ export interface BuildingParts {
   project: ProjectData;
   building: THREE.Mesh;
   shaderMaterial: THREE.ShaderMaterial | null;
-  edgeGlow: THREE.LineSegments;
+  /**
+   * Edge-glow outline: a wide antialiased LineSegments2 (GFX-004), or a 1 px
+   * LineSegments when wide lines are off. Both expose material.color/opacity.
+   */
+  edgeGlow: THREE.LineSegments | LineSegments2;
   foundation: THREE.Mesh;
   foundationWireframe: THREE.LineSegments;
   /** Invisible hover/click hit pad — toggled with the building for PERF-002 */
@@ -232,7 +237,8 @@ export class HighlightManager {
     entry.edgeGlow.scale.setScalar(vs.scale);
 
     // --- Edge glow ---
-    const eg = entry.edgeGlow.material as THREE.LineBasicMaterial;
+    // LineBasicMaterial or LineMaterial — both carry color + opacity.
+    const eg = entry.edgeGlow.material as { color: THREE.Color; opacity: number };
     eg.color.setHex(vs.baseColor).multiplyScalar(vs.edgeGlowColorScale);
     eg.opacity = vs.edgeGlowOpacity;
 
