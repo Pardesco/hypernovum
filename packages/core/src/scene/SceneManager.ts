@@ -35,6 +35,7 @@ import { ud, projectOf, setUserData } from './sceneUserData';
 import { computeCityFrame, shouldFrameOnBuild, type CityFrame } from './cameraFraming';
 import { FrameStats, formatPerfSnapshot, type PerfSnapshot } from './frameStats';
 import { fitShadowFrustum } from './shadowFit';
+import { minFrameInterval, shouldRenderFrame } from './framePacing';
 import {
   AUTO_PROBE_MIN_SAMPLES,
   AUTO_PROBE_MS,
@@ -292,6 +293,10 @@ export class SceneManager {
   /** Bloom pass resolution factor: 0.5 on the Balanced tier. */
   private bloomScale = 1;
   private onRequestRebuild?: () => void;
+
+  // Idle/background frame pacing (GFX-008).
+  private lastActivityAt = performance.now();
+  private lastRenderAt = 0;
   /**
    * Luminance above which the bloom pass picks a pixel up (GFX-002). At 0.7
    * whole lit facades bloomed and washed out the building shading; at 1.0 only
@@ -315,6 +320,8 @@ export class SceneManager {
 
   // Launch effect tracking
   private launchEffects: Map<THREE.Mesh, { startTime: number; duration: number }> = new Map();
+
+  private removeWindowFocusListener: (() => void) | null = null;
 
   /** Gate for the requestAnimationFrame loop — see setRenderingEnabled. */
   private renderingEnabled = true;
@@ -449,6 +456,14 @@ export class SceneManager {
     this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
     this.container.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.container.addEventListener('mouseup', (e) => this.onMouseUp(e));
+    // Any input on the city restores full frame rate (GFX-008).
+    const markActive = () => { this.lastActivityAt = performance.now(); };
+    for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown'] as const) {
+      this.container.addEventListener(type, markActive, { passive: true });
+    }
+    const win = this.container.ownerDocument.defaultView ?? window;
+    win.addEventListener('focus', markActive);
+    this.removeWindowFocusListener = () => win.removeEventListener('focus', markActive);
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(container);
 
@@ -2786,7 +2801,21 @@ export class SceneManager {
     }
     this.animationId = window.requestAnimationFrame(this.animate);
 
-    const frameStart = performance.now();
+    // GFX-008: full rate while interacting, ~30 fps when idle, ~5 fps while
+    // Obsidian is in the background. Camera motion (damping, glides) counts
+    // as activity; the Auto quality probe needs every frame.
+    const now = performance.now();
+    const budget = minFrameInterval({
+      now,
+      lastActivityAt: Math.max(this.lastActivityAt, this.lastCameraMoveAt),
+      // The container's own document: the city may live in a popout window.
+      focused: this.container.ownerDocument.hasFocus(),
+      needsFullRate: this.autoProbe !== null,
+    });
+    if (!shouldRenderFrame(now, this.lastRenderAt, budget)) return;
+    this.lastRenderAt = now;
+
+    const frameStart = now;
     const frameInterval = this.lastFrameAt > 0 ? frameStart - this.lastFrameAt : 0;
     if (frameInterval > 0) this.frameStats.push(frameInterval);
     this.lastFrameAt = frameStart;
@@ -2972,9 +3001,9 @@ export class SceneManager {
     }
 
     // Process launch effects (dramatic pulse when launching Claude)
-    const now = performance.now();
+    const launchNow = performance.now();
     for (const [building, effect] of this.launchEffects) {
-      const age = now - effect.startTime;
+      const age = launchNow - effect.startTime;
       const progress = age / effect.duration;
 
       if (progress >= 1.0) {
@@ -3226,6 +3255,7 @@ export class SceneManager {
   dispose(): void {
     if (this.animationId !== null) window.cancelAnimationFrame(this.animationId);
     this.resizeObserver.disconnect();
+    this.removeWindowFocusListener?.();
     this.controls.dispose();
     this.highlight.dispose();
     if (this.composer) {
